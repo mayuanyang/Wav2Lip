@@ -99,8 +99,26 @@ class Dataset(object):
         return mels
 
     def prepare_window(self, window):
-        # 3 x T x H x W
+        """
+        3 x T x H x W
+        Normalization: The pixel values of the images are divided by 255 to normalize them from a range of [0, 255] to [0, 1]. 
+        This is a common preprocessing step for image data in machine learning to help the model converge faster during training.
+        """
         x = np.asarray(window) / 255.
+
+        """
+        Transposition: The method transposes the dimensions of the array using np.transpose(x, (3, 0, 1, 2)).
+        The original shape of x is assumed to be (T, H, W, C) where:
+        T is the number of images (time steps if treating images as a sequence).
+        H is the height of the images.
+        W is the width of the images.
+        C is the number of color channels (typically 3 for RGB images).
+        The transposition changes the shape to (C, T, H, W) which means:
+        C (number of channels) comes first.
+        T (number of images) comes second.
+        H (height of images) comes third.
+        W (width of images) comes fourth.
+        """
         x = np.transpose(x, (3, 0, 1, 2))
 
         return x
@@ -121,11 +139,13 @@ class Dataset(object):
             while wrong_img_name == img_name:
                 wrong_img_name = random.choice(img_names)
 
+            # From the given img_name, get the next 5 images and put them into window_fnames
             window_fnames = self.get_window(img_name)
             wrong_window_fnames = self.get_window(wrong_img_name)
             if window_fnames is None or wrong_window_fnames is None:
                 continue
 
+            # Read every image in window_fnames, NOTE: image is resize to the hparams.img_size
             window = self.read_window(window_fnames)
             if window is None:
                 continue
@@ -150,17 +170,28 @@ class Dataset(object):
             indiv_mels = self.get_segmented_mels(orig_mel.copy(), img_name)
             if indiv_mels is None: continue
 
+            # Prepare the correct 5 images into a good shape
             window = self.prepare_window(window)
             y = window.copy()
+            # This is to slice the image and put the second half of the image to be 0 which is black
             window[:, :, window.shape[2]//2:] = 0.
 
             wrong_window = self.prepare_window(wrong_window)
+
+            # Concat the correct 5 images(the second half of each image are black out) and incorrect 5 images into a vector
             x = np.concatenate([window, wrong_window], axis=0)
 
             x = torch.FloatTensor(x)
             mel = torch.FloatTensor(mel.T).unsqueeze(0)
             indiv_mels = torch.FloatTensor(indiv_mels).unsqueeze(1)
             y = torch.FloatTensor(y)
+
+            """
+            x: The correct 5 images(the second half of each image are black out) and incorrect 5 images
+            indiv_mels: TBD
+            mel: TBD
+            y: The correct 5 images without black out
+            """
             return x, indiv_mels, mel, y
 
 def save_sample_images(x, g, gt, global_step, checkpoint_dir):
