@@ -325,7 +325,7 @@ if __name__ == "__main__":
     # Dataset and Dataloader setup
     train_dataset = Dataset('train', True)
     test_dataset = Dataset('val', True)
-    print(train_dataset.all_videos)
+    #print(train_dataset.all_videos)
 
     train_data_loader = data_utils.DataLoader(
         train_dataset, batch_size=hparams.syncnet_batch_size, shuffle=True,
