@@ -206,6 +206,11 @@ class Dataset(object):
                     try:
                         img = cv2.resize(img, (hparams.img_size, hparams.img_size))
                         self.image_cache[fname] = img  # Cache the resized image
+                        
+                        box = (0, hparams.img_size // 2, hparams.img_size, hparams.img_size)
+                        # Crop the image
+                        img_cropped = img_to_save.crop(box)
+                        img_cropped.save(f'temp/half_image_{idx}_{i}.png')
                     except Exception as e:
                         all_read = False
                         break
@@ -235,12 +240,20 @@ class Dataset(object):
             if (mel.shape[0] != syncnet_mel_step_size):
                 continue
             
-            # Save the sample images
+            #Save the sample images
             # if idx % 100 == 0:
             #   print('The video is ', vidname)
             #   for i, img in enumerate(window):
             #         img_to_save = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-            #         img_to_save.save(f'temp1/saved_image_{idx}_{i}.png')
+            #         img_to_save.save(f'temp/saved_image_{idx}_{i}.png')
+
+            #         # Half image
+            #         box = (0, hparams.img_size // 2, hparams.img_size, hparams.img_size)
+        
+            #         # Crop the image
+            #         img_cropped = img_to_save.crop(box)
+            #         img_cropped.save(f'temp/half_image_{idx}_{i}.png')
+              
 
             # H x W x 3 * T
             x = np.concatenate(window, axis=2) / 255.
