@@ -36,7 +36,8 @@ class SyncNet_color(nn.Module):
 
             Conv2d(512, 512, kernel_size=3, stride=2, padding=1), #6x3
             Conv2d(512, 512, kernel_size=3, stride=1, padding=0), #6x3
-            Conv2d(512, 512, kernel_size=1, stride=1, padding=0),) #6x3
+            Conv2d(512, 512, kernel_size=1, stride=1, padding=0), #6x3
+            Conv2d(512, 512, kernel_size=1, stride=4, padding=0),) #6x3
 
         self.audio_encoder = nn.Sequential(
             Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
