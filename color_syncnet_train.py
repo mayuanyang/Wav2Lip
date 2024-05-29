@@ -193,6 +193,7 @@ class Dataset(object):
             window = []
 
             all_read = True
+            i = 0
             for fname in window_fnames:
                 #print('The image name ', fname)
                 if fname in self.image_cache:
@@ -207,15 +208,31 @@ class Dataset(object):
                         img = cv2.resize(img, (hparams.img_size, hparams.img_size))
                         self.image_cache[fname] = img  # Cache the resized image
                         
-                        box = (0, hparams.img_size // 2, hparams.img_size, hparams.img_size)
+                        # Convert the image from BGR to RGB
+                        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        
+                        # Convert to a PIL image
+                        img_pil = Image.fromarray(img_rgb)
+                        
+                        # Get the width and height of the image
+                        width, height = img_pil.size
+                        
+                        # Define the box to crop the bottom half of the image
+                        box = (0, height // 2, width, height)
+                        
                         # Crop the image
-                        img_cropped = img_to_save.crop(box)
+                        img_cropped = img_pil.crop(box)
                         img_cropped.save(f'temp/half_image_{idx}_{i}.png')
+                        
+                        # Convert the cropped image back to a NumPy array and BGR format for further processing
+                        img = np.array(img_cropped)
+                        img = cv2.cvtColor(img_cropped, cv2.COLOR_RGB2BGR)
                     except Exception as e:
                         all_read = False
                         break
 
                 window.append(img)
+                i += 1
 
             if not all_read: continue
 
