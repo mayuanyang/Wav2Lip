@@ -222,7 +222,7 @@ class Dataset(object):
                         
                         # Crop the image
                         img_cropped = img_pil.crop(box)
-                        img_cropped.save(f'temp/half_image_{idx}_{i}.png')
+                        #img_cropped.save(f'temp/half_image_{idx}_{i}.png')
                         
                         # Convert the cropped image back to a NumPy array and BGR format for further processing
                         img = np.array(img_cropped)
