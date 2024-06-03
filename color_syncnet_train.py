@@ -138,15 +138,12 @@ class Dataset(object):
         Handle exceptions and retries in case of read errors.
         Return the processed image data, audio features, and label.
         """
-        
-        while 1:
-            idx = random.randint(0, len(self.all_videos) - 1)
-            vidname = self.all_videos[idx]
+        idx = random.randint(0, len(self.all_videos) - 1)
+        vidname = self.all_videos[idx]
 
-            img_names = list(glob(join(vidname, '*.jpg')))
-            
-            if len(img_names) <= 3 * syncnet_T:
-                continue
+        img_names = list(glob(join(vidname, '*.jpg')))
+        
+        if len(img_names) > 3 * syncnet_T:
             
             """
             Changed by eddy, the following are the original codes, it uses random to get the wrong_img_name, 
