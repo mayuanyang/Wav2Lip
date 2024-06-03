@@ -199,7 +199,7 @@ class Dataset(object):
             
             window_fnames = self.get_window(chosen)
             if window_fnames is None:
-                continue
+                return
             
             window = []
 
@@ -223,7 +223,7 @@ class Dataset(object):
 
                 window.append(img)
 
-            if not all_read: continue
+            if not all_read: return
 
             try:
                 wavpath = join(vidname, "audio.wav")
@@ -239,12 +239,12 @@ class Dataset(object):
             except Exception as e:
                 print('error', e)
                 traceback.print_exc() 
-                continue
+                return
 
             mel = self.crop_audio_window(orig_mel.copy(), img_name)
 
             if (mel.shape[0] != syncnet_mel_step_size):
-                continue
+                return
             
             # Save the sample images
             # if idx % 100 == 0:
