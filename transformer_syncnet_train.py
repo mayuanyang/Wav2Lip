@@ -263,13 +263,13 @@ class Dataset(object):
 
 cross_entropy_loss = nn.CrossEntropyLoss()
 
-def constrastive_loss(self, audio_embedding, face_embedding, label):
+def constrastive_loss(audio_embedding, face_embedding, label, margin=1.0):
         # Compute the Euclidean distance between the two embeddings
         euclidean_distance = nn.functional.pairwise_distance(audio_embedding, face_embedding)
         
         # Calculate the contrastive loss
         loss_contrastive = torch.mean((1 - label) * torch.pow(euclidean_distance, 2) +
-                                      label * torch.pow(torch.clamp(self.margin - euclidean_distance, min=0.0), 2))
+                                      label * torch.pow(torch.clamp(margin - euclidean_distance, min=0.0), 2))
         
         return loss_contrastive
 
