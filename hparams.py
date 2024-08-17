@@ -79,7 +79,7 @@ hparams = HParams(
 	batch_size=8,
 	initial_learning_rate=1e-4,
 	nepochs=200000000000000000,  ### ctrl + c, stop whenever eval loss is consistently greater than train loss for ~10 epochs
-	num_workers=8,
+	num_workers=24,
 	checkpoint_interval=2000,
 	eval_interval=2000,
     save_optimizer_state=True,
@@ -88,7 +88,7 @@ hparams = HParams(
 		#syncnet_wt=0.03, # is initially set by eddy, will be set automatically to 0.01 later.  
 	syncnet_batch_size=64,
 	syncnet_lr=1e-4,
-	syncnet_eval_interval=1000,
+	syncnet_eval_interval=4000,
 	syncnet_checkpoint_interval=2000,
 
 	disc_wt=0.07,
