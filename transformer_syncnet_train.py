@@ -139,7 +139,7 @@ class Dataset(object):
                 if should_load_diff_video:
                     idx = random.randint(0, len(self.all_videos) - 1)
                     should_load_diff_video = False
-                    print('Reloading a different video')
+                    
 
                 vidname = self.all_videos[idx]
                 img_names = list(glob(join(vidname, '*.jpg')))
