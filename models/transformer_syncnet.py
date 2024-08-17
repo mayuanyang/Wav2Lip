@@ -59,6 +59,8 @@ class TransformerSyncnet(nn.Module):
 
             Conv2d(256, 512, kernel_size=3, stride=1, padding=0),
             Conv2d(512, 512, kernel_size=1, stride=1, padding=0),)
+        
+        self.fc1 = nn.Linear(1024, 512)
 
 
     def forward(self, face_embedding, audio_embedding):
@@ -78,5 +80,7 @@ class TransformerSyncnet(nn.Module):
         # normalise them
         audio_embedding = F.normalize(audio_embedding, p=2, dim=1)
         face_embedding = F.normalize(face_embedding, p=2, dim=1)
+
+        face_embedding = self.fc1(face_embedding)
         
         return audio_embedding, face_embedding
