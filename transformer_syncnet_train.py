@@ -263,6 +263,16 @@ class Dataset(object):
 
 cross_entropy_loss = nn.CrossEntropyLoss()
 
+def constrastive_loss(self, audio_embedding, face_embedding, label):
+        # Compute the Euclidean distance between the two embeddings
+        euclidean_distance = nn.functional.pairwise_distance(audio_embedding, face_embedding)
+        
+        # Calculate the contrastive loss
+        loss_contrastive = torch.mean((1 - label) * torch.pow(euclidean_distance, 2) +
+                                      label * torch.pow(torch.clamp(self.margin - euclidean_distance, min=0.0), 2))
+        
+        return loss_contrastive
+
 def get_lip_landmark(image, face_mesh):
   try:
     
@@ -359,11 +369,11 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
             #lip_x = lip_x.to(device)
 
-            output = model(x, mel)
+            audio_embedding, face_embedding = model(x, mel)
             
             y = y.to(device)
 
-            loss = cross_entropy_loss(output, y) #if (global_epoch // 50) % 2 == 0 else contrastive_loss2(a, v, y)
+            loss = constrastive_loss(audio_embedding, face_embedding, y) #if (global_epoch // 50) % 2 == 0 else contrastive_loss2(a, v, y)
             loss.backward()
             optimizer.step()
 
@@ -440,10 +450,10 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, sch
 
             mel = mel.to(device)
 
-            output = model(x, mel)
+            audio_embedding, face_embedding = model(x, mel)
             y = y.to(device)
 
-            loss = cross_entropy_loss(output, y)
+            loss = constrastive_loss(audio_embedding, face_embedding, y) 
             losses.append(loss.item())
 
             if step > eval_steps: break
