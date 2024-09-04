@@ -76,10 +76,10 @@ hparams = HParams(
 	img_size=192,
 	fps=25,
 	
-	batch_size=11,
+	batch_size=20,
 	initial_learning_rate=1e-4,
 	nepochs=200000000000000000,  ### ctrl + c, stop whenever eval loss is consistently greater than train loss for ~10 epochs
-	num_workers=16,
+	num_workers=32,
 	checkpoint_interval=2000,
 	eval_interval=5000,
   save_optimizer_state=True,
