@@ -97,11 +97,45 @@ class Dataset(object):
                         break
                     try:
                         img = cv2.resize(img, (hparams.img_size, hparams.img_size))
-                        if len(image_cache) < 350000:
-                          image_cache[fname] = img  # Cache the resized image and preevent OOM
+                        if len(image_cache) < hparams.image_cache_size:
+                          image_cache[fname] = img  # Cache the resized image and prevent OOM
+                    
                         
                     except Exception as e:
                         break
+                    
+                    '''
+                    Data augmentation
+                    0 means unchange
+                    1 for grayscale
+                    2 for brightness
+                    3 for contrast
+                    '''
+                    option = random.choices([0, 1, 2, 3, 4])[0] 
+                    
+                    if option == 1:
+                        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                        img = cv2.merge([img_gray, img_gray, img_gray])
+                    elif option == 2:
+                        brightness_factor = np.random.uniform(0.7, 1.3)
+                        img = cv2.convertScaleAbs(img, alpha=brightness_factor, beta=0)
+                    elif option == 3:
+                        contrast_factor = np.random.uniform(0.7, 1.3)
+                        img = cv2.convertScaleAbs(img, alpha=contrast_factor, beta=0)
+                    elif option == 4:
+                        angle = np.random.uniform(-15, 15)  # Random angle between -15 and 15 degrees
+
+                        # Get the image dimensions
+                        (h, w) = img.shape[:2]
+
+                        # Calculate the center of the image
+                        center = (w // 2, h // 2)
+
+                        # Get the rotation matrix
+                        rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+
+                        # Perform the rotation
+                        img = cv2.warpAffine(img, rotation_matrix, (w, h))
 
                 window.append(img)
 
@@ -163,26 +197,22 @@ class Dataset(object):
 
     def __getitem__(self, idx):
         #start_time = time.perf_counter()
-        circuit_breaker_counter = 0
-        previous_vid = ""
+        
+        should_load_diff_video = False
 
         while 1:
-            #idx = random.randint(0, len(self.all_videos) - 1)
+            if should_load_diff_video:
+                idx = random.randint(0, len(self.all_videos) - 1)
+                should_load_diff_video = False
+
             vidname = self.all_videos[idx]
 
-            if vidname == previous_vid:
-                circuit_breaker_counter += 1
-
-            previous_vid = vidname
-
             img_names = list(glob(join(vidname, '*.jpg')))
-            if len(img_names) <= 3 * syncnet_T:
-                continue
             
-            if circuit_breaker_counter > 4500:
-                print('Circuit breaker in, the problem video is ', vidname)
-                circuit_breaker_counter = 0
-                continue
+            if len(img_names) <= 3 * syncnet_T:
+                print('The length', len(img_names))
+                should_load_diff_video = True
+            
 
             img_name = random.choice(img_names)
             wrong_img_name = random.choice(img_names)
@@ -192,14 +222,17 @@ class Dataset(object):
             window_fnames = self.get_window(img_name)
             wrong_window_fnames = self.get_window(wrong_img_name)
             if window_fnames is None or wrong_window_fnames is None:
+                should_load_diff_video = True
                 continue
 
             window = self.read_window(window_fnames)
             if window is None:
+                should_load_diff_video = True
                 continue
 
             wrong_window = self.read_window(wrong_window_fnames)
             if wrong_window is None:
+                should_load_diff_video = True
                 continue
 
             try:
@@ -213,8 +246,6 @@ class Dataset(object):
                     orig_mel = audio.melspectrogram(wav).T
                     orig_mel_cache[wavpath] = orig_mel
 
-            
-
                 mel = self.crop_audio_window(orig_mel.copy(), img_name)
                 
                 if (mel.shape[0] != syncnet_mel_step_size):
@@ -225,6 +256,17 @@ class Dataset(object):
 
                 window = self.prepare_window(window)
                 y = window.copy()
+
+
+                '''
+                Set the second half of the images to be black, the window has 5 images
+                The wrong_window contains images that do not align with the audio
+                x contains 10 images, the first 5 are the correct iamges with second half black out, the last 5 are the incorrect images to the audio
+                indiv_mels contains the corresponding audio for the given window
+                y is the window that without the second half black out
+                '''
+
+                
                 window[:, :, window.shape[2]//2:] = 0.
 
                 wrong_window = self.prepare_window(wrong_window)
@@ -233,16 +275,16 @@ class Dataset(object):
 
                 x = torch.FloatTensor(x)
                 mel = torch.FloatTensor(mel.T).unsqueeze(0)
+
                 indiv_mels = torch.FloatTensor(indiv_mels).unsqueeze(1)
+
                 y = torch.FloatTensor(y)
-                # end_time = time.perf_counter()
-                # execution_time = (end_time - start_time) * 1000  # Convert seconds to milliseconds
-                # print(f"The method took {execution_time:.2f} milliseconds to execute.")
 
                 return x, indiv_mels, mel, y
 
             except Exception as e:
                 print('An error has occured', vidname, img_name, wrong_img_name)
+                print(e)
                 continue
 
 def save_sample_images(x, g, gt, global_step, checkpoint_dir):
@@ -267,8 +309,13 @@ def save_sample_images(x, g, gt, global_step, checkpoint_dir):
 logloss = nn.BCELoss()
 def cosine_loss(a, v, y):
     d = nn.functional.cosine_similarity(a, v)
-    loss = logloss(d.unsqueeze(1), y)
-
+    
+    # Scale cosine similarity to range [0, 1]
+    cos_sim_scaled = (1 + d) / 2.0
+    
+    # Calculate the loss: the target is 1 for similar pairs and 0 for dissimilar pairs
+    loss = nn.functional.mse_loss(cos_sim_scaled, y.float())
+    
     return loss
 
 def contrastive_loss(a, v, y, margin=0.5):
@@ -280,7 +327,7 @@ def contrastive_loss(a, v, y, margin=0.5):
     return loss
 
 device = torch.device("cuda" if use_cuda else "cpu")
-syncnet = SyncNet(embed_size=256, num_heads=8, num_encoder_layers=6).to(device)
+syncnet = SyncNet(num_heads=8, num_encoder_layers=6).to(device)
 for p in syncnet.parameters():
     p.requires_grad = False
 
@@ -291,8 +338,10 @@ def get_sync_loss(mel, g):
     g = g[:, :, :, g.size(3)//2:]
     g = torch.cat([g[:, :, i] for i in range(syncnet_T)], dim=1)
     # B, 3 * T, H//2, W
-    output = syncnet(g, mel)
-    y = torch.ones(g.size(0), dtype=torch.long).to(device) 
+    output, audio_embedding, face_embedding = syncnet(g, mel)
+
+    y = torch.ones(g.size(0), dtype=torch.long).squeeze().to(device)
+    
     return cross_entropy_loss(output, y)
 
 def perceptual_loss(gen_features, gt_features):
@@ -365,12 +414,15 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               l2loss = nn.functional.mse_loss(g, gt)
 
+              running_l1_loss += l1loss.item()
+              running_l2_loss += l2loss.item()
+
               '''
               If the syncnet_wt is 0.03, it means the sync_loss has 3% of the loss wheras the rest occupy 97% of the loss
               '''
 
               #l1l2_loss = 0.8 * l1loss + 0.2 * l2loss
-              loss = hparams.syncnet_wt * sync_loss + (1 - hparams.syncnet_wt) * (0.3 * l2loss + 0.7 * lower_half_l1_loss)
+              loss = hparams.syncnet_wt * sync_loss + (1 - hparams.syncnet_wt) * l1loss
               
               l1loss.backward()
               optimizer.step()
@@ -392,6 +444,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                       model, optimizer, global_step, checkpoint_dir, global_epoch)
 
               avg_img_loss = (running_img_loss) / (step + 1)
+
+              avg_l1_loss = running_l1_loss / (step + 1)
+
+              avg_l2_loss = running_l2_loss / (step + 1)
               
               if global_step % hparams.eval_interval == 0:
                 with torch.no_grad():
@@ -401,14 +457,18 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   if avg_img_loss < .01: # change 
                           hparams.set_hparam('syncnet_wt', 0.01) # without image GAN a lesser weight is sufficient
 
-              prog_bar.set_description('Step: {}, Avg Img Loss: {}, Sync Loss: {}, Lower Half Loss: {}, LR: {}'.format(global_step, avg_img_loss,
-                                                                      running_sync_loss / (step + 1), lower_half_l1_loss.item(), current_lr))
+              prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, Lower Half Loss: {}, L1: {}, L2: {}, LR: {}'.format(global_step, avg_img_loss,
+                                                                      running_sync_loss / (step + 1), lower_half_l1_loss.item(), avg_l1_loss, avg_l2_loss, current_lr))
               
-              metrics = {"train/img_loss": avg_img_loss, 
-                       "train/sync_loss": running_sync_loss / (step + 1), 
-                       "train/step": global_step,
-                       "train/lower_half_loss": lower_half_l1_loss.item(),
-                       "train/learning_rate": current_lr}
+              metrics = {
+                  "train/overall_loss": avg_img_loss, 
+                  "train/avg_l1": avg_l1_loss, 
+                  "train/avg_l2": avg_l2_loss, 
+                  "train/sync_loss": running_sync_loss / (step + 1), 
+                  "train/step": global_step,
+                  "train/lower_half_loss": lower_half_l1_loss.item(),
+                  "train/learning_rate": current_lr
+                  }
             
               wandb.log({**metrics})
 
@@ -490,7 +550,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
     new_s = {}
     for k, v in s.items():
         new_s[k.replace('module.', '')] = v
-    model.load_state_dict(new_s)
+    model.load_state_dict(new_s, strict=False)
     if not reset_optimizer:
         optimizer_state = checkpoint["optimizer"]
         if optimizer_state is not None:
@@ -502,7 +562,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
 
     if optimizer != None:
       for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.00001
+        param_group['lr'] = 0.00002
 
     return model
 
