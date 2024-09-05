@@ -28,6 +28,16 @@ import logging
 import matplotlib.pyplot as plt
 
 from PIL import Image
+import psutil
+
+# Get memory information
+memory_info = psutil.virtual_memory()
+
+# Total memory in bytes
+total_memory = memory_info.total
+
+# Available memory in bytes
+available_memory = memory_info.available
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -208,7 +218,7 @@ class Dataset(object):
                         try:
                             img = cv2.resize(img, (hparams.img_size, hparams.img_size))                            
                             
-                            if len(face_image_cache) < hparams.image_cache_size:
+                            if available_memory / (1024 ** 3.0) >= 2:
                               face_image_cache[fname] = img  # Cache the resized image
                             
                         except Exception as e:
@@ -263,7 +273,8 @@ class Dataset(object):
                     else:
                         wav = audio.load_wav(wavpath, hparams.sample_rate)
                         orig_mel = audio.melspectrogram(wav).T
-                        orig_mel_cache[wavpath] = orig_mel
+                        if available_memory / (1024 ** 3.0) >= 2:
+                          orig_mel_cache[wavpath] = orig_mel
                     
                 except Exception as e:
                     should_load_diff_video = True
