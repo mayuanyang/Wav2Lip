@@ -65,15 +65,6 @@ print('use_cuda: {}'.format(use_cuda))
 syncnet_T = 5
 syncnet_mel_step_size = 16
 
-# Get memory information
-memory_info = psutil.virtual_memory()
-
-# Total memory in bytes
-total_memory = memory_info.total
-
-# Available memory in bytes
-available_memory = memory_info.available
-
 class Dataset(object):
     def __init__(self, split):
         self.all_videos = get_image_list(args.data_root, split)
@@ -107,7 +98,7 @@ class Dataset(object):
                         break
                     try:
                         img = cv2.resize(img, (hparams.img_size, hparams.img_size))                       
-                        if available_memory / (1024 ** 3.0) >= 2:
+                        if len(image_cache) < hparams.image_cache_size:
                           image_cache[fname] = img  # Cache the resized image and prevent OOM
                     
                         
@@ -254,7 +245,7 @@ class Dataset(object):
                 else:
                     wav = audio.load_wav(wavpath, hparams.sample_rate)
                     orig_mel = audio.melspectrogram(wav).T
-                    if available_memory / (1024 ** 3.0) >= 2:
+                    if len(orig_mel_cache) < hparams.audio_cache_size:
                       orig_mel_cache[wavpath] = orig_mel
 
                 mel = self.crop_audio_window(orig_mel.copy(), img_name)
