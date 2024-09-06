@@ -392,7 +392,7 @@ def get_lip_landmark(image, face_mesh):
 # Register hooks to print gradient norms
 def print_grad_norm(module, grad_input, grad_output):
     for i, grad in enumerate(grad_output):
-        if grad is not None and global_step % hparams.syncnet_eval_interval == 0:
+        if grad is not None and global_step % 500 == 0:
             print(f'{module.__class__.__name__} - grad_output[{i}] norm: {grad.norm().item()}')
 
 # end added by eddy
@@ -415,7 +415,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     
     if should_print_grad_norm:
       for name, module in model.named_modules():
-        if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear)):
+        if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear, nn.TransformerEncoderLayer)):
             module.register_backward_hook(print_grad_norm)
     
     # end
@@ -524,10 +524,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 
             
         global_epoch += 1
-        # if should_print_grad_norm or global_step % 20==0:
-        #   for param in model.parameters():
-        #         if param.grad is not None:
-        #             print('The gradient is ', param.grad.norm())
+        if should_print_grad_norm or global_step % 20==0:
+          for param in model.parameters():
+                if param.grad is not None:
+                    print('The gradient is ', param.grad.norm())
         # Clip gradients
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         
@@ -621,7 +621,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
 
     # Reset the new learning rate
     for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.00003
+        param_group['lr'] = 0.0002
 
     return model
 
@@ -665,7 +665,7 @@ if __name__ == "__main__":
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
-                           lr=hparams.syncnet_lr,betas=(0.5, 0.999), weight_decay=1e-5)
+                           lr=hparams.syncnet_lr,betas=(0.8, 0.999), weight_decay=1e-5)
 
     if checkpoint_path is not None:
         load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=False)
@@ -673,4 +673,4 @@ if __name__ == "__main__":
     train(device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=checkpoint_dir,
           checkpoint_interval=hparams.syncnet_checkpoint_interval,
-          nepochs=hparams.nepochs, should_print_grad_norm=False)
+          nepochs=hparams.nepochs, should_print_grad_norm=True)

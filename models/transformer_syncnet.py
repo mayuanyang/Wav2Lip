@@ -74,7 +74,7 @@ class TransformerSyncnet(nn.Module):
 
 
         self.transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=512, nhead=num_heads, dropout=0.),
+            nn.TransformerEncoderLayer(d_model=512, nhead=num_heads, dropout=0.1),
             num_layers=num_encoder_layers
         )
 
