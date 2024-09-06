@@ -237,7 +237,8 @@ class Dataset(object):
                         contrast_factor = np.random.uniform(0.7, 1.3)
                         img = cv2.convertScaleAbs(img, alpha=contrast_factor, beta=0)
                     elif option == 4:
-                        angle = np.random.uniform(-15, 15)  # Random angle between -15 and 15 degrees
+                        angle = np.random.uniform(1, 15)
+                        angle = np.random.uniform(-angle, angle)
 
                         # Get the image dimensions
                         (h, w) = img.shape[:2]
