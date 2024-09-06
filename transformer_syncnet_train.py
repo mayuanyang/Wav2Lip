@@ -525,10 +525,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 
             
         global_epoch += 1
-        if should_print_grad_norm or global_step % 20==0:
-          for param in model.parameters():
-                if param.grad is not None:
-                    print('The gradient is ', param.grad.norm())
+        # if should_print_grad_norm or global_step % 20==0:
+        #   for param in model.parameters():
+        #         if param.grad is not None:
+        #             print('The gradient is ', param.grad.norm())
         # Clip gradients
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         
@@ -622,7 +622,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
 
     # Reset the new learning rate
     for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.0002
+        param_group['lr'] = 0.00002
 
     return model
 
