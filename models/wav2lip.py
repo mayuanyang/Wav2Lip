@@ -140,7 +140,7 @@ class Wav2Lip(nn.Module):
         of the decoded audio and face features
         '''
         
-        # x is the combined audio and face features
+        # x is the combined audio and face features, the shape is torch.Size([B, C, 192, 192]) where C is 96
         x = self.output_block(x)
 
         # The second u-net for clarity
@@ -157,6 +157,8 @@ class Wav2Lip(nn.Module):
 
         else:
             outputs = x
+        
+        #print('The outputs shape', outputs.shape)
             
         return outputs
 

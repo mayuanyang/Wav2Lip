@@ -9,38 +9,47 @@ class TransformerWav2Lip(nn.Module):
     def __init__(self):
         super(TransformerWav2Lip, self).__init__()
 
-        self.face_encoder_blocks = nn.ModuleList([
-            nn.Sequential(Conv2d(6, 32, kernel_size=7, stride=1, padding=3),
-                          Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
-                          Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
-                          ), # 192,192
-
-            nn.Sequential(Conv2d(32, 64, kernel_size=5, stride=2, padding=2),
-              Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-              ), # 96,96
-
-            nn.Sequential(Conv2d(64, 128, kernel_size=5, stride=2, padding=2), # 48,48
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            ),
-
-            nn.Sequential(Conv2d(128, 128, kernel_size=3, stride=2, padding=1),    # 24,24
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            ),
-
-            nn.Sequential(Conv2d(128, 256, kernel_size=3, stride=2, padding=1),   # 12,12
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True)),
-
-            nn.Sequential(Conv2d(256, 512, kernel_size=3, stride=2, padding=1),       # 6,6
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True)),
-
-            nn.Sequential(Conv2d(512, 512, kernel_size=3, stride=2, padding=1),     # 3,3
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),),
+        self.face_encoder = nn.Sequential(
             
-            nn.Sequential(Conv2d(512, 512, kernel_size=3, stride=1, padding=0),     # 1, 1
-            Conv2d(512, 512, kernel_size=1, stride=1, padding=0)),])
+            Conv2d(6, 32, kernel_size=7, stride=1, padding=3), #192x192, 1+(7−1)×1=7
+            
+            Conv2d(32, 64, kernel_size=7, stride=2, padding=3), #96x96, 7+(7−1)×2=7+12=19
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), # 19+(3−1)×1=19+2=21
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), # 21+(3−1)×1=19+2=23
+
+            Conv2d(64, 128, kernel_size=5, stride=(1, 2), padding=1), #94x47, 23+(5−1)×1=19+2=23
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #94x47
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #94x47
+
+            Conv2d(128, 256, kernel_size=5, stride=2, padding=2), # 47x24
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 47x24
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 47x24
+
+            Conv2d(256, 256, kernel_size=5, stride=2, padding=2), # 24x 12
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12
+
+            Conv2d(256, 512, kernel_size=3, stride=1, padding=1), # 24x 12
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12
+
+            Conv2d(512, 256, kernel_size=5, stride=2, padding=2), #12x6
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #12x6
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #12x6
+
+            Conv2d(256, 128, kernel_size=3, stride=(2,1), padding=1), #6x6
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #12x6
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #12x6
+
+            Conv2d(128, 64, kernel_size=3, stride=1, padding=1), #6x6
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1), #6x6
+
+            Conv2d(64, 64, kernel_size=3, stride=2, padding=0), #2x2 The receptive field up to here is 99x99
+            
+            )
 
         self.audio_encoder = nn.Sequential(
-            Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
+            Conv2d(1, 32, kernel_size=3, stride=1, padding=1), # 80x16
             Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
 
@@ -52,130 +61,146 @@ class TransformerWav2Lip(nn.Module):
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
 
-            Conv2d(128, 256, kernel_size=3, stride=(3, 2), padding=1),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=(3, 2), padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
 
-            Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+            Conv2d(128, 128, kernel_size=1, stride=1, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=2, padding=0),)
 
-            Conv2d(512, 1024, kernel_size=3, stride=1, padding=0),
-            Conv2d(1024, 1024, kernel_size=1, stride=1, padding=0)
-            )
-
-        self.face_decoder_blocks = nn.ModuleList([
-            nn.Sequential(Conv2d(1024, 1024, kernel_size=1, stride=1, padding=0),
-                          Conv2d(1024, 1024, kernel_size=3, stride=1, padding=1, residual=True),),
-
-            nn.Sequential(Conv2dTranspose(1536, 768, kernel_size=3, stride=1, padding=0), # 3,3
-            Conv2d(768, 768, kernel_size=3, stride=1, padding=1, residual=True),),
-
-            nn.Sequential(Conv2dTranspose(1280, 640, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(640, 640, kernel_size=3, stride=1, padding=1, residual=True),), # 6, 6
-
-            nn.Sequential(Conv2dTranspose(1152, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),), # 12, 12
-
-            nn.Sequential(Conv2dTranspose(768, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),), # 24, 24
-
-            nn.Sequential(Conv2dTranspose(384, 128, kernel_size=3, stride=2, padding=1, output_padding=1), 
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),), # 48, 48
-
-            nn.Sequential(Conv2dTranspose(256, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),), # 96,96
-
-            # add by eddy to support 192x192 input
-            nn.Sequential(
-                Conv2dTranspose(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
-                Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
-                
-            )
-            # end add by eddy
-            ]) 
         
-        self.fc1 = nn.Linear(3538944, 512) 
-        
-        self.transformer_encoder = nn.TransformerEncoderLayer(d_model=512, nhead=8)  # Adjust d_model and nhead as per your need
+        self.transformer_encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=768, nhead=8, dropout=0.1),
+            num_layers=2
+        )
 
-        self.output_block = nn.Sequential(Conv2d(96, 32, kernel_size=3, stride=1, padding=1),
-            nn.Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
-            nn.Sigmoid())
+        self.upsample_block = nn.Sequential(
+            # First upsampling from 4x4 to 8x8
+            nn.ConvTranspose2d(48, 128, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            
+            # Upsample from 8x8 to 16x16
+            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=3),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            
+            # Upsample from 16x16 to 32x32
+            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            
+            # Upsample from 32x32 to 64x64
+            nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            
+            # Upsample from 64x64 to 128x128
+            nn.ConvTranspose2d(16, 8, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(8),
+            nn.ReLU(),
+            
+            # Upsample from 128x128 to 192x192
+            nn.ConvTranspose2d(8, 3, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(3),
+            nn.ReLU(),
+            
+            # Final Conv layer to match the desired number of output channels
+            nn.Conv2d(3, 3, kernel_size=3, padding=1),
+            nn.Sigmoid()  # Sigmoid to bring the values between 0 and 1 for an image
+        )
+        
+        # self.fc1 = nn.Linear(3538944, 512) 
+        
+        # self.transformer_encoder = nn.TransformerEncoderLayer(d_model=512, nhead=8)  # Adjust d_model and nhead as per your need
+
+        # self.output_block = nn.Sequential(Conv2d(48, 32, kernel_size=3, stride=1, padding=1),
+        #     nn.Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
+        #     nn.Sigmoid())
         
         
 
     def forward(self, audio_sequences, face_sequences):
+        '''
+        The face sequence has the shape of (B, 6, 5, 192, 192)
+        where B is the batch size 
+        6 is the channels, it is the concatenation of window and wrong window's channel, each one has 3 channels
+        5 is the number of images
+        192x192 is the H and W
+        '''
+        # print('The audio input shape', audio_sequences.shape)
+        # print('The face input shape', face_sequences.shape)
+
         # audio_sequences = (B, T, 1, 80, 16)
         B = audio_sequences.size(0)
 
         input_dim_size = len(face_sequences.size())
         if input_dim_size > 4:
+            '''
+            For audio, concat the dim 1 which is the time step
+            For face, concat the dim 2 which is the number of images(5)
+            '''
             audio_sequences = torch.cat([audio_sequences[:, i] for i in range(audio_sequences.size(1))], dim=0)
             face_sequences = torch.cat([face_sequences[:, :, i] for i in range(face_sequences.size(2))], dim=0)
 
-        audio_embedding = self.audio_encoder(audio_sequences) # B, 512, 1, 1
+        # print('The audio shape before encoder', audio_sequences.shape)
+        # print('The face shape before encoder', face_sequences.shape)
 
-        face_features = []
-        this_face_sequence = face_sequences
-        for f in self.face_encoder_blocks:
-            this_face_sequence = f(this_face_sequence)
-            face_features.append(this_face_sequence)
+        face_embedding = self.face_encoder(face_sequences)
+        audio_embedding = self.audio_encoder(audio_sequences)
 
-        x = audio_embedding
-        index = 1
-        for f in self.face_decoder_blocks:
-            #Use the face decoder to decode the audio
-            x = f(x)
-            index += 1
+        # print('The face shape after encoder', face_embedding.shape)
+        # print('The audio shape after encoder', audio_embedding.shape)
 
-            try:
-                '''
-                Concat the decoded audio with the correspondent face features, 
-                this also known as skip connection by concatinationg the encoder's face feature and decoded audio features
-                '''
-                x = torch.cat((x, face_features[-1]), dim=1)
-            except Exception as e:
-                raise e
-            
-            face_features.pop()
-            #print('The new length', len(feats))
 
         '''
+        Keep the first 2 dimension and flatten the rest dimension into 1, flatten means multiply the rest dimension
+        So the shape after the permute(change order) become [Batch, image_size(HxW), Channel]
+        '''
+        audio_embedding = audio_embedding.view(audio_embedding.size(0), audio_embedding.size(1), -1)
+        face_embedding = face_embedding.view(face_embedding.size(0), face_embedding.size(1), -1)
         
-        '''
-        print('The combined shape', x.shape, face_sequences.size(1),  face_sequences.size(2))
+        audio_embedding = audio_embedding.permute(0, 2, 1)
+        face_embedding = face_embedding.permute(0, 2, 1)
 
-        # Step 1: Flatten the spatial dimensions
-        tensor = x.view(x.shape[0], 96, -1)  # Shape: [batch_size, 96, 36864]
-        print('the tensor shape 1', tensor.shape)
+        # print('The face shape', face_embedding.shape)
+        # print('The audio shape', audio_embedding.shape)
 
-        tensor = tensor.view(x.shape[0], -1)  # Shape: [batch_size, 96, 36864]
-        print('the tensor shape 2', tensor.shape)
+        
+        # normalise them
+        audio_embedding = F.normalize(audio_embedding, p=2, dim=2)
+        face_embedding = F.normalize(face_embedding, p=2, dim=2)
 
-        # Step 2: Permute the dimensions to match Transformer input
-        tensor = tensor.permute(0, 1)  # Shape: [36864, batch_size, 96]
-        print('the tensor shape 3', tensor.shape)
+        # Concatenate lip frames and audio features
+        combined = torch.cat((face_embedding, audio_embedding), dim=2)
 
-        tensor = self.fc1(tensor)
+        # print('The combined shape', combined.shape)
+        
+        # Make sure combined is 1-dimensional
+        combined = combined.view(combined.size(0), -1)
 
-        # Step 3: Pass the tensor through the TransformerEncoderLayer
-        t_output = self.transformer_encoder(tensor)
-        print('2')
+        # Pass through the Transformer encoder, the input size is 1024
+        transformer_output = self.transformer_encoder(combined)
 
-        # Step 1: Permute the dimensions back to [batch_size, embedding_size, seq_len]
-        t_output = t_output.permute(1, 2, 0)  # Shape: [batch_size, embedding_size, seq_len]
+        # print('The transformer output shape', transformer_output.shape)
 
         # Step 2: Reshape it back to the original shape [batch_size, channels, height, width]
-        batch_size = x.shape[0]
-        height, width = 192, 192
-        t_output = t_output.view(batch_size, 96, height, width) 
+        batch_size = combined.shape[0]
+        
+        transformer_output = transformer_output.view(batch_size, 48, 4, 4) 
 
-        x = self.output_block(t_output)
+        # print('The unflatten transformer output shape', transformer_output.shape)
+
+        x = self.upsample_block(transformer_output)
 
         if input_dim_size > 4:
             x = torch.split(x, B, dim=0) # [(B, C, H, W)]
             outputs = torch.stack(x, dim=2) # (B, C, T, H, W)
 
         else:
-            outputs = t_output
+            outputs = x
             
+        '''
+        The target outputs shape is torch.Size([B, 3, 5, 192, 192])
+        '''
         return outputs

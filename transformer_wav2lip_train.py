@@ -57,8 +57,8 @@ global_step = 0
 global_epoch = 0
 use_cosine_loss=True
 use_cuda = torch.cuda.is_available()
-image_cache = multiprocessing.Manager().dict()
-orig_mel_cache = multiprocessing.Manager().dict()
+image_cache = {} #multiprocessing.Manager().dict()
+orig_mel_cache = {} #multiprocessing.Manager().dict()
 
 print('use_cuda: {}'.format(use_cuda))
 
@@ -266,6 +266,9 @@ class Dataset(object):
                 x contains 10 images, the first 5 are the correct iamges with second half black out, the last 5 are the incorrect images to the audio
                 indiv_mels contains the corresponding audio for the given window
                 y is the window that without the second half black out
+
+                window and wrong window both has 3 channels, 5 images with size of 192x912
+                after the concatenation along axis = 0 would yield 6 channels and 5 images
                 '''
 
                 
@@ -274,6 +277,8 @@ class Dataset(object):
                 wrong_window = self.prepare_window(wrong_window)
 
                 x = np.concatenate([window, wrong_window], axis=0)
+
+                #print('the x, window and wrong window shape', x.shape, window.shape, wrong_window.shape)
 
                 x = torch.FloatTensor(x)
                 mel = torch.FloatTensor(mel.T).unsqueeze(0)
@@ -389,7 +394,11 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         prog_bar = tqdm(enumerate(train_data_loader))
         running_img_loss = 0.0
         for step, (x, indiv_mels, mel, gt) in prog_bar:
-            #print("The batch size", x.shape)
+            
+            '''
+            The x is the concatentation of correct window and wrong window, each window has 5 images with size of 192x192 and 3 channels
+            so the x shape is (6, 5, 192, 192) where 6 is 3 + 3 channels
+            '''
             if x.shape[0] == hparams.batch_size:
               model.train()
               optimizer.zero_grad()
@@ -405,6 +414,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               # Get the second half of the images and calculate the loss
               lower_half1 = g[:, :, :, 96:, :]
               lower_half2 = gt[:, :, :, 96:, :]
+
               lower_half_l1_loss = F.l1_loss(lower_half1, lower_half2)
 
               if hparams.syncnet_wt > 0.:
@@ -472,7 +482,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   "train/learning_rate": current_lr
                   }
             
-              wandb.log({**metrics})
+              #wandb.log({**metrics})
 
         global_epoch += 1
 
@@ -512,7 +522,7 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, sch
                        "val/epoch": global_epoch,
                        }
             
-              wandb.log({**metrics})
+              #wandb.log({**metrics})
 
               scheduler.step(averaged_sync_loss + averaged_recon_loss)
 
@@ -582,7 +592,7 @@ if __name__ == "__main__":
 
     test_data_loader = data_utils.DataLoader(
         test_dataset, batch_size=hparams.batch_size,
-        num_workers=4)
+        num_workers=0)
 
     device = torch.device("cuda" if use_cuda else "cpu")
 
@@ -602,18 +612,18 @@ if __name__ == "__main__":
     if not os.path.exists(checkpoint_dir):
         os.mkdir(checkpoint_dir)
 
-    wandb.init(
-      # set the wandb project where this run will be logged
-      project="my-wav2lip",
+    # wandb.init(
+    #   # set the wandb project where this run will be logged
+    #   project="my-wav2lip",
 
-      # track hyperparameters and run metadata
-      config={
-      "learning_rate": hparams.initial_learning_rate,
-      "architecture": "Wav2lip",
-      "dataset": "MyOwn",
-      "epochs": 200000,
-      }
-    )
+    #   # track hyperparameters and run metadata
+    #   config={
+    #   "learning_rate": hparams.initial_learning_rate,
+    #   "architecture": "Wav2lip",
+    #   "dataset": "MyOwn",
+    #   "epochs": 200000,
+    #   }
+    # )
 
     # Train!
     train(device, model, train_data_loader, test_data_loader, optimizer,
