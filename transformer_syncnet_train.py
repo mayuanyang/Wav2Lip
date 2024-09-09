@@ -29,6 +29,7 @@ import matplotlib.pyplot as plt
 
 from PIL import Image
 
+
 def str2bool(v):
     if isinstance(v, bool):
         return v
@@ -65,7 +66,7 @@ orig_mel_cache = multiprocessing.Manager().dict()
 current_training_loss = 0.6
 learning_step_loss_threshhold = 0.3
 consecutive_threshold_count = 0
-samples = [True, True,True, True,True, True,True, False, False, False]
+samples = [True, True,True, True,True, False,False, False, False, False]
 
 print('use_cuda: {}'.format(use_cuda))
 
@@ -236,7 +237,8 @@ class Dataset(object):
                         contrast_factor = np.random.uniform(0.7, 1.3)
                         img = cv2.convertScaleAbs(img, alpha=contrast_factor, beta=0)
                     elif option == 4:
-                        angle = np.random.uniform(-15, 15)  # Random angle between -15 and 15 degrees
+                        angle = np.random.uniform(1, 15)
+                        angle = np.random.uniform(-angle, angle)
 
                         # Get the image dimensions
                         (h, w) = img.shape[:2]
@@ -263,7 +265,8 @@ class Dataset(object):
                     else:
                         wav = audio.load_wav(wavpath, hparams.sample_rate)
                         orig_mel = audio.melspectrogram(wav).T
-                        orig_mel_cache[wavpath] = orig_mel
+                        if len(orig_mel_cache) < hparams.audio_cache_size:
+                          orig_mel_cache[wavpath] = orig_mel
                     
                 except Exception as e:
                     should_load_diff_video = True
@@ -390,7 +393,7 @@ def get_lip_landmark(image, face_mesh):
 # Register hooks to print gradient norms
 def print_grad_norm(module, grad_input, grad_output):
     for i, grad in enumerate(grad_output):
-        if grad is not None and global_step % hparams.syncnet_eval_interval == 0:
+        if grad is not None and global_step % 500 == 0:
             print(f'{module.__class__.__name__} - grad_output[{i}] norm: {grad.norm().item()}')
 
 # end added by eddy
@@ -413,7 +416,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     
     if should_print_grad_norm:
       for name, module in model.named_modules():
-        if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear)):
+        if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear, nn.TransformerEncoderLayer)):
             module.register_backward_hook(print_grad_norm)
     
     # end
@@ -619,7 +622,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
 
     # Reset the new learning rate
     for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.00003
+        param_group['lr'] = 0.00002
 
     return model
 
@@ -663,7 +666,7 @@ if __name__ == "__main__":
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
-                           lr=hparams.syncnet_lr,betas=(0.5, 0.999), weight_decay=1e-5)
+                           lr=hparams.syncnet_lr,betas=(0.8, 0.999), weight_decay=1e-5)
 
     if checkpoint_path is not None:
         load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=False)
@@ -671,4 +674,4 @@ if __name__ == "__main__":
     train(device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=checkpoint_dir,
           checkpoint_interval=hparams.syncnet_checkpoint_interval,
-          nepochs=hparams.nepochs, should_print_grad_norm=False)
+          nepochs=hparams.nepochs, should_print_grad_norm=True)

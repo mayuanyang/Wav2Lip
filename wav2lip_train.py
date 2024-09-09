@@ -28,6 +28,16 @@ import time
 import multiprocessing
 from torch.nn import functional as F
 
+import psutil
+
+# Get memory information
+memory_info = psutil.virtual_memory()
+
+# Total memory in bytes
+total_memory = memory_info.total
+
+# Available memory in bytes
+available_memory = memory_info.available
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -97,7 +107,7 @@ class Dataset(object):
                         break
                     try:
                         img = cv2.resize(img, (hparams.img_size, hparams.img_size))
-                        if len(image_cache) < hparams.image_cache_size:
+                        if available_memory / (1024 ** 3.0) >= 2:
                           image_cache[fname] = img  # Cache the resized image and prevent OOM
                         
                     except Exception as e:
@@ -210,7 +220,8 @@ class Dataset(object):
                 else:
                     wav = audio.load_wav(wavpath, hparams.sample_rate)
                     orig_mel = audio.melspectrogram(wav).T
-                    orig_mel_cache[wavpath] = orig_mel
+                    if available_memory / (1024 ** 3.0) >= 2:
+                      orig_mel_cache[wavpath] = orig_mel
 
                 mel = self.crop_audio_window(orig_mel.copy(), img_name)
                 

@@ -3,8 +3,9 @@ from tqdm import tqdm
 
 from models import TransformerSyncnet as SyncNet
 from models import Wav2Lip as Wav2Lip
+from models import Wav2LipStep2
 import audio
-
+import psutil
 import torch
 
 import wandb
@@ -96,7 +97,7 @@ class Dataset(object):
                     if img is None:
                         break
                     try:
-                        img = cv2.resize(img, (hparams.img_size, hparams.img_size))
+                        img = cv2.resize(img, (hparams.img_size, hparams.img_size))                       
                         if len(image_cache) < hparams.image_cache_size:
                           image_cache[fname] = img  # Cache the resized image and prevent OOM
                     
@@ -244,7 +245,8 @@ class Dataset(object):
                 else:
                     wav = audio.load_wav(wavpath, hparams.sample_rate)
                     orig_mel = audio.melspectrogram(wav).T
-                    orig_mel_cache[wavpath] = orig_mel
+                    if len(orig_mel_cache) < hparams.audio_cache_size:
+                      orig_mel_cache[wavpath] = orig_mel
 
                 mel = self.crop_audio_window(orig_mel.copy(), img_name)
                 
