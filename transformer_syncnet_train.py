@@ -66,7 +66,7 @@ orig_mel_cache = multiprocessing.Manager().dict()
 current_training_loss = 0.6
 learning_step_loss_threshhold = 0.3
 consecutive_threshold_count = 0
-samples = [True, True,True, True,True, True,True, False, False, False]
+samples = [True, True,True, True,True, False,False, False, False, False]
 
 print('use_cuda: {}'.format(use_cuda))
 
