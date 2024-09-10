@@ -380,7 +380,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             module.register_backward_hook(print_grad_norm)
 
     # Initialize LPIPS model
-    lpips_loss = lpips.LPIPS(net='vgg')  # You can choose 'alex', 'vgg', or 'squeeze'
+    lpips_loss = lpips.LPIPS(net='vgg').to(device)  # You can choose 'alex', 'vgg', or 'squeeze'
 
     eval_loss = 0.0
 
@@ -420,7 +420,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
                 # Now you can process the individual frames, e.g., pass them through a model
                 # For example:
-                frame_loss = lpips_loss(gen_frame, gt_frame)
+                frame_loss = lpips_loss(gen_frame.to(device), gt_frame.to(device))
                 losses.append(frame_loss)
                 
 
