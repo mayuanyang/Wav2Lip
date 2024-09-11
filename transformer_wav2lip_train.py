@@ -450,7 +450,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               '''
 
               #l1l2_loss = 0.8 * l1loss + 0.2 * l2loss
-              loss = hparams.syncnet_wt * sync_loss + (1 - hparams.syncnet_wt) * l1loss + 0.01 * disc_loss
+              loss = hparams.syncnet_wt * sync_loss + (1 - hparams.syncnet_wt - hparams.disc_wt) * l1loss + hparams.disc_wt * disc_loss
               
               loss.backward()
               optimizer.step()
@@ -590,7 +590,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
 
     if optimizer != None:
       for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.00002
+        param_group['lr'] = 0.00001
 
     return model
 
