@@ -83,26 +83,17 @@ class TransformerWav2Lip(nn.Module):
 
             nn.Sequential(Conv2dTranspose(256, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),), # 96,96
-
-            # add by eddy to support 192x192 input
+            
             nn.Sequential(
                 Conv2dTranspose(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
                 Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
                 
-            )
-            # end add by eddy
-            ]) 
-        
-        self.fc1 = nn.Linear(3538944, 512) 
-        
-        self.transformer_encoder = nn.TransformerEncoderLayer(d_model=512, nhead=8)  # Adjust d_model and nhead as per your need
+            )]) 
 
         self.output_block = nn.Sequential(Conv2d(96, 32, kernel_size=3, stride=1, padding=1),
             nn.Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
             nn.Sigmoid())
         
-        
-
     def forward(self, audio_sequences, face_sequences):
         # audio_sequences = (B, T, 1, 80, 16)
         B = audio_sequences.size(0)
@@ -140,42 +131,18 @@ class TransformerWav2Lip(nn.Module):
             #print('The new length', len(feats))
 
         '''
-        
+        Eddy: We might want to use a transformer to learn the combined audio and face features rather than using the concatenation 
+        of the decoded audio and face features
         '''
-        print('The combined shape', x.shape, face_sequences.size(1),  face_sequences.size(2))
-
-        # Step 1: Flatten the spatial dimensions
-        tensor = x.view(x.shape[0], 96, -1)  # Shape: [batch_size, 96, 36864]
-        print('the tensor shape 1', tensor.shape)
-
-        tensor = tensor.view(x.shape[0], -1)  # Shape: [batch_size, 96, 36864]
-        print('the tensor shape 2', tensor.shape)
-
-        # Step 2: Permute the dimensions to match Transformer input
-        tensor = tensor.permute(0, 1)  # Shape: [36864, batch_size, 96]
-        print('the tensor shape 3', tensor.shape)
-
-        tensor = self.fc1(tensor)
-
-        # Step 3: Pass the tensor through the TransformerEncoderLayer
-        t_output = self.transformer_encoder(tensor)
-        print('2')
-
-        # Step 1: Permute the dimensions back to [batch_size, embedding_size, seq_len]
-        t_output = t_output.permute(1, 2, 0)  # Shape: [batch_size, embedding_size, seq_len]
-
-        # Step 2: Reshape it back to the original shape [batch_size, channels, height, width]
-        batch_size = x.shape[0]
-        height, width = 192, 192
-        t_output = t_output.view(batch_size, 96, height, width) 
-
-        x = self.output_block(t_output)
+        
+        # x is the combined audio and face features
+        x = self.output_block(x)
 
         if input_dim_size > 4:
             x = torch.split(x, B, dim=0) # [(B, C, H, W)]
             outputs = torch.stack(x, dim=2) # (B, C, T, H, W)
 
         else:
-            outputs = t_output
+            outputs = x
             
         return outputs
