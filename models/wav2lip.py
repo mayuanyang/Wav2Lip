@@ -83,22 +83,17 @@ class Wav2Lip(nn.Module):
 
             nn.Sequential(Conv2dTranspose(256, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),), # 96,96
-
-            # add by eddy to support 192x192 input
+            
             nn.Sequential(
                 Conv2dTranspose(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
                 Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
                 
-            )
-            # end add by eddy
-            ]) 
+            )]) 
 
         self.output_block = nn.Sequential(Conv2d(96, 32, kernel_size=3, stride=1, padding=1),
             nn.Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
             nn.Sigmoid())
         
-        
-
     def forward(self, audio_sequences, face_sequences):
         # audio_sequences = (B, T, 1, 80, 16)
         B = audio_sequences.size(0)
@@ -142,14 +137,6 @@ class Wav2Lip(nn.Module):
         
         # x is the combined audio and face features
         x = self.output_block(x)
-
-        # The second u-net for clarity
-        # Pass it through the clearness U-Net
-        # for enc_layer in self.clearness_unet:
-        #     x = enc_layer(x)
-        
-        # for dec_layer in self.clearness_decoder:
-        #     x = dec_layer(x)
 
         if input_dim_size > 4:
             x = torch.split(x, B, dim=0) # [(B, C, H, W)]

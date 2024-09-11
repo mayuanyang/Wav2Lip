@@ -16,7 +16,7 @@ import torch.backends.cudnn as cudnn
 from torch.utils import data as data_utils
 import numpy as np
 import torchvision.models as models
-
+import lpips
 
 from glob import glob
 
@@ -48,14 +48,14 @@ parser.add_argument('--checkpoint_dir', help='Save checkpoints to this directory
 parser.add_argument('--syncnet_checkpoint_path', help='Load the pre-trained Expert discriminator', required=True, type=str)
 
 parser.add_argument('--checkpoint_path', help='Resume from this checkpoint', default=None, type=str)
-parser.add_argument('--use_cosine_loss', help='Whether to use cosine loss', default=True, type=str2bool)
+parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
 
 args = parser.parse_args()
 
 
 global_step = 0
 global_epoch = 0
-use_cosine_loss=True
+use_wandb=True
 use_cuda = torch.cuda.is_available()
 image_cache = multiprocessing.Manager().dict()
 orig_mel_cache = multiprocessing.Manager().dict()
@@ -379,7 +379,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear)):
             module.register_backward_hook(print_grad_norm)
 
-    
+    # Initialize LPIPS model
+    lpips_loss = lpips.LPIPS(net='vgg').to(device)  # You can choose 'alex', 'vgg', or 'squeeze'
+
     eval_loss = 0.0
 
     while global_epoch < nepochs:
@@ -401,6 +403,30 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               gt = gt.to(device)
 
               g = model(indiv_mels, x)
+
+              # Compare two images
+              '''
+              The g and gt shape is torch.Size([2, 3, 5, 192, 192]), and vgg is expecting [batch, channels, h, w]
+              the 5 here represent the number of frames, so we either need to loop through them or combine them
+              we choose to collapse
+              '''
+              num_of_frames = g.shape[2]
+              losses = []
+
+              for i in range(num_of_frames):
+                # Extract the i-th frame from gen_image and gt_image
+                gen_frame = g[:, :, i, :, :]  # Shape: [batch_size, 3, 192, 192]
+                gt_frame = gt[:, :, i, :, :]    # Shape: [batch_size, 3, 192, 192]
+
+                # Now you can process the individual frames, e.g., pass them through a model
+                # For example:
+                frame_loss = lpips_loss(gen_frame.to(device), gt_frame.to(device))
+                losses.append(frame_loss)
+                
+
+              # Average the loss over all frames
+              disc_loss = torch.mean(torch.stack(losses))
+              print('The total loss', disc_loss)
 
               # Get the second half of the images and calculate the loss
               lower_half1 = g[:, :, :, 96:, :]
@@ -424,9 +450,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               '''
 
               #l1l2_loss = 0.8 * l1loss + 0.2 * l2loss
-              loss = hparams.syncnet_wt * sync_loss + (1 - hparams.syncnet_wt) * l1loss
+              loss = hparams.syncnet_wt * sync_loss + (1 - hparams.syncnet_wt - hparams.disc_wt) * l1loss + hparams.disc_wt * disc_loss
               
-              l1loss.backward()
+              loss.backward()
               optimizer.step()
 
               if global_step % checkpoint_interval == 0:
@@ -471,8 +497,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   "train/lower_half_loss": lower_half_l1_loss.item(),
                   "train/learning_rate": current_lr
                   }
-            
-              wandb.log({**metrics})
+              if use_wandb: 
+                wandb.log({**metrics})
 
         global_epoch += 1
 
@@ -511,8 +537,8 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, sch
                        "val/sync_loss": averaged_sync_loss, 
                        "val/epoch": global_epoch,
                        }
-            
-              wandb.log({**metrics})
+              if use_wandb:
+                wandb.log({**metrics})
 
               scheduler.step(averaged_sync_loss + averaged_recon_loss)
 
@@ -564,13 +590,13 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
 
     if optimizer != None:
       for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.00002
+        param_group['lr'] = 0.00001
 
     return model
 
 if __name__ == "__main__":
     checkpoint_dir = args.checkpoint_dir
-    use_cosine_loss = args.use_cosine_loss
+    use_wandb = args.use_wandb
 
     # Dataset and Dataloader setup
     train_dataset = Dataset('train')
@@ -602,18 +628,19 @@ if __name__ == "__main__":
     if not os.path.exists(checkpoint_dir):
         os.mkdir(checkpoint_dir)
 
-    wandb.init(
-      # set the wandb project where this run will be logged
-      project="my-wav2lip",
+    if use_wandb:
+      wandb.init(
+        # set the wandb project where this run will be logged
+        project="my-wav2lip",
 
-      # track hyperparameters and run metadata
-      config={
-      "learning_rate": hparams.initial_learning_rate,
-      "architecture": "Wav2lip",
-      "dataset": "MyOwn",
-      "epochs": 200000,
-      }
-    )
+        # track hyperparameters and run metadata
+        config={
+        "learning_rate": hparams.initial_learning_rate,
+        "architecture": "Wav2lip",
+        "dataset": "MyOwn",
+        "epochs": 200000,
+        }
+      )
 
     # Train!
     train(device, model, train_data_loader, test_data_loader, optimizer,
