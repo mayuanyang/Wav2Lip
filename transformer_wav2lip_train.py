@@ -268,8 +268,8 @@ class Dataset(object):
                 y is the window that without the second half black out
                 '''
 
-                
-                window[:, :, window.shape[2]//2:] = 0.
+                margin = 10
+                window[:, :, window.shape[2]//2:, margin:-margin] = 0.
 
                 wrong_window = self.prepare_window(wrong_window)
 
@@ -390,6 +390,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         running_sync_loss, running_l1_loss, running_l2_loss = 0., 0., 0.
         prog_bar = tqdm(enumerate(train_data_loader))
         running_img_loss = 0.0
+        running_disc_loss = 0.0
         for step, (x, indiv_mels, mel, gt) in prog_bar:
             #print("The batch size", x.shape)
             if x.shape[0] == hparams.batch_size:
@@ -426,12 +427,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               # Average the loss over all frames
               disc_loss = torch.mean(torch.stack(losses))
-              print('The total loss', disc_loss)
-
-              # Get the second half of the images and calculate the loss
-              lower_half1 = g[:, :, :, 96:, :]
-              lower_half2 = gt[:, :, :, 96:, :]
-              lower_half_l1_loss = F.l1_loss(lower_half1, lower_half2)
+              running_disc_loss += disc_loss.item()
 
               if hparams.syncnet_wt > 0.:
                   sync_loss = get_sync_loss(mel, g)
@@ -476,6 +472,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               avg_l1_loss = running_l1_loss / (step + 1)
 
               avg_l2_loss = running_l2_loss / (step + 1)
+
+              avg_disc_loss = running_disc_loss / (step + 1)
               
               if global_step % hparams.eval_interval == 0:
                 with torch.no_grad():
@@ -485,16 +483,16 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   if avg_img_loss < .01: # change 
                           hparams.set_hparam('syncnet_wt', 0.01) # without image GAN a lesser weight is sufficient
 
-              prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, Lower Half Loss: {}, L1: {}, L2: {}, LR: {}'.format(global_step, avg_img_loss,
-                                                                      running_sync_loss / (step + 1), lower_half_l1_loss.item(), avg_l1_loss, avg_l2_loss, current_lr))
+              prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, L1: {}, L2: {}, Disc: {}, LR: {}'.format(global_step, avg_img_loss,
+                                                                      running_sync_loss / (step + 1), avg_l1_loss, avg_l2_loss, avg_disc_loss, current_lr))
               
               metrics = {
                   "train/overall_loss": avg_img_loss, 
                   "train/avg_l1": avg_l1_loss, 
                   "train/avg_l2": avg_l2_loss, 
                   "train/sync_loss": running_sync_loss / (step + 1), 
+                  "train/disc_loss": avg_disc_loss,
                   "train/step": global_step,
-                  "train/lower_half_loss": lower_half_l1_loss.item(),
                   "train/learning_rate": current_lr
                   }
               if use_wandb: 
