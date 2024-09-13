@@ -9,9 +9,9 @@ import torch
 import matplotlib.pyplot as plt
 from PIL import Image
 
-face_image_cache = {} #multiprocessing.Manager().dict()
-file_exist_cache = {} #multiprocessing.Manager().dict()
-orig_mel_cache = {} #multiprocessing.Manager().dict()
+face_image_cache =  multiprocessing.Manager().dict()
+file_exist_cache = multiprocessing.Manager().dict()
+orig_mel_cache = multiprocessing.Manager().dict()
 
 """
 The FPS is set to 25 for video, 5/25 is 0.2, we need to have 0.2 seconds for the audio,
