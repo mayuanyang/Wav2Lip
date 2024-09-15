@@ -182,21 +182,22 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               '''
               num_of_frames = g.shape[2]
               losses = []
+              disc_loss = 0
 
-              for i in range(num_of_frames):
-                # Extract the i-th frame from gen_image and gt_image
-                gen_frame = g[:, :, i, :, :]  # Shape: [batch_size, 3, 192, 192]
-                gt_frame = gt[:, :, i, :, :]    # Shape: [batch_size, 3, 192, 192]
+              if hparams.disc_wt > 0:
+                for i in range(num_of_frames):
+                  # Extract the i-th frame from gen_image and gt_image
+                  gen_frame = g[:, :, i, :, :]  # Shape: [batch_size, 3, 192, 192]
+                  gt_frame = gt[:, :, i, :, :]    # Shape: [batch_size, 3, 192, 192]
 
-                # Now you can process the individual frames, e.g., pass them through a model
-                # For example:
-                frame_loss = lpips_loss(gen_frame.to(device), gt_frame.to(device))
-                losses.append(frame_loss)
+                  # Now you can process the individual frames, e.g., pass them through a model
+                  # For example:
+                  frame_loss = lpips_loss(gen_frame.to(device), gt_frame.to(device))
+                  losses.append(frame_loss)
                 
-
-              # Average the loss over all frames
-              disc_loss = torch.mean(torch.stack(losses))
-              running_disc_loss += disc_loss.item()
+                # Average the loss over all frames
+                disc_loss = torch.mean(torch.stack(losses))
+                running_disc_loss += disc_loss.item()
 
               if hparams.syncnet_wt > 0.:
                   sync_loss = get_sync_loss(mel, g)
