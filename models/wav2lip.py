@@ -19,37 +19,42 @@ class Wav2Lip(nn.Module):
         '''
 
         self.face_encoder_blocks = nn.ModuleList([
-            nn.Sequential(Conv2d(6, 32, kernel_size=7, stride=1, padding=3), #1+(7−1)×1=7
-                          Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True), #9
-                          Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True), #11
+            nn.Sequential(Conv2d(6, 64, kernel_size=7, stride=1, padding=3), #1+(7−1)×1=7
+                          Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #9
+                          Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #11
+                          Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #13
                           ), # 192,192
 
-            nn.Sequential(Conv2d(32, 64, kernel_size=7, stride=2, padding=3), #11+(7−1)×2=23
-              Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #25
+            nn.Sequential(Conv2d(64, 64, kernel_size=7, stride=2, padding=3), #13+(7−1)×2=25
               Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #27
+              Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #29
+              Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #31
               ), # 96,96
 
-            nn.Sequential(Conv2d(64, 128, kernel_size=7, stride=2, padding=3), # 48,48, 27+(7−1)×2=39
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #41
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #43
+            nn.Sequential(Conv2d(64, 128, kernel_size=7, stride=2, padding=3), # 48,48, 31+(7−1)×2=43
+            Conv2d(128, 128, kernel_size=5, stride=1, padding=2, residual=True), #43+(5−1)×1=47
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #47+(5−1)×1=51
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #51+(5−1)×1=55
             ),
 
-            nn.Sequential(Conv2d(128, 128, kernel_size=7, stride=2, padding=3), # 24,24, 43+(7−1)×2=55
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #57
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #59
+            nn.Sequential(Conv2d(128, 128, kernel_size=7, stride=2, padding=3), # 24,24, 55+(7−1)×2=67
+            Conv2d(128, 128, kernel_size=5, stride=1, padding=2, residual=True), #67+(5−1)×1=71
+            Conv2d(128, 128, kernel_size=5, stride=1, padding=2, residual=True), #71+(5−1)×1=75
             ),
 
-            nn.Sequential(Conv2d(128, 256, kernel_size=7, stride=2, padding=3), # 12,12, 59+(7−1)×2=71
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #73
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True)), #75
+            nn.Sequential(Conv2d(128, 256, kernel_size=7, stride=2, padding=3), # 12,12, 75+(7−1)×2=87
+            Conv2d(256, 256, kernel_size=5, stride=1, padding=2, residual=True), #87+(5−1)×1=91
+            Conv2d(256, 256, kernel_size=5, stride=1, padding=2, residual=True), #91+(5−1)×1=95
+            ), 
 
-            nn.Sequential(Conv2d(256, 512, kernel_size=5, stride=2, padding=2), # 6,6, 75+(5−1)×2=83
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True)), #85
+            nn.Sequential(Conv2d(256, 512, kernel_size=5, stride=2, padding=2), # 6,6, 95+(5−1)×2=103
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), #105
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True)), #107
 
-            nn.Sequential(Conv2d(512, 512, kernel_size=5, stride=2, padding=2), # 3,3, 85+(5−1)×2=93
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),), #95
+            nn.Sequential(Conv2d(512, 512, kernel_size=5, stride=2, padding=2), # 3,3, 107+(5−1)×2=115
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),), #117
             
-            nn.Sequential(Conv2d(512, 512, kernel_size=3, stride=1, padding=0), # 1, 1, 95+(3−1)×1=97
+            nn.Sequential(Conv2d(512, 512, kernel_size=3, stride=1, padding=0), # 1, 1, 117+(3−1)×1=119
             Conv2d(512, 512, kernel_size=1, stride=1, padding=0)),])
 
         self.audio_encoder = nn.Sequential(
@@ -102,7 +107,7 @@ class Wav2Lip(nn.Module):
                 
             )]) 
 
-        self.output_block = nn.Sequential(Conv2d(96, 32, kernel_size=3, stride=1, padding=1),
+        self.output_block = nn.Sequential(Conv2d(128, 32, kernel_size=3, stride=1, padding=1),
             nn.Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
             nn.Sigmoid())
         
