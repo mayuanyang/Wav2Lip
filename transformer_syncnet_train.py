@@ -17,7 +17,7 @@ from glob import glob
 import os, random, cv2, argparse
 from hparams import hparams, get_image_list
 from models.conv import Conv2d, Conv2dTranspose
-from syncnet_dataset import Dataset
+from syncnet_dataset import Dataset, samples
 
 # import module 
 import traceback
