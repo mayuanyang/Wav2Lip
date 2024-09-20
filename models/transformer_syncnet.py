@@ -37,19 +37,20 @@ class TransformerSyncnet(nn.Module):
             Conv2d(256, 512, kernel_size=3, stride=1, padding=1), # 24x 12, 55+(3-1)x1=57
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 57+(3-1)x1=59
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 59+(3-1)x1=61
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 59+(3-1)x1=61
 
-            Conv2d(512, 256, kernel_size=5, stride=2, padding=2), #12x6, 61+(5-1)x2=69
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #12x6, 69+(3-1)x1=71
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #12x6, 71+(3-1)x1=73
+            Conv2d(512, 512, kernel_size=5, stride=2, padding=2), #12x6, 61+(5-1)x2=69
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), #12x6, 69+(3-1)x1=71
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), #12x6, 71+(3-1)x1=73
 
-            Conv2d(256, 128, kernel_size=3, stride=(2,1), padding=1), #6x6, 73+(3-1)x2=77
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), # 77+(3-1)x1=79
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), # 79+(3-1)x1=81
+            Conv2d(512, 256, kernel_size=3, stride=(2,1), padding=1), #6x6, 73+(3-1)x2=77
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 77+(3-1)x1=79
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 79+(3-1)x1=81
 
-            Conv2d(128, 64, kernel_size=3, stride=1, padding=1), #6x6, 81+(3-1)x1=83
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #6x6, 83+(3-1)x1=85
+            Conv2d(256, 128, kernel_size=3, stride=1, padding=1), #6x6, 81+(3-1)x1=83
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #6x6, 83+(3-1)x1=85
 
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1), #6x6, 85+(3-1)x1=87
+            Conv2d(128, 64, kernel_size=3, stride=1, padding=1), #6x6, 85+(3-1)x1=87
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #3x3, 87+(3-1)x1=89
 
             Conv2d(64, 64, kernel_size=3, stride=2, padding=1), # 89+(3-1)x2=93
