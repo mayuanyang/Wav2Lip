@@ -39,8 +39,8 @@ parser = argparse.ArgumentParser(description='Code to train the expert lip-sync 
 parser.add_argument("--data_root", help="Root folder of the preprocessed LRS2 dataset", required=True)
 
 parser.add_argument('--checkpoint_dir', help='Save checkpoints to this directory', required=True, type=str)
-parser.add_argument('--checkpoint_path', help='Resumed from this checkpoint', default='filelists', type=str)
-parser.add_argument('--train_root', help='Resumed from this checkpoint', default=None, type=str)
+parser.add_argument('--checkpoint_path', help='Resumed from this checkpoint', default=None, type=str)
+parser.add_argument('--train_root', help='The train.txt and val.txt directory', default='filelists', type=str)
 parser.add_argument('--use_cosine_loss', help='Whether to use cosine loss', default=True, type=str2bool)
 parser.add_argument('--sample_mode', help='easy or random', default=True, type=str)
 parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
@@ -349,7 +349,21 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
 
     print("Load checkpoint from: {}".format(path))
     checkpoint = _load(path)
-    model.load_state_dict(checkpoint["state_dict"])
+    
+    model_dict = model.state_dict()
+
+    # Filter out the layers with mismatched dimensions
+    pretrained_dict = {}
+    for k, v in checkpoint["state_dict"].items():
+        if k in model_dict and v.size() == model_dict[k].size():
+            pretrained_dict[k] = v
+
+    #print('The pretrained', pretrained_dict)
+    # Update the current model with the pre-trained weights
+    model_dict.update(pretrained_dict)
+
+    model.load_state_dict(model_dict)
+
     if not reset_optimizer:
         optimizer_state = checkpoint["optimizer"]
         if optimizer_state is not None:
@@ -387,8 +401,8 @@ if __name__ == "__main__":
     if not os.path.exists(checkpoint_dir): os.mkdir(checkpoint_dir)
 
     # Dataset and Dataloader setup
-    train_dataset = Dataset('train', args.data_root)
-    test_dataset = Dataset('val', args.data_root)
+    train_dataset = Dataset('train', args.data_root, args.train_root)
+    test_dataset = Dataset('val', args.data_root, args.train_root)
     #print(train_dataset.all_videos)
 
     train_data_loader = data_utils.DataLoader(
