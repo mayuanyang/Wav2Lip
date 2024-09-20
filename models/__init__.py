@@ -5,3 +5,4 @@ from .res_syncnet import ResSyncNet_color
 #from .efficient_syncnet import EfficientSyncNet_color
 from .transformer_syncnet import TransformerSyncnet
 from .transformer_wav2lip import TransformerWav2Lip
+from .lora_wav2lip import LoRAConv2d
