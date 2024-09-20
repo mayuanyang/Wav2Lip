@@ -39,7 +39,8 @@ parser = argparse.ArgumentParser(description='Code to train the expert lip-sync 
 parser.add_argument("--data_root", help="Root folder of the preprocessed LRS2 dataset", required=True)
 
 parser.add_argument('--checkpoint_dir', help='Save checkpoints to this directory', required=True, type=str)
-parser.add_argument('--checkpoint_path', help='Resumed from this checkpoint', default=None, type=str)
+parser.add_argument('--checkpoint_path', help='Resumed from this checkpoint', default='filelists', type=str)
+parser.add_argument('--train_root', help='Resumed from this checkpoint', default=None, type=str)
 parser.add_argument('--use_cosine_loss', help='Whether to use cosine loss', default=True, type=str2bool)
 parser.add_argument('--sample_mode', help='easy or random', default=True, type=str)
 parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
@@ -168,7 +169,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         
         avg_ce_loss = 0.
         avg_cos_loss = 0.
-        avg_mse_loss = 0.
+        
         prog_bar = tqdm(enumerate(train_data_loader))
         current_lr = get_current_lr(optimizer)
         for step, (x, mel, y) in prog_bar:
@@ -205,9 +206,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             normalized_ce_loss = (ce_loss.item() - ce_min) / (ce_max - ce_min + 1e-8)
             normalized_cos_loss = (cos_loss.item() - cos_min) / (cos_max - cos_min + 1e-8)
 
-            print('ce min {0}, ce max {1}, cos min {2}, cos max {3}, norm ce {4}, norm cos{5}'.format(ce_min, ce_max, cos_min, cos_max, normalized_ce_loss, normalized_cos_loss))
-
-            mse_loss = nn.functional.mse_loss(output, nn.functional.one_hot(y, num_classes=2).float())
+            #print('ce min {0}, ce max {1}, cos min {2}, cos max {3}, norm ce {4}, norm cos{5}'.format(ce_min, ce_max, cos_min, cos_max, normalized_ce_loss, normalized_cos_loss))
 
             if normalized_ce_loss < normalized_cos_loss:
                 back_loss = ce_loss
@@ -222,7 +221,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             global_step += 1
             avg_ce_loss += ce_loss.item()
             avg_cos_loss += cos_loss.item()
-            avg_mse_loss += mse_loss.item()
 
 
             if global_step == 1 or global_step % checkpoint_interval == 0:
@@ -235,11 +233,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 
             current_training_loss = avg_ce_loss / (step + 1)
             current_cos_loss = avg_cos_loss / (step + 1)
-            avg_mse_loss = avg_mse_loss / (step + 1)
-            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}, Cos Loss: {3}, MSE Loss: {4}, LR: {5}'.format(global_step, global_epoch, current_training_loss, current_cos_loss, avg_mse_loss, current_lr))
+            
+            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}, Cos Loss: {3}, LR: {4}'.format(global_step, global_epoch, current_training_loss, current_cos_loss, current_lr))
             metrics = {"train/ce_loss": current_training_loss, 
                        "train/cos_loss": current_cos_loss, 
-                       "train/mse_loss": avg_mse_loss, 
                        "train/step": global_step, 
                        "train/epoch": global_epoch,
                        "train/learning_rate": current_lr}

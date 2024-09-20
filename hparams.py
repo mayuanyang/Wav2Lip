@@ -1,10 +1,10 @@
 from glob import glob
 import os
 
-def get_image_list(data_root, split):
+def get_image_list(data_root, split, train_root='filelists'):
 	filelist = []
 
-	with open('filelists/{}.txt'.format(split)) as f:
+	with open('{train_root}/{}.txt'.format(split)) as f:
 		for line in f:
 			line = line.strip()
 			if ' ' in line: line = line.split()[0]

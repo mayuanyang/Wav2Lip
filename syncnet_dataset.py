@@ -23,9 +23,9 @@ samples = [True, True,True, True,True, False,False, False, False, False]
 
 class Dataset(object):
     
-    def __init__(self, split, data_root):
+    def __init__(self, split, data_root, train_root):
         print('-----')
-        self.all_videos = get_image_list(data_root, split)  
+        self.all_videos = get_image_list(data_root, split, train_root)  
         
 
     def get_frame_id(self, frame):
