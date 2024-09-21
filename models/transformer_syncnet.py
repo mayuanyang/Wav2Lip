@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from .conv import Conv2d
+from .conv import Conv2d, SpatialAttention
 
 class TransformerSyncnet(nn.Module):
     def __init__(self, num_heads, num_encoder_layers):
@@ -33,6 +33,8 @@ class TransformerSyncnet(nn.Module):
             Conv2d(256, 256, kernel_size=5, stride=2, padding=2), # 24x 12, 43+(5-1)x2=51
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 51+(3-1)x1=53
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 53+(3-1)x1=55
+            SpatialAttention(kernel_size=3),
+            
 
             Conv2d(256, 512, kernel_size=3, stride=1, padding=1), # 24x 12, 55+(3-1)x1=57
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 57+(3-1)x1=59
