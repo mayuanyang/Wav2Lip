@@ -52,7 +52,7 @@ class TransformerSyncnet(nn.Module):
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1), #6x6, 85+(3-1)x1=87
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #3x3, 87+(3-1)x1=89
 
-            Conv2d(64, 64, kernel_size=3, stride=2, padding=1), # 89+(3-1)x2=93
+            Conv2d(64, 64, kernel_size=3, stride=2, padding=1), # 89+(3-1)x2=93, the 27th
             
             )
 
