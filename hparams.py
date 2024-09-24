@@ -94,8 +94,8 @@ hparams = HParams(
 	disc_wt=0.05,
 	disc_initial_learning_rate=1e-4,
 	
-  image_cache_size=240000,
-	audio_cache_size=16500
+  image_cache_size=250000,
+	audio_cache_size=20500
 )
 
 
