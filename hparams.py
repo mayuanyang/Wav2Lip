@@ -88,14 +88,14 @@ hparams = HParams(
 	#syncnet_wt=0.03, # is initially set by eddy, will be set automatically to 0.01 later.  
 	syncnet_batch_size=170,
 	syncnet_lr=5e-5,
-	syncnet_eval_interval=100000,
+	syncnet_eval_interval=1000,
 	syncnet_checkpoint_interval=1000,
 
 	disc_wt=0.05,
 	disc_initial_learning_rate=1e-4,
 	
   image_cache_size=250000,
-	audio_cache_size=20500
+	audio_cache_size=22500
 )
 
 
