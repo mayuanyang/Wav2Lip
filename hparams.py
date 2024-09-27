@@ -87,7 +87,8 @@ hparams = HParams(
   syncnet_wt=0.01, # is initially zero, will be set automatically to 0.03 later. Leads to faster convergence. 
 	#syncnet_wt=0.03, # is initially set by eddy, will be set automatically to 0.01 later.  
 	syncnet_batch_size=170,
-	syncnet_lr=5e-5,
+	syncnet_face_lr=2e-5,
+	syncnet_audio_lr=5e-5,
 	syncnet_eval_interval=1000,
 	syncnet_checkpoint_interval=1000,
 

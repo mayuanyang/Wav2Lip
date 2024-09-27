@@ -96,8 +96,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
     
     global global_step, global_epoch, consecutive_threshold_count, current_training_loss
-    resumed_step = global_step
-    print('start training data folder', train_data_loader)
+    
     patience = 50
 
     # Added by eddy
@@ -107,23 +106,16 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
       for name, module in model.named_modules():
         if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear, nn.TransformerEncoderLayer)):
             module.register_backward_hook(print_grad_norm)
-    
-    # end
-    
-    ce_min = 1000.
-    ce_max = 0.
-    cos_min = 1000.
-    cos_max = 0.
+  
     
     while global_epoch < nepochs:
         # for param_group in optimizer.param_groups:
         #   print("The learning rates are: ", param_group['lr'])
         
         avg_ce_loss = 0.
-        avg_cos_loss = 0.
         
         prog_bar = tqdm(enumerate(train_data_loader))
-        current_lr = get_current_lr(optimizer)
+        print_current_lr(optimizer)
         for step, (x, mel, y) in prog_bar:
             
             model.train()
@@ -158,11 +150,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             current_training_loss = avg_ce_loss / (step + 1)
             
             
-            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}, LR: {3}'.format(global_step, global_epoch, current_training_loss, current_lr))
+            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}'.format(global_step, global_epoch, current_training_loss))
             metrics = {"train/ce_loss": current_training_loss, 
                        "train/step": global_step, 
-                       "train/epoch": global_epoch,
-                       "train/learning_rate": current_lr}
+                       "train/epoch": global_epoch}
             
             if use_wandb:
               wandb.log({**metrics})
@@ -193,10 +184,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         
 
 # Added by eddy
-def get_current_lr(optimizer):
+def print_current_lr(optimizer):
     # Assuming there is only one parameter group
     for param_group in optimizer.param_groups:
-        return param_group['lr']
+        print("LR", param_group['lr'])
 
 
 def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler):
@@ -314,7 +305,8 @@ if __name__ == "__main__":
 
         # track hyperparameters and run metadata
         config={
-        "learning_rate": hparams.syncnet_lr,
+        "face_learning_rate": hparams.syncnet_face_lr,
+        "audio_learning_rate": hparams.syncnet_audio_lr,
         "architecture": "TransformerSyncnet",
         "dataset": "MyOwn",
         "epochs": 200000,
@@ -342,13 +334,10 @@ if __name__ == "__main__":
     model = TransformerSyncnet(num_heads=8, num_encoder_layers=4).to(device)
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
-    optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
-                           lr=hparams.syncnet_lr,betas=(0.8, 0.999), weight_decay=1e-5)
     
     optimizer = optim.Adam([
-        {'params': model.face_encoder[:27].parameters(), 'lr': hparams.syncnet_lr},
-        {'params': model.audio_encoder[:22].parameters(), 'lr': hparams.syncnet_lr}   
-        #{'params': model.face_encoder[13:].parameters()}               # Layers 12 onwards with default learning rate
+        {'params': model.face_encoder[:27].parameters(), 'lr': hparams.syncnet_face_lr},
+        {'params': model.audio_encoder[:22].parameters(), 'lr': hparams.syncnet_audio_lr},
     ], lr=5e-5,betas=(0.8, 0.999), weight_decay=1e-5)  # Default learning rate for other layers
 
     if checkpoint_path is not None:
