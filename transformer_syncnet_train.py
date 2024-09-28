@@ -97,7 +97,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     
     global global_step, global_epoch, consecutive_threshold_count, current_training_loss
     
-    patience = 50
+    patience = 1000
 
     # Added by eddy
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=patience, verbose=True)
@@ -148,7 +148,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                     eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler)
                 
             current_training_loss = avg_ce_loss / (step + 1)
-            
+
+            scheduler.step(current_training_loss)
             
             prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}'.format(global_step, global_epoch, current_training_loss))
             metrics = {"train/ce_loss": current_training_loss, 
