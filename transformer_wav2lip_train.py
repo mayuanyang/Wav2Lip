@@ -135,13 +135,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     global global_step, global_epoch
     resumed_step = global_step
 
-    patience = 50
+    patience = 2000
 
     current_lr = get_current_lr(optimizer)
     print('The learning rate is: {0}'.format(current_lr))
 
     # Added by eddy
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=patience, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=patience, verbose=True)
 
     if should_print_grad_norm:
       for name, module in model.named_modules():
@@ -255,6 +255,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, L1: {}, L2: {}, Disc: {}, LR: {}'.format(global_step, avg_img_loss,
                                                                       running_sync_loss / (step + 1), avg_l1_loss, avg_l2_loss, avg_disc_loss, current_lr))
+              
+              scheduler.step(avg_l1_loss)
               
               metrics = {
                   "train/overall_loss": avg_img_loss, 
