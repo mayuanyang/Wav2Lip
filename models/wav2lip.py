@@ -79,25 +79,31 @@ class Wav2Lip(nn.Module):
             Conv2d(768, 768, kernel_size=3, stride=1, padding=1, residual=True),),
 
             nn.Sequential(Conv2dTranspose(1280, 640, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(640, 640, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(640, 640, kernel_size=3, stride=1, padding=1, residual=True),), # 6, 6
 
             nn.Sequential(Conv2dTranspose(1152, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),), # 12, 12
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            ), # 12, 12
 
             nn.Sequential(Conv2dTranspose(768, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),), # 24, 24
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            ), # 24, 24
 
             nn.Sequential(Conv2dTranspose(384, 128, kernel_size=3, stride=2, padding=1, output_padding=1), 
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),), # 48, 48
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            ), # 48, 48
 
             nn.Sequential(Conv2dTranspose(256, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),), # 96,96
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            ), # 96,96
             
             nn.Sequential(
                 Conv2dTranspose(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
+                Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
                 Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
                 
             )]) 
