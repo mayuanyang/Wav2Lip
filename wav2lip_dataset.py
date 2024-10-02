@@ -21,8 +21,8 @@ cross_entropy_loss = nn.CrossEntropyLoss()
 recon_loss = nn.L1Loss()
 
 class Dataset(object):
-    def __init__(self, split, data_root):
-        self.all_videos = get_image_list(data_root, split)
+    def __init__(self, split, data_root, train_root):
+        self.all_videos = get_image_list(data_root, split, train_root)
 
     def get_frame_id(self, frame):
         return int(basename(frame).split('.')[0])
@@ -166,8 +166,9 @@ class Dataset(object):
             img_names = list(glob(join(vidname, '*.jpg')))
             
             if len(img_names) <= 3 * syncnet_T:
-                print('The length', len(img_names))
+                print('The length', len(img_names), vidname)
                 should_load_diff_video = True
+                continue
             
 
             img_name = random.choice(img_names)
