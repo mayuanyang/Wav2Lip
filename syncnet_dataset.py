@@ -9,9 +9,9 @@ import torch
 import matplotlib.pyplot as plt
 from PIL import Image
 
-face_image_cache =  multiprocessing.Manager().dict()
-file_exist_cache = multiprocessing.Manager().dict()
-orig_mel_cache = multiprocessing.Manager().dict()
+face_image_cache = {} # multiprocessing.Manager().dict()
+file_exist_cache = {} # multiprocessing.Manager().dict()
+orig_mel_cache = {} #multiprocessing.Manager().dict()
 
 """
 The FPS is set to 25 for video, 5/25 is 0.2, we need to have 0.2 seconds for the audio,
@@ -23,9 +23,10 @@ samples = [True, True,True, True,True, False,False, False, False, False]
 
 class Dataset(object):
     
-    def __init__(self, split, data_root, train_root):
+    def __init__(self, split, data_root, train_root, use_augmentation):
         print('-----')
         self.all_videos = get_image_list(data_root, split, train_root)
+        self.use_augmentation = use_augmentation
         
 
     def get_frame_id(self, frame):
@@ -157,41 +158,42 @@ class Dataset(object):
                             all_read = False
                             break
                     
-                    '''
-                    Data augmentation
-                    0 means unchange
-                    1 for grayscale
-                    2 for brightness
-                    3 for contrast
-                    '''
-                    option = random.choices([0, 1, 2, 3, 4])[0] 
-                    
-                    if option == 1:
-                        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                        img = cv2.merge([img_gray, img_gray, img_gray])
-                        
-                    elif option == 2:
-                        brightness_factor = np.random.uniform(0.7, 1.3)
-                        img = cv2.convertScaleAbs(img, alpha=brightness_factor, beta=0)
-                        
-                    elif option == 3:
-                        contrast_factor = np.random.uniform(0.7, 1.3)
-                        img = cv2.convertScaleAbs(img, alpha=contrast_factor, beta=0)
-                    elif option == 4:
-                        angle = np.random.uniform(1, 15)
-                        angle = np.random.uniform(-angle, angle)
+                    if self.use_augmentation:
+                      '''
+                      Data augmentation
+                      0 means unchange
+                      1 for grayscale
+                      2 for brightness
+                      3 for contrast
+                      '''
+                      option = random.choices([0, 1, 2, 3, 4])[0] 
+                      
+                      if option == 1:
+                          img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                          img = cv2.merge([img_gray, img_gray, img_gray])
+                          
+                      elif option == 2:
+                          brightness_factor = np.random.uniform(0.7, 1.3)
+                          img = cv2.convertScaleAbs(img, alpha=brightness_factor, beta=0)
+                          
+                      elif option == 3:
+                          contrast_factor = np.random.uniform(0.7, 1.3)
+                          img = cv2.convertScaleAbs(img, alpha=contrast_factor, beta=0)
+                      elif option == 4:
+                          angle = np.random.uniform(1, 15)
+                          angle = np.random.uniform(-angle, angle)
 
-                        # Get the image dimensions
-                        (h, w) = img.shape[:2]
+                          # Get the image dimensions
+                          (h, w) = img.shape[:2]
 
-                        # Calculate the center of the image
-                        center = (w // 2, h // 2)
+                          # Calculate the center of the image
+                          center = (w // 2, h // 2)
 
-                        # Get the rotation matrix
-                        rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+                          # Get the rotation matrix
+                          rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
 
-                        # Perform the rotation
-                        img = cv2.warpAffine(img, rotation_matrix, (w, h))
+                          # Perform the rotation
+                          img = cv2.warpAffine(img, rotation_matrix, (w, h))
 
                     face_window.append(img)
 

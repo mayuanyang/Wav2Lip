@@ -44,6 +44,7 @@ parser.add_argument('--train_root', help='The train.txt and val.txt directory', 
 parser.add_argument('--use_cosine_loss', help='Whether to use cosine loss', default=True, type=str2bool)
 parser.add_argument('--sample_mode', help='easy or random', default=True, type=str)
 parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
+parser.add_argument('--use_augmentation', help='Whether to use data augmentation', default=True, type=str2bool)
 
 args = parser.parse_args()
 
@@ -56,6 +57,7 @@ use_cuda = torch.cuda.is_available()
 use_cosine_loss=True
 sample_mode='random'
 use_wandb=True
+use_augmentation= True
 
 
 current_training_loss = 0.6
@@ -298,6 +300,7 @@ if __name__ == "__main__":
     checkpoint_path = args.checkpoint_path
     sample_mode = args.sample_mode
     use_wandb = args.use_wandb
+    use_augmentation = args.use_augmentation
 
     if use_wandb: 
       wandb.init(
@@ -317,8 +320,8 @@ if __name__ == "__main__":
     if not os.path.exists(checkpoint_dir): os.mkdir(checkpoint_dir)
 
     # Dataset and Dataloader setup
-    train_dataset = Dataset('train', args.data_root, args.train_root)
-    test_dataset = Dataset('val', args.data_root, args.train_root)
+    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation)
+    test_dataset = Dataset('val', args.data_root, args.train_root, False)
     #print(train_dataset.all_videos)
 
     train_data_loader = data_utils.DataLoader(
