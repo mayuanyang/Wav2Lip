@@ -179,9 +179,15 @@ class Dataset(object):
             while wrong_img_name == img_name:
                 wrong_img_name = random.choice(img_names)
 
+            ref_img_name = random.choice(img_names)
+            while ref_img_name == img_name or ref_img_name == wrong_img_name:
+                ref_img_name = random.choice(img_names)
+
             window_fnames = self.get_window(img_name)
             wrong_window_fnames = self.get_window(wrong_img_name)
-            if window_fnames is None or wrong_window_fnames is None:
+            ref_window_fnames = self.get_window(ref_img_name)
+
+            if window_fnames is None or wrong_window_fnames is None or ref_window_fnames is None:
                 should_load_diff_video = True
                 continue
 
@@ -192,6 +198,11 @@ class Dataset(object):
 
             wrong_window = self.read_window(wrong_window_fnames)
             if wrong_window is None:
+                should_load_diff_video = True
+                continue
+            
+            ref_window = self.read_window(ref_window_fnames)
+            if ref_window is None:
                 should_load_diff_video = True
                 continue
 
@@ -222,7 +233,8 @@ class Dataset(object):
                 '''
                 Set the second half of the images to be black, the window has 5 images
                 The wrong_window contains images that do not align with the audio
-                x contains 10 images, the first 5 are the correct iamges with second half black out, the last 5 are the incorrect images to the audio
+                x contains 5 images and 6 channels each, the 5 images from window with second half black out, the images from wrong window are merged via channels
+                so the final x still got 5 images and with the merged window and wrong_window
                 indiv_mels contains the corresponding audio for the given window
                 y is the window that without the second half black out
                 '''
@@ -231,7 +243,10 @@ class Dataset(object):
 
                 wrong_window = self.prepare_window(wrong_window)
 
-                x = np.concatenate([window, wrong_window], axis=0)
+                ref_window = self.prepare_window(ref_window)
+
+                x = np.concatenate([window, wrong_window, ref_window], axis=0) # Concat via the channel axis
+                
 
                 x = torch.FloatTensor(x)
                 mel = torch.FloatTensor(mel.T).unsqueeze(0)

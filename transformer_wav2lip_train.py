@@ -70,7 +70,7 @@ def save_sample_images(x, g, gt, global_step, checkpoint_dir):
     g = (g.detach().cpu().numpy().transpose(0, 2, 3, 4, 1) * 255.).astype(np.uint8)
     gt = (gt.detach().cpu().numpy().transpose(0, 2, 3, 4, 1) * 255.).astype(np.uint8)
 
-    refs, inps = x[..., 3:], x[..., :3]
+    refs, inps = x[..., 6:], x[..., :3]
     folder = join(checkpoint_dir, "samples_step{:09d}".format(global_step))
     if not os.path.exists(folder): os.mkdir(folder)
     collage = np.concatenate((refs, inps, g, gt), axis=-2)
