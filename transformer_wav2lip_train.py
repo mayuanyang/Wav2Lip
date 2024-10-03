@@ -45,6 +45,7 @@ parser.add_argument('--syncnet_checkpoint_path', help='Load the pre-trained Expe
 
 parser.add_argument('--checkpoint_path', help='Resume from this checkpoint', default=None, type=str)
 parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
+parser.add_argument('--use_augmentation', help='Whether to use data augmentation', default=True, type=str2bool)
 parser.add_argument('--train_root', help='The train.txt and val.txt directory', default='filelists', type=str)
 args = parser.parse_args()
 
@@ -52,6 +53,7 @@ args = parser.parse_args()
 global_step = 0
 global_epoch = 0
 use_wandb=True
+use_augmentation= True
 use_cuda = torch.cuda.is_available()
 
 
@@ -369,10 +371,11 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
 if __name__ == "__main__":
     checkpoint_dir = args.checkpoint_dir
     use_wandb = args.use_wandb
+    use_augmentation = args.use_augmentation
 
     # Dataset and Dataloader setup
-    train_dataset = Dataset('train', args.data_root, args.train_root)
-    test_dataset = Dataset('val', args.data_root, args.train_root)
+    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation)
+    test_dataset = Dataset('val', args.data_root, args.train_root, False)
 
     train_data_loader = data_utils.DataLoader(
         train_dataset, batch_size=hparams.batch_size, shuffle=True,

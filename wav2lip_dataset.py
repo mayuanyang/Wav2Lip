@@ -9,9 +9,10 @@ import torch
 import matplotlib.pyplot as plt
 from PIL import Image
 from torch import nn
+import traceback
 
-image_cache = multiprocessing.Manager().dict()
-orig_mel_cache = multiprocessing.Manager().dict()
+image_cache = {} # multiprocessing.Manager().dict()
+orig_mel_cache = {} #multiprocessing.Manager().dict()
 
 syncnet_T = 5
 syncnet_mel_step_size = 16
@@ -21,8 +22,9 @@ cross_entropy_loss = nn.CrossEntropyLoss()
 recon_loss = nn.L1Loss()
 
 class Dataset(object):
-    def __init__(self, split, data_root, train_root):
+    def __init__(self, split, data_root, train_root, use_augmentation):
         self.all_videos = get_image_list(data_root, split, train_root)
+        self.use_augmentation = use_augmentation
 
     def get_frame_id(self, frame):
         return int(basename(frame).split('.')[0])
@@ -67,31 +69,32 @@ class Dataset(object):
                     2 for brightness
                     3 for contrast
                     '''
-                    option = random.choices([0, 1, 2, 3, 4])[0] 
-                    
-                    if option == 1:
-                        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                        img = cv2.merge([img_gray, img_gray, img_gray])
-                    elif option == 2:
-                        brightness_factor = np.random.uniform(0.7, 1.3)
-                        img = cv2.convertScaleAbs(img, alpha=brightness_factor, beta=0)
-                    elif option == 3:
-                        contrast_factor = np.random.uniform(0.7, 1.3)
-                        img = cv2.convertScaleAbs(img, alpha=contrast_factor, beta=0)
-                    elif option == 4:
-                        angle = np.random.uniform(-15, 15)  # Random angle between -15 and 15 degrees
+                    if self.use_augmentation:
+                      option = random.choices([0, 1, 2, 3, 4])[0] 
+                      
+                      if option == 1:
+                          img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                          img = cv2.merge([img_gray, img_gray, img_gray])
+                      elif option == 2:
+                          brightness_factor = np.random.uniform(0.7, 1.3)
+                          img = cv2.convertScaleAbs(img, alpha=brightness_factor, beta=0)
+                      elif option == 3:
+                          contrast_factor = np.random.uniform(0.7, 1.3)
+                          img = cv2.convertScaleAbs(img, alpha=contrast_factor, beta=0)
+                      elif option == 4:
+                          angle = np.random.uniform(-15, 15)  # Random angle between -15 and 15 degrees
 
-                        # Get the image dimensions
-                        (h, w) = img.shape[:2]
+                          # Get the image dimensions
+                          (h, w) = img.shape[:2]
 
-                        # Calculate the center of the image
-                        center = (w // 2, h // 2)
+                          # Calculate the center of the image
+                          center = (w // 2, h // 2)
 
-                        # Get the rotation matrix
-                        rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+                          # Get the rotation matrix
+                          rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
 
-                        # Perform the rotation
-                        img = cv2.warpAffine(img, rotation_matrix, (w, h))
+                          # Perform the rotation
+                          img = cv2.warpAffine(img, rotation_matrix, (w, h))
 
                 window.append(img)
 
@@ -240,6 +243,6 @@ class Dataset(object):
                 return x, indiv_mels, mel, y
 
             except Exception as e:
-                print('An error has occured', vidname, img_name, wrong_img_name)
-                print(e)
+                #print('An error has occured', vidname, img_name, wrong_img_name)
+                traceback.print_exc()   
                 continue
