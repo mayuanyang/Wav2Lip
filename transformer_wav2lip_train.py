@@ -165,10 +165,11 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         running_img_loss = 0.0
         running_disc_loss = 0.0
         for step, (x, indiv_mels, mel, gt) in prog_bar:
-            #print("The batch size", x.shape)
+            #print("The x shape", x.shape)
             if x.shape[0] == hparams.batch_size:
               model.train()
               optimizer.zero_grad()
+              
 
               # Move data to CUDA device
               x = x.to(device)
@@ -177,6 +178,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               gt = gt.to(device)
 
               g = model(indiv_mels, x)
+
+              #print("The g shape", g.shape)
 
               # Compare two images
               '''
@@ -396,13 +399,14 @@ if __name__ == "__main__":
                            lr=hparams.initial_learning_rate)
 
     if args.checkpoint_path is not None:
-        load_checkpoint(args.checkpoint_path, model, optimizer, reset_optimizer=False)
+        load_checkpoint(args.checkpoint_path, model, optimizer, reset_optimizer=True)
         
     load_checkpoint(args.syncnet_checkpoint_path, syncnet, None, reset_optimizer=True, overwrite_global_states=False)
 
     if not os.path.exists(checkpoint_dir):
         os.mkdir(checkpoint_dir)
 
+    
     if use_wandb:
       wandb.init(
         # set the wandb project where this run will be logged
