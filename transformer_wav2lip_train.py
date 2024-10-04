@@ -367,7 +367,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
 
     if optimizer != None:
       for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.00001
+        param_group['lr'] = 0.0001
 
     return model
 
