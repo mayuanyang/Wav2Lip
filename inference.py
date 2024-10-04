@@ -138,6 +138,7 @@ def datagen(frames, mels):
 
 			img_batch = np.concatenate((img_masked, img_batch), axis=3) / 255.
 			mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
+      
 
 			yield img_batch, mel_batch, frame_batch, coords_batch
 			img_batch, mel_batch, frame_batch, coords_batch = [], [], [], []
@@ -147,8 +148,9 @@ def datagen(frames, mels):
 
 		img_masked = img_batch.copy()
 		img_masked[:, args.img_size//2:] = 0
+		img_ref = img_batch.copy()
 
-		img_batch = np.concatenate((img_masked, img_batch), axis=3) / 255.
+		img_batch = np.concatenate((img_masked, img_batch, img_ref), axis=3) / 255.
 		mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
 
 		yield img_batch, mel_batch, frame_batch, coords_batch
@@ -241,10 +243,11 @@ def main():
 
 	print("Length of mel chunks: {}".format(len(mel_chunks)))
 
-	full_frames = full_frames[:len(mel_chunks)]
+	input_frames = full_frames[:len(mel_chunks)]
+	
 
 	batch_size = args.wav2lip_batch_size
-	gen = datagen(full_frames.copy(), mel_chunks)
+	gen = datagen(input_frames.copy(), mel_chunks)
 
 	for i, (img_batch, mel_batch, frames, coords) in enumerate(tqdm(gen, 
 											total=int(np.ceil(float(len(mel_chunks))/batch_size)))):
@@ -252,11 +255,12 @@ def main():
 			model = load_model(args.checkpoint_path)
 			print ("Model loaded")
 
-			frame_h, frame_w = full_frames[0].shape[:-1]
+			frame_h, frame_w = input_frames[0].shape[:-1]
 			out = cv2.VideoWriter('temp/result.avi', 
 									cv2.VideoWriter_fourcc(*'DIVX'), fps, (frame_w, frame_h))
 
 		img_batch = torch.FloatTensor(np.transpose(img_batch, (0, 3, 1, 2))).to(device)
+		
 		mel_batch = torch.FloatTensor(np.transpose(mel_batch, (0, 3, 1, 2))).to(device)
 
 		with torch.no_grad():
