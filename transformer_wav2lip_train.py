@@ -45,13 +45,15 @@ parser.add_argument('--syncnet_checkpoint_path', help='Load the pre-trained Expe
 
 parser.add_argument('--checkpoint_path', help='Resume from this checkpoint', default=None, type=str)
 parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
-
+parser.add_argument('--use_augmentation', help='Whether to use data augmentation', default=True, type=str2bool)
+parser.add_argument('--train_root', help='The train.txt and val.txt directory', default='filelists', type=str)
 args = parser.parse_args()
 
 
 global_step = 0
 global_epoch = 0
 use_wandb=True
+use_augmentation= True
 use_cuda = torch.cuda.is_available()
 
 
@@ -97,7 +99,7 @@ def contrastive_loss(a, v, y, margin=0.5):
     return loss
 
 device = torch.device("cuda" if use_cuda else "cpu")
-syncnet = SyncNet(num_heads=8, num_encoder_layers=6).to(device)
+syncnet = SyncNet(num_heads=8, num_encoder_layers=4).to(device)
 for p in syncnet.parameters():
     p.requires_grad = False
 
@@ -115,8 +117,6 @@ def get_sync_loss(mel, g):
     
     return cross_entropy_loss(output, y)
 
-def perceptual_loss(gen_features, gt_features):
-    return nn.functional.mse_loss(gen_features, gt_features)
 
 def print_grad_norm(module, grad_input, grad_output):
     for i, grad in enumerate(grad_output):
@@ -135,13 +135,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     global global_step, global_epoch
     resumed_step = global_step
 
-    patience = 50
+    patience = 2000
 
     current_lr = get_current_lr(optimizer)
     print('The learning rate is: {0}'.format(current_lr))
 
     # Added by eddy
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=patience, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=patience, verbose=True)
 
     if should_print_grad_norm:
       for name, module in model.named_modules():
@@ -153,8 +153,12 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
     eval_loss = 0.0
 
+    syncnet_wt = hparams.syncnet_wt
+    sync_loss = 0.
+
     while global_epoch < nepochs:
         current_lr = get_current_lr(optimizer)
+                
         #print('Starting Epoch: {}'.format(global_epoch))
         running_sync_loss, running_l1_loss, running_l2_loss = 0., 0., 0.
         prog_bar = tqdm(enumerate(train_data_loader))
@@ -216,7 +220,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               '''
 
               #l1l2_loss = 0.8 * l1loss + 0.2 * l2loss
-              loss = hparams.syncnet_wt * sync_loss + (1 - hparams.syncnet_wt - hparams.disc_wt) * l1loss + hparams.disc_wt * disc_loss
+              loss = syncnet_wt * sync_loss + (1 - syncnet_wt - hparams.disc_wt) * l1loss + hparams.disc_wt * disc_loss
               
               loss.backward()
               optimizer.step()
@@ -255,6 +259,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, L1: {}, L2: {}, Disc: {}, LR: {}'.format(global_step, avg_img_loss,
                                                                       running_sync_loss / (step + 1), avg_l1_loss, avg_l2_loss, avg_disc_loss, current_lr))
+              
+              scheduler.step(avg_l1_loss)
               
               metrics = {
                   "train/overall_loss": avg_img_loss, 
@@ -365,10 +371,11 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
 if __name__ == "__main__":
     checkpoint_dir = args.checkpoint_dir
     use_wandb = args.use_wandb
+    use_augmentation = args.use_augmentation
 
     # Dataset and Dataloader setup
-    train_dataset = Dataset('train', args.data_root)
-    test_dataset = Dataset('val', args.data_root)
+    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation)
+    test_dataset = Dataset('val', args.data_root, args.train_root, False)
 
     train_data_loader = data_utils.DataLoader(
         train_dataset, batch_size=hparams.batch_size, shuffle=True,

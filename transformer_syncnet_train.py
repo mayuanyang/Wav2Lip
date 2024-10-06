@@ -44,6 +44,7 @@ parser.add_argument('--train_root', help='The train.txt and val.txt directory', 
 parser.add_argument('--use_cosine_loss', help='Whether to use cosine loss', default=True, type=str2bool)
 parser.add_argument('--sample_mode', help='easy or random', default=True, type=str)
 parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
+parser.add_argument('--use_augmentation', help='Whether to use data augmentation', default=True, type=str2bool)
 
 args = parser.parse_args()
 
@@ -56,6 +57,7 @@ use_cuda = torch.cuda.is_available()
 use_cosine_loss=True
 sample_mode='random'
 use_wandb=True
+use_augmentation= True
 
 
 current_training_loss = 0.6
@@ -81,53 +83,6 @@ def cosine_loss(a, v, y):
     return loss
 
 
-
-def get_lip_landmark(image, face_mesh):
-  try:
-    
-    # Load an image (make sure the image path is correct)
-    height, width, _ = image.shape
-
-    # Convert the image from BGR to RGB
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-    # Process the image to extract face landmarks
-    results = face_mesh.process(image_rgb)
-
-        
-    if results.multi_face_landmarks:
-        for face_landmarks in results.multi_face_landmarks:
-            # Create an empty list to store the lip landmarks
-            lip_embeddings = []
-            
-            # Iterate through the specific lip landmarks
-            for idx in LIP_LANDMARKS:
-                landmark = face_landmarks.landmark[idx]
-                # Extract the x, y, z coordinates
-                x = landmark.x
-                y = landmark.y
-                z = landmark.z
-                # Append the coordinates to the embeddings list
-                lip_embeddings.append([x, y, z])
-            
-            # Convert the list to a numpy array (optional, for easier manipulation)
-            lip_embeddings = np.array(lip_embeddings)
-            break
-
-    # Normalize the embedding (optional but recommended)
-    # This normalization ensures that all coordinates are on the same scale (between 0 and 1)
-    lip_embeddings = lip_embeddings / np.linalg.norm(lip_embeddings)
-
-    # Print the embedding
-    #print("Lip Embedding:", lip_embedding)
-
-    
-    return lip_embeddings
-  except Exception as e:
-    print('error', e)
-    traceback.print_exc() 
-    return None
-
 # added by eddy
 # Register hooks to print gradient norms
 def print_grad_norm(module, grad_input, grad_output):
@@ -143,12 +98,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
     
     global global_step, global_epoch, consecutive_threshold_count, current_training_loss
-    resumed_step = global_step
-    print('start training data folder', train_data_loader)
-    patience = 50
-
-    current_lr = get_current_lr(optimizer)
-    print('The learning rate is: {0}'.format(current_lr))
+    
+    patience = 1000
 
     # Added by eddy
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=patience, verbose=True)
@@ -157,21 +108,16 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
       for name, module in model.named_modules():
         if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear, nn.TransformerEncoderLayer)):
             module.register_backward_hook(print_grad_norm)
-    
-    # end
-    
-    ce_min = 1000.
-    ce_max = 0.
-    cos_min = 1000.
-    cos_max = 0.
+  
     
     while global_epoch < nepochs:
+        # for param_group in optimizer.param_groups:
+        #   print("The learning rates are: ", param_group['lr'])
         
         avg_ce_loss = 0.
-        avg_cos_loss = 0.
         
         prog_bar = tqdm(enumerate(train_data_loader))
-        current_lr = get_current_lr(optimizer)
+        print_current_lr(optimizer)
         for step, (x, mel, y) in prog_bar:
             
             model.train()
@@ -187,41 +133,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             y = y.to(device)                        
             
             ce_loss = cross_entropy_loss(output, y)
-            if ce_loss.item() < ce_min:
-                ce_min = ce_loss.item()
-            
-            if ce_loss.item() > ce_max:
-                ce_max = ce_loss.item()
-
-            cos_loss = cosine_loss(audio_embedding, face_embedding, y)
-            if cos_loss.item() < cos_min:
-                cos_min = cos_loss.item()
-            
-            if cos_loss.item() > cos_max:
-                cos_max = cos_loss.item()
-
             
 
-            # Normalize losses
-            normalized_ce_loss = (ce_loss.item() - ce_min) / (ce_max - ce_min + 1e-8)
-            normalized_cos_loss = (cos_loss.item() - cos_min) / (cos_max - cos_min + 1e-8)
-
-            #print('ce min {0}, ce max {1}, cos min {2}, cos max {3}, norm ce {4}, norm cos{5}'.format(ce_min, ce_max, cos_min, cos_max, normalized_ce_loss, normalized_cos_loss))
-
-            if normalized_ce_loss < normalized_cos_loss:
-                back_loss = ce_loss
-            else:
-                back_loss = cos_loss
-
-            #back_loss = 0.5 * ce_loss + 0.5 * cos_loss
-
-            back_loss.backward()
+            ce_loss.backward()
             optimizer.step()
 
             global_step += 1
             avg_ce_loss += ce_loss.item()
-            avg_cos_loss += cos_loss.item()
-
 
             if global_step == 1 or global_step % checkpoint_interval == 0:
                 save_checkpoint(
@@ -232,14 +150,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                     eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler)
                 
             current_training_loss = avg_ce_loss / (step + 1)
-            current_cos_loss = avg_cos_loss / (step + 1)
+
+            scheduler.step(current_training_loss)
             
-            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}, Cos Loss: {3}, LR: {4}'.format(global_step, global_epoch, current_training_loss, current_cos_loss, current_lr))
+            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}'.format(global_step, global_epoch, current_training_loss))
             metrics = {"train/ce_loss": current_training_loss, 
-                       "train/cos_loss": current_cos_loss, 
                        "train/step": global_step, 
-                       "train/epoch": global_epoch,
-                       "train/learning_rate": current_lr}
+                       "train/epoch": global_epoch}
             
             if use_wandb:
               wandb.log({**metrics})
@@ -270,10 +187,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         
 
 # Added by eddy
-def get_current_lr(optimizer):
+def print_current_lr(optimizer):
     # Assuming there is only one parameter group
     for param_group in optimizer.param_groups:
-        return param_group['lr']
+        print("LR", param_group['lr'])
 
 
 def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler):
@@ -373,8 +290,8 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
     global_epoch = checkpoint["global_epoch"]
 
     # Reset the new learning rate
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.00002
+    # for param_group in optimizer.param_groups:
+    #     param_group['lr'] = 0.00002
 
     return model
 
@@ -383,6 +300,7 @@ if __name__ == "__main__":
     checkpoint_path = args.checkpoint_path
     sample_mode = args.sample_mode
     use_wandb = args.use_wandb
+    use_augmentation = args.use_augmentation
 
     if use_wandb: 
       wandb.init(
@@ -391,7 +309,8 @@ if __name__ == "__main__":
 
         # track hyperparameters and run metadata
         config={
-        "learning_rate": hparams.syncnet_lr,
+        "face_learning_rate": hparams.syncnet_face_lr,
+        "audio_learning_rate": hparams.syncnet_audio_lr,
         "architecture": "TransformerSyncnet",
         "dataset": "MyOwn",
         "epochs": 200000,
@@ -401,8 +320,8 @@ if __name__ == "__main__":
     if not os.path.exists(checkpoint_dir): os.mkdir(checkpoint_dir)
 
     # Dataset and Dataloader setup
-    train_dataset = Dataset('train', args.data_root, args.train_root)
-    test_dataset = Dataset('val', args.data_root, args.train_root)
+    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation)
+    test_dataset = Dataset('val', args.data_root, args.train_root, False)
     #print(train_dataset.all_videos)
 
     train_data_loader = data_utils.DataLoader(
@@ -411,19 +330,22 @@ if __name__ == "__main__":
 
     test_data_loader = data_utils.DataLoader(
         test_dataset, batch_size=hparams.syncnet_batch_size,
-        num_workers=8)
+        num_workers=2)
 
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # Model
-    model = TransformerSyncnet(num_heads=8, num_encoder_layers=6).to(device)
+    model = TransformerSyncnet(num_heads=8, num_encoder_layers=4).to(device)
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
-    optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
-                           lr=hparams.syncnet_lr,betas=(0.8, 0.999), weight_decay=1e-5)
+    
+    optimizer = optim.Adam([
+        {'params': model.face_encoder[:27].parameters(), 'lr': hparams.syncnet_face_lr},
+        {'params': model.audio_encoder[:22].parameters(), 'lr': hparams.syncnet_audio_lr},
+    ], lr=5e-5,betas=(0.8, 0.999), weight_decay=1e-5)  # Default learning rate for other layers
 
     if checkpoint_path is not None:
-        load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=False)
+        load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=True)
 
     train(device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=checkpoint_dir,
