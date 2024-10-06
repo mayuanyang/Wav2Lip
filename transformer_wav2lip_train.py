@@ -160,7 +160,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         current_lr = get_current_lr(optimizer)
                 
         #print('Starting Epoch: {}'.format(global_epoch))
-        running_sync_loss, running_l1_loss, running_l2_loss = 0., 0., 0.
+        running_sync_loss, running_l1_loss = 0., 0.
         prog_bar = tqdm(enumerate(train_data_loader))
         running_img_loss = 0.0
         running_disc_loss = 0.0
@@ -213,16 +213,11 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               l1loss = recon_loss(g, gt)
 
-              l2loss = nn.functional.mse_loss(g, gt)
-
               running_l1_loss += l1loss.item()
-              running_l2_loss += l2loss.item()
-
+              
               '''
               If the syncnet_wt is 0.03, it means the sync_loss has 3% of the loss wheras the rest occupy 97% of the loss
               '''
-
-              #l1l2_loss = 0.8 * l1loss + 0.2 * l2loss
               loss = syncnet_wt * sync_loss + (1 - syncnet_wt - hparams.disc_wt) * l1loss + hparams.disc_wt * disc_loss
               
               loss.backward()
@@ -248,8 +243,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               avg_l1_loss = running_l1_loss / (step + 1)
 
-              avg_l2_loss = running_l2_loss / (step + 1)
-
               avg_disc_loss = running_disc_loss / (step + 1)
               
               if global_step % hparams.eval_interval == 0:
@@ -260,15 +253,14 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   if avg_img_loss < .01: # change 
                           hparams.set_hparam('syncnet_wt', 0.01) # without image GAN a lesser weight is sufficient
 
-              prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, L1: {}, L2: {}, Disc: {}, LR: {}'.format(global_step, avg_img_loss,
-                                                                      running_sync_loss / (step + 1), avg_l1_loss, avg_l2_loss, avg_disc_loss, current_lr))
+              prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, L1: {}, Disc: {}, LR: {}'.format(global_step, avg_img_loss,
+                                                                      running_sync_loss / (step + 1), avg_l1_loss, avg_disc_loss, current_lr))
               
               scheduler.step(avg_l1_loss)
               
               metrics = {
                   "train/overall_loss": avg_img_loss, 
                   "train/avg_l1": avg_l1_loss, 
-                  "train/avg_l2": avg_l2_loss, 
                   "train/sync_loss": running_sync_loss / (step + 1), 
                   "train/disc_loss": avg_disc_loss,
                   "train/step": global_step,
