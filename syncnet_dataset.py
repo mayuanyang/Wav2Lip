@@ -8,10 +8,11 @@ import audio
 import torch
 import matplotlib.pyplot as plt
 from PIL import Image
+import mediapipe as mp
 
-face_image_cache = multiprocessing.Manager().dict()
-file_exist_cache = multiprocessing.Manager().dict()
-orig_mel_cache = multiprocessing.Manager().dict()
+face_image_cache = {} # multiprocessing.Manager().dict()
+file_exist_cache = {} # multiprocessing.Manager().dict()
+orig_mel_cache = {} #multiprocessing.Manager().dict()
 
 """
 The FPS is set to 25 for video, 5/25 is 0.2, we need to have 0.2 seconds for the audio,
@@ -27,10 +28,9 @@ class Dataset(object):
         print('-----')
         self.all_videos = get_image_list(data_root, split, train_root)
         self.use_augmentation = use_augmentation
-        
 
     def get_frame_id(self, frame):
-        return int(basename(frame).split('.')[0])
+        return int(basename(frame).replace('_landmarks', '').split('.')[0])
 
     def get_window(self, start_frame):
         start_id = self.get_frame_id(start_frame)
@@ -143,16 +143,20 @@ class Dataset(object):
                 for fname in window_fnames:
                     if fname in face_image_cache:
                         img = face_image_cache[fname]
+                        langmark_img = face_image_cache[fname.replace('.jpg', '_landmarks.jpg')]
                     else:
                         img = cv2.imread(fname)
+                        langmark_img = cv2.imread(fname.replace('.jpg', '_landmarks.jpg'))
                         if img is None:
                             all_read = False
                             break
                         try:
-                            img = cv2.resize(img, (hparams.img_size, hparams.img_size))                            
+                            img = cv2.resize(img, (hparams.img_size, hparams.img_size))                        
+                            langmark_img = cv2.resize(img, (hparams.img_size, hparams.img_size))
                             
                             if len(face_image_cache) < hparams.image_cache_size:
                               face_image_cache[fname] = img  # Cache the resized image
+                              face_image_cache[fname.replace('.jpg', '_landmarks.jpg')] = langmark_img
                             
                         except Exception as e:
                             all_read = False
@@ -196,6 +200,7 @@ class Dataset(object):
                           img = cv2.warpAffine(img, rotation_matrix, (w, h))
 
                     face_window.append(img)
+                    face_window.append(langmark_img)
 
                 if not all_read: continue
 
