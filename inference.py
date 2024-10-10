@@ -57,6 +57,9 @@ parser.add_argument('--rotate', default=False, action='store_true',
 parser.add_argument('--nosmooth', default=False, action='store_true',
           help='Prevent smoothing face detections over a short temporal window')
 
+parser.add_argument('--model_layers', default=2, type=int, 
+      help='The number of layers that the model has')
+
 args = parser.parse_args()
 args.img_size = 192
 
@@ -182,8 +185,8 @@ def _load(checkpoint_path):
                 map_location=lambda storage, loc: storage)
   return checkpoint
 
-def load_model(path, lora_path=None):
-  model = Wav2Lip()
+def load_model(path, lora_path=None, model_layers=2):
+  model = Wav2Lip(model_layers)
   print("Load checkpoint from: {}".format(path))
   checkpoint = _load(path)
   s = checkpoint["state_dict"]
@@ -271,7 +274,7 @@ def main():
   for i, (img_batch, mel_batch, frames, coords) in enumerate(tqdm(gen, 
                       total=int(np.ceil(float(len(mel_chunks))/batch_size)))):
     if i == 0:
-      model = load_model(args.checkpoint_path, args.lora_checkpoint_path)
+      model = load_model(args.checkpoint_path, args.lora_checkpoint_path, args.model_layers)
       print ("Model loaded")
 
       frame_h, frame_w = input_frames[0].shape[:-1]

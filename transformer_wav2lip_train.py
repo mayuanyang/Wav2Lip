@@ -47,11 +47,13 @@ parser.add_argument('--checkpoint_path', help='Resume from this checkpoint', def
 parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
 parser.add_argument('--use_augmentation', help='Whether to use data augmentation', default=True, type=str2bool)
 parser.add_argument('--train_root', help='The train.txt and val.txt directory', default='filelists', type=str)
+parser.add_argument('--num_of_unet_layers', help='The train.txt and val.txt directory', default=2, type=int)
 args = parser.parse_args()
 
 
 global_step = 0
 global_epoch = 0
+num_of_unet_layers = 2
 use_wandb=True
 use_augmentation= True
 use_cuda = torch.cuda.is_available()
@@ -384,7 +386,7 @@ if __name__ == "__main__":
 
     # Model
     #model = Wav2Lip(embed_size=256, num_heads=8, num_encoder_layers=6).to(device)
-    model = Wav2Lip().to(device)
+    model = Wav2Lip(args.num_of_unet_layers).to(device)
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
