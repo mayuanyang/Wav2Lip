@@ -139,7 +139,8 @@ def datagen(frames, mels, use_ref_img):
       ref_face, _ = face_det_results[rdn_idx].copy()
       ref_face = cv2.resize(ref_face, (args.img_size, args.img_size))
       ref_batch.append(ref_face)
-      ref_batch = np.asarray(ref_batch)
+      
+    
       
     img_batch.append(face)
     mel_batch.append(m)
@@ -148,6 +149,7 @@ def datagen(frames, mels, use_ref_img):
 
     if len(img_batch) >= args.wav2lip_batch_size:
       img_batch, mel_batch = np.asarray(img_batch), np.asarray(mel_batch)
+      ref_batch = np.asarray(ref_batch)
 
       img_masked = img_batch.copy()
       img_masked[:, args.img_size//2:] = 0
