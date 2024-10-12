@@ -335,7 +335,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # Model
-    model = TransformerSyncnet(num_heads=8, num_encoder_layers=8).to(device)
+    model = TransformerSyncnet(num_heads=8, num_encoder_layers=6).to(device)
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
     
