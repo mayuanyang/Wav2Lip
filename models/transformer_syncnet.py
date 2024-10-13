@@ -43,17 +43,17 @@ class TransformerSyncnet(nn.Module):
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #12x6, 69+(3-1)x1=71
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #12x6, 71+(3-1)x1=73
 
-            Conv2d(256, 128, kernel_size=3, stride=(2,1), padding=1), #6x6, 73+(3-1)x2=77
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), # 77+(3-1)x1=79
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), # 79+(3-1)x1=81
+            Conv2d(256, 256, kernel_size=3, stride=(2,1), padding=1), #6x6, 73+(3-1)x2=77
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 77+(3-1)x1=79
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 79+(3-1)x1=81
 
-            Conv2d(128, 64, kernel_size=3, stride=1, padding=1), #6x6, 81+(3-1)x1=83
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #6x6, 83+(3-1)x1=85
+            Conv2d(256, 128, kernel_size=3, stride=1, padding=1), #6x6, 81+(3-1)x1=83
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #6x6, 83+(3-1)x1=85
 
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1), #6x6, 85+(3-1)x1=87
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #3x3, 87+(3-1)x1=89
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1), #6x6, 85+(3-1)x1=87
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #3x3, 87+(3-1)x1=89
 
-            Conv2d(64, 64, kernel_size=3, stride=2, padding=1), #3x3, 89+(3-1)x2=93, the 27th
+            Conv2d(128, 64, kernel_size=3, stride=2, padding=1), #3x3, 89+(3-1)x2=93, the 27th
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #3x3, 93+(3-1)x1=95, the 27th
             
             )
