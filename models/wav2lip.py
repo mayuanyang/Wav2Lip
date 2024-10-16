@@ -15,23 +15,32 @@ class Wav2Lip(nn.Module):
         
         print('The length of blocks', len(self.blocks))
         self.output_block = ProcessBlock(3)
+
+        # Define the sharpening kernel
+        sharpen_kernel = torch.tensor([[[[ 0, -1,  0],
+                                         [-1,  5, -1],
+                                         [ 0, -1,  0]]]], dtype=torch.float32)
         
-    def forward(self, audio_sequences, face_sequences):
+        # Sharpening layer as a convolution with fixed weights
+        self.sharpen = nn.Conv2d(3, 3, kernel_size=3, stride=1, padding=1, bias=False, groups=3)
+        self.sharpen.weight = nn.Parameter(sharpen_kernel.repeat(3, 1, 1, 1), requires_grad=False)
+                
         
+    def forward(self, audio_sequences, face_sequences, sharpen_img):
         temp_output = None
         face_input = face_sequences
         for block in self.blocks:
             if temp_output is not None:
                 face_input = face_sequences + temp_output
             
-            temp_output = self.forward_impl(audio_sequences, face_input, block.face_encoder_blocks, block.audio_encoder, block.face_decoder_blocks, block.output_block)
+            temp_output = self.forward_impl(audio_sequences, face_input, block.face_encoder_blocks, block.audio_encoder, block.face_decoder_blocks, block.output_block, sharpen_img)
             
         step2_face_sequences = face_sequences + temp_output
-        outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.output_block)
+        outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.output_block, sharpen_img)
       
         return outputs
 
-    def forward_impl(self, audio_sequences, face_sequences, face_encoder_blocks, audio_encoder, face_decoder_blocks, output_block):
+    def forward_impl(self, audio_sequences, face_sequences, face_encoder_blocks, audio_encoder, face_decoder_blocks, output_block, sharpen_img):
         # audio_sequences = (B, T, 1, 80, 16)
         B = audio_sequences.size(0)
 
@@ -76,9 +85,16 @@ class Wav2Lip(nn.Module):
 
         # x is the combined audio and face features
         x = output_block(x)
+        
+        if sharpen_img:
+          channels = x.shape[1]
+          if channels == 3:
+                x = self.sharpen(x)
 
         if input_dim_size > 4:
+            
             x = torch.split(x, B, dim=0) # [(B, C, H, W)]
+            
             outputs = torch.stack(x, dim=2) # (B, C, T, H, W)
 
         else:
@@ -180,6 +196,7 @@ class ProcessBlock(nn.Module):
 
         self.output_block = nn.Sequential(Conv2d(128, 32, kernel_size=3, stride=1, padding=1),
             nn.Conv2d(32, output_block_channels, kernel_size=1, stride=1, padding=0),
+            
             nn.Sigmoid())
 
 

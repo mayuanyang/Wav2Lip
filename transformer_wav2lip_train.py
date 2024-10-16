@@ -48,6 +48,7 @@ parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, ty
 parser.add_argument('--use_augmentation', help='Whether to use data augmentation', default=True, type=str2bool)
 parser.add_argument('--train_root', help='The train.txt and val.txt directory', default='filelists', type=str)
 parser.add_argument('--num_of_unet_layers', help='The train.txt and val.txt directory', default=2, type=int)
+parser.add_argument('--sharpen_img', help='Whether to sharpen the image', default=True, type=str2bool)
 args = parser.parse_args()
 
 
@@ -56,6 +57,7 @@ global_epoch = 0
 num_of_unet_layers = 2
 use_wandb=True
 use_augmentation= True
+sharpen_img = False
 use_cuda = torch.cuda.is_available()
 
 
@@ -131,7 +133,7 @@ def get_current_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
-def train(device, model, train_data_loader, test_data_loader, optimizer,
+def train(device, model, train_data_loader, test_data_loader, optimizer, sharpen_img,
           checkpoint_dir=None, checkpoint_interval=None, nepochs=None, should_print_grad_norm=False):
 
     global global_step, global_epoch
@@ -179,7 +181,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               indiv_mels = indiv_mels.to(device)
               gt = gt.to(device)
 
-              g = model(indiv_mels, x)
+              g = model(indiv_mels, x, sharpen_img)
 
               #print("The g shape", g.shape)
 
@@ -369,6 +371,7 @@ if __name__ == "__main__":
     checkpoint_dir = args.checkpoint_dir
     use_wandb = args.use_wandb
     use_augmentation = args.use_augmentation
+    sharpen_img = args.sharpen_img
 
     # Dataset and Dataloader setup
     train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation)
@@ -417,6 +420,7 @@ if __name__ == "__main__":
 
     # Train!
     train(device, model, train_data_loader, test_data_loader, optimizer,
+              sharpen_img,
               checkpoint_dir=checkpoint_dir,
               checkpoint_interval=hparams.checkpoint_interval,
               nepochs=hparams.nepochs)
