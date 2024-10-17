@@ -1,4 +1,4 @@
-from os.path import dirname, join, basename, isfile
+from os.path import join
 from tqdm import tqdm
 
 from models import TransformerSyncnet as TransformerSyncnet
@@ -14,13 +14,11 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from glob import glob
 
-import os, random, cv2, argparse
-from hparams import hparams, get_image_list
+import os, argparse
+from hparams import hparams
 from models.conv import Conv2d, Conv2dTranspose
 from syncnet_dataset import Dataset, samples
 
-# import module 
-import traceback
 import wandb
 
 
