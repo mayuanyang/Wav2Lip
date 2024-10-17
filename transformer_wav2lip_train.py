@@ -48,7 +48,6 @@ parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, ty
 parser.add_argument('--use_augmentation', help='Whether to use data augmentation', default=True, type=str2bool)
 parser.add_argument('--train_root', help='The train.txt and val.txt directory', default='filelists', type=str)
 parser.add_argument('--num_of_unet_layers', help='The train.txt and val.txt directory', default=2, type=int)
-parser.add_argument('--sharpen_img', help='Whether to sharpen the image', default=True, type=str2bool)
 args = parser.parse_args()
 
 
@@ -57,7 +56,6 @@ global_epoch = 0
 num_of_unet_layers = 2
 use_wandb=True
 use_augmentation= True
-sharpen_img = False
 use_cuda = torch.cuda.is_available()
 
 
@@ -82,25 +80,7 @@ def save_sample_images(x, g, gt, global_step, checkpoint_dir):
         for t in range(len(c)):
             cv2.imwrite('{}/{}_{}.jpg'.format(folder, batch_idx, t), c[t])
 
-logloss = nn.BCELoss()
-def cosine_loss(a, v, y):
-    d = nn.functional.cosine_similarity(a, v)
-    
-    # Scale cosine similarity to range [0, 1]
-    cos_sim_scaled = (1 + d) / 2.0
-    
-    # Calculate the loss: the target is 1 for similar pairs and 0 for dissimilar pairs
-    loss = nn.functional.mse_loss(cos_sim_scaled, y.float())
-    
-    return loss
 
-def contrastive_loss(a, v, y, margin=0.5):
-    """
-    Contrastive loss tries to minimize the distance between similar pairs and maximize the distance between dissimilar pairs up to a margin.
-    """
-    d = nn.functional.pairwise_distance(a, v)
-    loss = torch.mean((1 - y) * torch.pow(d, 2) + y * torch.pow(torch.clamp(margin - d, min=0.0), 2))
-    return loss
 
 device = torch.device("cuda" if use_cuda else "cpu")
 syncnet = SyncNet(num_heads=8, num_encoder_layers=4).to(device)
@@ -133,7 +113,7 @@ def get_current_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
-def train(device, model, train_data_loader, test_data_loader, optimizer, sharpen_img,
+def train(device, model, train_data_loader, test_data_loader, optimizer, 
           checkpoint_dir=None, checkpoint_interval=None, nepochs=None, should_print_grad_norm=False):
 
     global global_step, global_epoch
@@ -173,7 +153,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer, sharpen
             if x.shape[0] == hparams.batch_size:
               model.train()
               optimizer.zero_grad()
-              
 
               # Move data to CUDA device
               x = x.to(device)
@@ -181,7 +160,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer, sharpen
               indiv_mels = indiv_mels.to(device)
               gt = gt.to(device)
 
-              g = model(indiv_mels, x, sharpen_img)
+              g = model(indiv_mels, x)
 
               #print("The g shape", g.shape)
 
@@ -363,7 +342,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
 
     if optimizer != None:
       for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.0001
+        param_group['lr'] = 0.00001
 
     return model
 
@@ -371,7 +350,6 @@ if __name__ == "__main__":
     checkpoint_dir = args.checkpoint_dir
     use_wandb = args.use_wandb
     use_augmentation = args.use_augmentation
-    sharpen_img = args.sharpen_img
 
     # Dataset and Dataloader setup
     train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation)
@@ -420,7 +398,6 @@ if __name__ == "__main__":
 
     # Train!
     train(device, model, train_data_loader, test_data_loader, optimizer,
-              sharpen_img,
               checkpoint_dir=checkpoint_dir,
               checkpoint_interval=hparams.checkpoint_interval,
               nepochs=hparams.nepochs)

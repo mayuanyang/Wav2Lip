@@ -195,7 +195,7 @@ def load_model(path, lora_path=None, model_layers=2):
   new_s = {}
   for k, v in s.items():
     new_s[k.replace('module.', '')] = v
-  model.load_state_dict(new_s)
+  model.load_state_dict(new_s, strict=False)
   if lora_path:
     print('I got lora')
     lora_params = torch.load(lora_path)
