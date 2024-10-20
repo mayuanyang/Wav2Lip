@@ -26,11 +26,16 @@ parser.add_argument('--ngpu', help='Number of GPUs across which to run in parall
 parser.add_argument('--batch_size', help='Single GPU Face detection batch size', default=32, type=int)
 parser.add_argument("--data_root", help="Root folder of the LRS2 dataset", required=True)
 parser.add_argument("--preprocessed_root", help="Root folder of the preprocessed dataset", required=True)
+parser.add_argument("--use_gpu", help="Whether to use GPU", default=1, type=int)
 
 args = parser.parse_args()
 
-fa = [face_detection.FaceAlignment(face_detection.LandmarksType._2D, flip_input=False, 
-									device='cuda:{}'.format(id)) for id in range(args.ngpu)]
+if args.use_gpu > 0:
+  fa = [face_detection.FaceAlignment(face_detection.LandmarksType._2D, flip_input=False, 
+                    device='cuda:{}'.format(id)) for id in range(args.ngpu)]
+else:
+	fa = face_detection.FaceAlignment(face_detection.LandmarksType._2D, flip_input=False, device='cpu')
+
 
 template = 'ffmpeg -loglevel panic -y -i {} -strict -2 {}'
 # template2 = 'ffmpeg -hide_banner -loglevel panic -threads 1 -y -i {} -async 1 -ac 1 -vn -acodec pcm_s16le -ar 16000 {}'
@@ -88,6 +93,7 @@ def mp_handler(job):
 	except:
 		traceback.print_exc()
 		
+		
 def main(args):
 	print('Started processing for {} with {} GPUs'.format(args.data_root, args.ngpu))
 
@@ -118,3 +124,5 @@ def main(args):
 
 if __name__ == '__main__':
 	main(args)
+	
+

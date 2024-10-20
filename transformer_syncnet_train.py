@@ -1,4 +1,4 @@
-from os.path import dirname, join, basename, isfile
+from os.path import join
 from tqdm import tqdm
 
 from models import TransformerSyncnet as TransformerSyncnet
@@ -14,13 +14,11 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from glob import glob
 
-import os, random, cv2, argparse
-from hparams import hparams, get_image_list
+import os, argparse
+from hparams import hparams
 from models.conv import Conv2d, Conv2dTranspose
 from syncnet_dataset import Dataset, samples
 
-# import module 
-import traceback
 import wandb
 
 
@@ -335,7 +333,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # Model
-    model = TransformerSyncnet(num_heads=8, num_encoder_layers=4).to(device)
+    model = TransformerSyncnet(num_heads=8, num_encoder_layers=6).to(device)
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
     

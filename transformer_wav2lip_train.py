@@ -1,8 +1,8 @@
 from os.path import dirname, join, basename, isfile
 from tqdm import tqdm
 
-from models import TransformerSyncnet as SyncNet
-from models import Wav2Lip as Wav2Lip
+from models import TransformerSyncnet
+from models import ResUNet
 import torch
 
 import wandb
@@ -17,12 +17,11 @@ import lpips
 
 from glob import glob
 
-import os, random, cv2, argparse
+import os, cv2, argparse
 from hparams import hparams, get_image_list
 
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from models.conv import Conv2d, Conv2dTranspose
-from torch.nn import functional as F
 from wav2lip_dataset import Dataset, syncnet_T
 
 
@@ -47,11 +46,13 @@ parser.add_argument('--checkpoint_path', help='Resume from this checkpoint', def
 parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
 parser.add_argument('--use_augmentation', help='Whether to use data augmentation', default=True, type=str2bool)
 parser.add_argument('--train_root', help='The train.txt and val.txt directory', default='filelists', type=str)
+parser.add_argument('--num_of_unet_layers', help='The train.txt and val.txt directory', default=2, type=int)
 args = parser.parse_args()
 
 
 global_step = 0
 global_epoch = 0
+num_of_unet_layers = 2
 use_wandb=True
 use_augmentation= True
 use_cuda = torch.cuda.is_available()
@@ -70,7 +71,7 @@ def save_sample_images(x, g, gt, global_step, checkpoint_dir):
     g = (g.detach().cpu().numpy().transpose(0, 2, 3, 4, 1) * 255.).astype(np.uint8)
     gt = (gt.detach().cpu().numpy().transpose(0, 2, 3, 4, 1) * 255.).astype(np.uint8)
 
-    refs, inps = x[..., 3:], x[..., :3]
+    refs, inps = x[..., 6:], x[..., :3]
     folder = join(checkpoint_dir, "samples_step{:09d}".format(global_step))
     if not os.path.exists(folder): os.mkdir(folder)
     collage = np.concatenate((refs, inps, g, gt), axis=-2)
@@ -78,28 +79,10 @@ def save_sample_images(x, g, gt, global_step, checkpoint_dir):
         for t in range(len(c)):
             cv2.imwrite('{}/{}_{}.jpg'.format(folder, batch_idx, t), c[t])
 
-logloss = nn.BCELoss()
-def cosine_loss(a, v, y):
-    d = nn.functional.cosine_similarity(a, v)
-    
-    # Scale cosine similarity to range [0, 1]
-    cos_sim_scaled = (1 + d) / 2.0
-    
-    # Calculate the loss: the target is 1 for similar pairs and 0 for dissimilar pairs
-    loss = nn.functional.mse_loss(cos_sim_scaled, y.float())
-    
-    return loss
 
-def contrastive_loss(a, v, y, margin=0.5):
-    """
-    Contrastive loss tries to minimize the distance between similar pairs and maximize the distance between dissimilar pairs up to a margin.
-    """
-    d = nn.functional.pairwise_distance(a, v)
-    loss = torch.mean((1 - y) * torch.pow(d, 2) + y * torch.pow(torch.clamp(margin - d, min=0.0), 2))
-    return loss
 
 device = torch.device("cuda" if use_cuda else "cpu")
-syncnet = SyncNet(num_heads=8, num_encoder_layers=4).to(device)
+syncnet = TransformerSyncnet(num_heads=8, num_encoder_layers=4).to(device)
 for p in syncnet.parameters():
     p.requires_grad = False
 
@@ -129,7 +112,7 @@ def get_current_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
-def train(device, model, train_data_loader, test_data_loader, optimizer,
+def train(device, model, train_data_loader, test_data_loader, optimizer, 
           checkpoint_dir=None, checkpoint_interval=None, nepochs=None, should_print_grad_norm=False):
 
     global global_step, global_epoch
@@ -160,12 +143,12 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         current_lr = get_current_lr(optimizer)
                 
         #print('Starting Epoch: {}'.format(global_epoch))
-        running_sync_loss, running_l1_loss, running_l2_loss = 0., 0., 0.
+        running_sync_loss, running_l1_loss = 0., 0.
         prog_bar = tqdm(enumerate(train_data_loader))
         running_img_loss = 0.0
         running_disc_loss = 0.0
         for step, (x, indiv_mels, mel, gt) in prog_bar:
-            #print("The batch size", x.shape)
+            #print("The x shape", x.shape)
             if x.shape[0] == hparams.batch_size:
               model.train()
               optimizer.zero_grad()
@@ -177,6 +160,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               gt = gt.to(device)
 
               g = model(indiv_mels, x)
+
+              #print("The g shape", g.shape)
 
               # Compare two images
               '''
@@ -210,16 +195,11 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               l1loss = recon_loss(g, gt)
 
-              l2loss = nn.functional.mse_loss(g, gt)
-
               running_l1_loss += l1loss.item()
-              running_l2_loss += l2loss.item()
-
+              
               '''
               If the syncnet_wt is 0.03, it means the sync_loss has 3% of the loss wheras the rest occupy 97% of the loss
               '''
-
-              #l1l2_loss = 0.8 * l1loss + 0.2 * l2loss
               loss = syncnet_wt * sync_loss + (1 - syncnet_wt - hparams.disc_wt) * l1loss + hparams.disc_wt * disc_loss
               
               loss.backward()
@@ -245,8 +225,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               avg_l1_loss = running_l1_loss / (step + 1)
 
-              avg_l2_loss = running_l2_loss / (step + 1)
-
               avg_disc_loss = running_disc_loss / (step + 1)
               
               if global_step % hparams.eval_interval == 0:
@@ -257,15 +235,14 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   if avg_img_loss < .01: # change 
                           hparams.set_hparam('syncnet_wt', 0.01) # without image GAN a lesser weight is sufficient
 
-              prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, L1: {}, L2: {}, Disc: {}, LR: {}'.format(global_step, avg_img_loss,
-                                                                      running_sync_loss / (step + 1), avg_l1_loss, avg_l2_loss, avg_disc_loss, current_lr))
+              prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, L1: {}, Disc: {}, LR: {}'.format(global_step, avg_img_loss,
+                                                                      running_sync_loss / (step + 1), avg_l1_loss, avg_disc_loss, current_lr))
               
               scheduler.step(avg_l1_loss)
               
               metrics = {
                   "train/overall_loss": avg_img_loss, 
                   "train/avg_l1": avg_l1_loss, 
-                  "train/avg_l2": avg_l2_loss, 
                   "train/sync_loss": running_sync_loss / (step + 1), 
                   "train/disc_loss": avg_disc_loss,
                   "train/step": global_step,
@@ -388,21 +365,21 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # Model
-    #model = Wav2Lip(embed_size=256, num_heads=8, num_encoder_layers=6).to(device)
-    model = Wav2Lip().to(device)
+    model = ResUNet(args.num_of_unet_layers).to(device)
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
                            lr=hparams.initial_learning_rate)
 
     if args.checkpoint_path is not None:
-        load_checkpoint(args.checkpoint_path, model, optimizer, reset_optimizer=False)
+        load_checkpoint(args.checkpoint_path, model, optimizer, reset_optimizer=True)
         
     load_checkpoint(args.syncnet_checkpoint_path, syncnet, None, reset_optimizer=True, overwrite_global_states=False)
 
     if not os.path.exists(checkpoint_dir):
         os.mkdir(checkpoint_dir)
 
+    
     if use_wandb:
       wandb.init(
         # set the wandb project where this run will be logged
