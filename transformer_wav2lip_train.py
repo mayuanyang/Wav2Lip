@@ -1,8 +1,8 @@
 from os.path import dirname, join, basename, isfile
 from tqdm import tqdm
 
-from models import TransformerSyncnet as SyncNet
-from models import Wav2Lip as Wav2Lip
+from models import TransformerSyncnet
+from models import ResUNet
 import torch
 
 import wandb
@@ -17,12 +17,11 @@ import lpips
 
 from glob import glob
 
-import os, random, cv2, argparse
+import os, cv2, argparse
 from hparams import hparams, get_image_list
 
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from models.conv import Conv2d, Conv2dTranspose
-from torch.nn import functional as F
 from wav2lip_dataset import Dataset, syncnet_T
 
 
@@ -80,28 +79,10 @@ def save_sample_images(x, g, gt, global_step, checkpoint_dir):
         for t in range(len(c)):
             cv2.imwrite('{}/{}_{}.jpg'.format(folder, batch_idx, t), c[t])
 
-logloss = nn.BCELoss()
-def cosine_loss(a, v, y):
-    d = nn.functional.cosine_similarity(a, v)
-    
-    # Scale cosine similarity to range [0, 1]
-    cos_sim_scaled = (1 + d) / 2.0
-    
-    # Calculate the loss: the target is 1 for similar pairs and 0 for dissimilar pairs
-    loss = nn.functional.mse_loss(cos_sim_scaled, y.float())
-    
-    return loss
 
-def contrastive_loss(a, v, y, margin=0.5):
-    """
-    Contrastive loss tries to minimize the distance between similar pairs and maximize the distance between dissimilar pairs up to a margin.
-    """
-    d = nn.functional.pairwise_distance(a, v)
-    loss = torch.mean((1 - y) * torch.pow(d, 2) + y * torch.pow(torch.clamp(margin - d, min=0.0), 2))
-    return loss
 
 device = torch.device("cuda" if use_cuda else "cpu")
-syncnet = SyncNet(num_heads=8, num_encoder_layers=4).to(device)
+syncnet = TransformerSyncnet(num_heads=8, num_encoder_layers=4).to(device)
 for p in syncnet.parameters():
     p.requires_grad = False
 
@@ -131,7 +112,7 @@ def get_current_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
-def train(device, model, train_data_loader, test_data_loader, optimizer,
+def train(device, model, train_data_loader, test_data_loader, optimizer, 
           checkpoint_dir=None, checkpoint_interval=None, nepochs=None, should_print_grad_norm=False):
 
     global global_step, global_epoch
@@ -171,7 +152,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             if x.shape[0] == hparams.batch_size:
               model.train()
               optimizer.zero_grad()
-              
 
               # Move data to CUDA device
               x = x.to(device)
@@ -361,7 +341,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
 
     if optimizer != None:
       for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.0001
+        param_group['lr'] = 0.00001
 
     return model
 
@@ -385,8 +365,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # Model
-    #model = Wav2Lip(embed_size=256, num_heads=8, num_encoder_layers=6).to(device)
-    model = Wav2Lip(args.num_of_unet_layers).to(device)
+    model = ResUNet(args.num_of_unet_layers).to(device)
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],

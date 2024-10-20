@@ -5,7 +5,7 @@ import json, subprocess, random, string
 from tqdm import tqdm
 from glob import glob
 import torch, face_detection
-from models import Wav2Lip
+from models import ResUNet
 import platform
 
 parser = argparse.ArgumentParser(description='Inference code to lip-sync videos in the wild using Wav2Lip models')
@@ -188,14 +188,14 @@ def _load(checkpoint_path):
   return checkpoint
 
 def load_model(path, lora_path=None, model_layers=2):
-  model = Wav2Lip(model_layers)
+  model = ResUNet(model_layers)
   print("Load checkpoint from: {}".format(path))
   checkpoint = _load(path)
   s = checkpoint["state_dict"]
   new_s = {}
   for k, v in s.items():
     new_s[k.replace('module.', '')] = v
-  model.load_state_dict(new_s)
+  model.load_state_dict(new_s, strict=False)
   if lora_path:
     print('I got lora')
     lora_params = torch.load(lora_path)
