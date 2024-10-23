@@ -92,8 +92,10 @@ hparams = HParams(
 	syncnet_eval_interval=100000,
 	syncnet_checkpoint_interval=2000,
 
-	disc_wt=0.5,
-  l1_wt=0.5,
+	disc_wt=0.3,
+	bottom_disc_wt=0.5,
+  l1_wt=0.3,
+	bottom_l1_wt=0.5,
 	
   image_cache_size=250000,
 	audio_cache_size=28000

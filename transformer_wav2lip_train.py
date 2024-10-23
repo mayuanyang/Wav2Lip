@@ -23,6 +23,7 @@ from hparams import hparams, get_image_list
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from models.conv import Conv2d, Conv2dTranspose
 from wav2lip_dataset import Dataset, syncnet_T
+import torch.nn.functional as F
 
 
 def str2bool(v):
@@ -147,6 +148,11 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         prog_bar = tqdm(enumerate(train_data_loader))
         running_img_loss = 0.0
         running_disc_loss = 0.0
+        running_bottom_disc_loss = 0.0
+        running_bottom_l1_loss = 0.0
+        running_bottom_l1_loss = 0.0
+
+        running_triplet_loss = 0.0
         for step, (x, indiv_mels, mel, gt) in prog_bar:
             #print("The x shape", x.shape)
             if x.shape[0] == hparams.batch_size:
@@ -157,12 +163,15 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               x = x.to(device)
               mel = mel.to(device)
               indiv_mels = indiv_mels.to(device)
+
               gt = gt.to(device)
-
               g = model(indiv_mels, x)
+                           
 
-              #print("The g shape", g.shape)
-
+              # print("The selected", selected_channels)
+              # print("The g ", g.shape)
+              # print("The gt", gt)
+              
               # Compare two images
               '''
               The g and gt shape is torch.Size([2, 3, 5, 192, 192]), and vgg is expecting [batch, channels, h, w]
@@ -170,8 +179,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               we choose to collapse
               '''
               num_of_frames = g.shape[2]
-              losses = []
-              disc_loss = 0
+              full_losses = []
+              bottom_losses = []
+              full_disc_loss = 0
+              bottom_disc_loss = 0
 
               if hparams.disc_wt > 0:
                 for i in range(num_of_frames):
@@ -179,14 +190,24 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   gen_frame = g[:, :, i, :, :]  # Shape: [batch_size, 3, 192, 192]
                   gt_frame = gt[:, :, i, :, :]    # Shape: [batch_size, 3, 192, 192]
 
+                  _, _, H, _ = gen_frame.shape
+                  g_bottom = gen_frame[:, :, H//2:, :]
+                  gt_bottom = gt_frame[:, :, H//2:, :]
+
                   # Now you can process the individual frames, e.g., pass them through a model
                   # For example:
-                  frame_loss = lpips_loss(gen_frame.to(device), gt_frame.to(device))
-                  losses.append(frame_loss)
+                  full_frame_loss = lpips_loss(gen_frame.to(device), gt_frame.to(device))
+                  bottom_frame_loss = lpips_loss(g_bottom.to(device), gt_bottom.to(device))
+                  
+                  full_losses.append(full_frame_loss)
+                  bottom_losses.append(bottom_frame_loss)
                 
                 # Average the loss over all frames
-                disc_loss = torch.mean(torch.stack(losses))
-                running_disc_loss += disc_loss.item()
+                full_disc_loss = torch.mean(torch.stack(full_losses))
+                running_disc_loss += full_disc_loss.item()
+
+                bottom_disc_loss = torch.mean(torch.stack(bottom_losses))
+                running_bottom_disc_loss += bottom_disc_loss.item()
 
               if hparams.syncnet_wt > 0.:
                   sync_loss = get_sync_loss(mel, g)
@@ -196,11 +217,19 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               l1loss = recon_loss(g, gt)
 
               running_l1_loss += l1loss.item()
+
+              _, _, _, H, _ = g.shape
+
+              bottom_l1loss = recon_loss(g[:, :, :, H//2:, :], gt[:, :, :, H//2:, :])
+
+              running_bottom_l1_loss += bottom_l1loss.item()
               
               '''
               If the syncnet_wt is 0.03, it means the sync_loss has 3% of the loss wheras the rest occupy 97% of the loss
               '''
-              loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * disc_loss
+              loss = syncnet_wt * sync_loss 
+              + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss 
+              + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss
               
               loss.backward()
               optimizer.step()
@@ -225,28 +254,36 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               avg_l1_loss = running_l1_loss / (step + 1)
 
+              avg_bottom_l1_loss = running_bottom_l1_loss / (step + 1)
+
               avg_disc_loss = running_disc_loss / (step + 1)
+
+              avg_bottom_disc_loss = running_bottom_disc_loss / (step + 1)
+
               
               if global_step % hparams.eval_interval == 0:
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-                  #if average_sync_loss < .75:
-                  if avg_img_loss < .01: # change 
-                          hparams.set_hparam('syncnet_wt', 0.01) # without image GAN a lesser weight is sufficient
-
-              prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, L1: {}, Disc: {}, LR: {}'.format(global_step, avg_img_loss,
-                                                                      running_sync_loss / (step + 1), avg_l1_loss, avg_disc_loss, current_lr))
+              prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, L1: {}, Bottom L1: {}, Full Disc: {}, Bottom Disc: {}, LR: {}'.format(global_step, avg_img_loss,
+                                                                      running_sync_loss / (step + 1), avg_l1_loss, avg_bottom_l1_loss, avg_disc_loss, avg_bottom_disc_loss, current_lr))
               
-              scheduler.step(avg_l1_loss)
+              scheduler.step(avg_img_loss)
               
               metrics = {
                   "train/overall_loss": avg_img_loss, 
                   "train/avg_l1": avg_l1_loss, 
+                  "train/avg_bottom_l1": avg_bottom_l1_loss, 
                   "train/sync_loss": running_sync_loss / (step + 1), 
                   "train/disc_loss": avg_disc_loss,
+                  "train/bottom_disc_loss": avg_bottom_disc_loss,
                   "train/step": global_step,
-                  "train/learning_rate": current_lr
+                  "train/learning_rate": current_lr,
+                  "l1_wt": hparams.l1_wt,
+                  "bottom_l1_wt": hparams.bottom_l1_wt,
+                  "syncnet_wt": hparams.syncnet_wt,
+                  "disc_wt": hparams.disc_wt,
+                  "bottom_disc_wt": hparams.bottom_disc_wt,
                   }
               if use_wandb: 
                 wandb.log({**metrics})
