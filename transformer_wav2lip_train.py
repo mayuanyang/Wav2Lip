@@ -83,7 +83,7 @@ def save_sample_images(x, g, gt, global_step, checkpoint_dir):
 
 
 device = torch.device("cuda" if use_cuda else "cpu")
-syncnet = TransformerSyncnet(num_heads=8, num_encoder_layers=4).to(device)
+syncnet = TransformerSyncnet(num_heads=8, num_encoder_layers=6).to(device)
 for p in syncnet.parameters():
     p.requires_grad = False
 
@@ -227,9 +227,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               '''
               If the syncnet_wt is 0.03, it means the sync_loss has 3% of the loss wheras the rest occupy 97% of the loss
               '''
-              loss = syncnet_wt * sync_loss 
-              + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss 
-              + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss
+              loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss
               
               loss.backward()
               optimizer.step()
