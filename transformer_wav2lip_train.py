@@ -200,7 +200,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               '''
               If the syncnet_wt is 0.03, it means the sync_loss has 3% of the loss wheras the rest occupy 97% of the loss
               '''
-              loss = syncnet_wt * sync_loss + (1 - syncnet_wt - hparams.disc_wt) * l1loss + hparams.disc_wt * disc_loss
+              loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * disc_loss
               
               loss.backward()
               optimizer.step()
