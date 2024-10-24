@@ -24,7 +24,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from models.conv import Conv2d, Conv2dTranspose
 from wav2lip_dataset import Dataset, syncnet_T
 import torch.nn.functional as F
-
+from pytorch_msssim import ms_ssim
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -166,11 +166,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               gt = gt.to(device)
               g = model(indiv_mels, x)
-                           
-
-              # print("The selected", selected_channels)
-              # print("The g ", g.shape)
-              # print("The gt", gt)
               
               # Compare two images
               '''
@@ -181,6 +176,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               num_of_frames = g.shape[2]
               full_losses = []
               bottom_losses = []
+              ssim_losses = []
               full_disc_loss = 0
               bottom_disc_loss = 0
 
@@ -198,9 +194,12 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   # For example:
                   full_frame_loss = lpips_loss(gen_frame.to(device), gt_frame.to(device))
                   bottom_frame_loss = lpips_loss(g_bottom.to(device), gt_bottom.to(device))
+
+                  ms_ssim_value = ms_ssim(gen_frame, gt_frame, data_range=1.0)
                   
                   full_losses.append(full_frame_loss)
                   bottom_losses.append(bottom_frame_loss)
+                  ssim_losses.append(ms_ssim_value)
                 
                 # Average the loss over all frames
                 full_disc_loss = torch.mean(torch.stack(full_losses))
@@ -208,6 +207,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
                 bottom_disc_loss = torch.mean(torch.stack(bottom_losses))
                 running_bottom_disc_loss += bottom_disc_loss.item()
+
+                ssim_loss = torch.mean(torch.stack(ssim_losses))
 
               if hparams.syncnet_wt > 0.:
                   sync_loss = get_sync_loss(mel, g)
@@ -224,10 +225,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               running_bottom_l1_loss += bottom_l1loss.item()
               
-              '''
-              If the syncnet_wt is 0.03, it means the sync_loss has 3% of the loss wheras the rest occupy 97% of the loss
-              '''
-              loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss
+              loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss + hparams.ssim_wt * ssim_loss
               
               loss.backward()
               optimizer.step()
@@ -263,8 +261,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-              prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, L1: {}, Bottom L1: {}, Full Disc: {}, Bottom Disc: {}, LR: {}'.format(global_step, avg_img_loss,
-                                                                      running_sync_loss / (step + 1), avg_l1_loss, avg_bottom_l1_loss, avg_disc_loss, avg_bottom_disc_loss, current_lr))
+              prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, L1: {}, Bottom L1: {}, Full Disc: {}, Bottom Disc: {}, SSIM: {}, LR: {}'.format(global_step, avg_img_loss,
+                                                                      running_sync_loss / (step + 1), avg_l1_loss, avg_bottom_l1_loss, avg_disc_loss, avg_bottom_disc_loss, ssim_loss.item(), current_lr))
               
               scheduler.step(avg_img_loss)
               
@@ -277,11 +275,11 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   "train/bottom_disc_loss": avg_bottom_disc_loss,
                   "train/step": global_step,
                   "train/learning_rate": current_lr,
-                  "l1_wt": hparams.l1_wt,
-                  "bottom_l1_wt": hparams.bottom_l1_wt,
-                  "syncnet_wt": hparams.syncnet_wt,
-                  "disc_wt": hparams.disc_wt,
-                  "bottom_disc_wt": hparams.bottom_disc_wt,
+                  "train/l1_wt": hparams.l1_wt,
+                  "train/bottom_l1_wt": hparams.bottom_l1_wt,
+                  "train/syncnet_wt": hparams.syncnet_wt,
+                  "train/disc_wt": hparams.disc_wt,
+                  "train/bottom_disc_wt": hparams.bottom_disc_wt,
                   }
               if use_wandb: 
                 wandb.log({**metrics})
@@ -376,7 +374,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
 
     if optimizer != None:
       for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.00001
+        param_group['lr'] = 0.0001
 
     return model
 

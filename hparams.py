@@ -96,6 +96,7 @@ hparams = HParams(
 	bottom_disc_wt=0.5,
   l1_wt=0.3,
 	bottom_l1_wt=0.5,
+	ssim_wt=0.2,
 	
   image_cache_size=250000,
 	audio_cache_size=28000
