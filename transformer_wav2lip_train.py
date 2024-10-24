@@ -151,6 +151,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         running_bottom_disc_loss = 0.0
         running_bottom_l1_loss = 0.0
         running_bottom_l1_loss = 0.0
+        running_ssim_loss = 0.0
 
         running_triplet_loss = 0.0
         for step, (x, indiv_mels, mel, gt) in prog_bar:
@@ -224,6 +225,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               bottom_l1loss = recon_loss(g[:, :, :, H//2:, :], gt[:, :, :, H//2:, :])
 
               running_bottom_l1_loss += bottom_l1loss.item()
+
+              running_ssim_loss += ssim_loss.item()
               
               loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss + hparams.ssim_wt * ssim_loss
               
@@ -256,13 +259,15 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               avg_bottom_disc_loss = running_bottom_disc_loss / (step + 1)
 
+              avg_ssim_loss = running_ssim_loss / (step + 1)
+
               
               if global_step % hparams.eval_interval == 0:
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
               prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, L1: {}, Bottom L1: {}, Full Disc: {}, Bottom Disc: {}, SSIM: {}, LR: {}'.format(global_step, avg_img_loss,
-                                                                      running_sync_loss / (step + 1), avg_l1_loss, avg_bottom_l1_loss, avg_disc_loss, avg_bottom_disc_loss, ssim_loss.item(), current_lr))
+                                                                      running_sync_loss / (step + 1), avg_l1_loss, avg_bottom_l1_loss, avg_disc_loss, avg_bottom_disc_loss, avg_ssim_loss, current_lr))
               
               scheduler.step(avg_img_loss)
               
@@ -273,13 +278,14 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   "train/sync_loss": running_sync_loss / (step + 1), 
                   "train/disc_loss": avg_disc_loss,
                   "train/bottom_disc_loss": avg_bottom_disc_loss,
-                  "train/step": global_step,
-                  "train/learning_rate": current_lr,
-                  "train/l1_wt": hparams.l1_wt,
-                  "train/bottom_l1_wt": hparams.bottom_l1_wt,
-                  "train/syncnet_wt": hparams.syncnet_wt,
-                  "train/disc_wt": hparams.disc_wt,
-                  "train/bottom_disc_wt": hparams.bottom_disc_wt,
+                  "train/ssim_loss": avg_ssim_loss,
+                  "params/step": global_step,
+                  "params/learning_rate": current_lr,
+                  "params/l1_wt": hparams.l1_wt,
+                  "params/bottom_l1_wt": hparams.bottom_l1_wt,
+                  "params/syncnet_wt": hparams.syncnet_wt,
+                  "params/disc_wt": hparams.disc_wt,
+                  "params/bottom_disc_wt": hparams.bottom_disc_wt,
                   }
               if use_wandb: 
                 wandb.log({**metrics})
