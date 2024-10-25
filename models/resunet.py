@@ -48,16 +48,14 @@ class ResUNet(nn.Module):
             this_face_sequence = f(this_face_sequence)
             face_features.append(this_face_sequence)
 
-        # NeRF-enhanced decoding
+        # NeRF-enhanced decoding with cross-attention between audio and face features
         x = audio_embedding
-        for f in face_decoder_blocks:
+        for idx, f in enumerate(face_decoder_blocks):
             x = f(x)
-            try:
-                x = torch.cat((x, face_features[-1]), dim=1)
-            except Exception as e:
-                raise e
-            
-            face_features.pop()
+            if face_features:  # Enhanced skip connection with attention
+                face_feature = face_features[-1]
+                face_features.pop()
+                x = self.cross_attention(x, face_feature)  # Cross-attention between face and audio features
 
         x = output_block(x)
 
@@ -71,6 +69,12 @@ class ResUNet(nn.Module):
             outputs = x
             
         return outputs
+    
+    def cross_attention(self, audio_embedding, face_feature):
+        # Apply cross-attention between audio_embedding and face_feature
+        attention_weights = torch.sigmoid(torch.mean(face_feature, dim=[2, 3], keepdim=True))
+        attention_applied = attention_weights * audio_embedding
+        return attention_applied + face_feature
 
 
 class ProcessBlock(nn.Module):
