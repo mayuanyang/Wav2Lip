@@ -24,14 +24,14 @@ class ResUNet(nn.Module):
             if temp_output is not None:
                 face_input = face_sequences + temp_output
             
-            temp_output = self.forward_impl(audio_sequences, face_input, block.face_encoder_blocks, block.audio_encoder, block.face_decoder_blocks, block.output_block)
+            temp_output = self.forward_impl(audio_sequences, face_input, block.face_encoder_blocks, block.audio_encoder, block.face_decoder_blocks, block.attention_blocks, block.output_block)
             
         step2_face_sequences = face_sequences + temp_output
-        outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.output_block)
+        outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.attention_blocks, self.output_block.output_block)
       
         return outputs
 
-    def forward_impl(self, audio_sequences, face_sequences, face_encoder_blocks, audio_encoder, face_decoder_blocks, output_block):
+    def forward_impl(self, audio_sequences, face_sequences, face_encoder_blocks, audio_encoder, face_decoder_blocks, cross_att_blocks, output_block):
         # audio_sequences = (B, T, 1, 80, 16)
         B = audio_sequences.size(0)
 
@@ -48,14 +48,15 @@ class ResUNet(nn.Module):
             this_face_sequence = f(this_face_sequence)
             face_features.append(this_face_sequence)
 
-        # NeRF-enhanced decoding with cross-attention between audio and face features
+        # NeRF-enhanced decoding
         x = audio_embedding
-        for idx, f in enumerate(face_decoder_blocks):
+        # Apply attention before concatenation
+        for i, f in enumerate(face_decoder_blocks):
             x = f(x)
-            if face_features:  # Enhanced skip connection with attention
-                face_feature = face_features[-1]
-                face_features.pop()
-                x = self.cross_attention(x, face_feature)  # Cross-attention between face and audio features
+            if face_features:
+                skip = face_features.pop()
+                skip = cross_att_blocks[i](x, skip)
+                x = torch.cat((x, skip), dim=1)
 
         x = output_block(x)
 
@@ -69,12 +70,6 @@ class ResUNet(nn.Module):
             outputs = x
             
         return outputs
-    
-    def cross_attention(self, audio_embedding, face_feature):
-        # Apply cross-attention between audio_embedding and face_feature
-        attention_weights = torch.sigmoid(torch.mean(face_feature, dim=[2, 3], keepdim=True))
-        attention_applied = attention_weights * audio_embedding
-        return attention_applied + face_feature
 
 
 class ProcessBlock(nn.Module):
@@ -88,9 +83,6 @@ class ProcessBlock(nn.Module):
         k is the kernel size.
         S is the stride.
         '''
-
-        # Define the NeRF module here
-        self.nerf = NeRF(depth=8, width=256)
 
         self.face_encoder_blocks = nn.ModuleList([
             nn.Sequential(Conv2d(9, 64, kernel_size=7, stride=1, padding=3), #1+(7−1)×1=7
@@ -175,60 +167,47 @@ class ProcessBlock(nn.Module):
         self.output_block = nn.Sequential(Conv2d(128, 32, kernel_size=3, stride=1, padding=1),
             nn.Conv2d(32, output_block_channels, kernel_size=1, stride=1, padding=0),
             nn.Sigmoid())
-    
-    def forward(self, face_features, audio_embedding):
-        """
-        Add NeRF for face feature enhancement in the decoder.
-        """
-        # Decode face features using the decoder
-        x = audio_embedding
-        for f in self.face_decoder_blocks:
-            x = f(x)
         
-        # Sample 3D points (for simplicity, assume we have 3D coordinates here)
-        B, C, H, W = x.shape
-        grid = self.create_3d_grid(B, H, W)  # Sample 3D points for NeRF
-        rgb, density = self.nerf(grid)
+        # Define attention gates corresponding to each skip connection
+        # Adjust F_g and F_l based on your architecture's channel dimensions
+        self.attention_blocks = nn.ModuleList([
+            AttentionGate(F_g=256, F_l=256, F_int=128),
+            AttentionGate(F_g=256, F_l=256, F_int=128),
+            AttentionGate(F_g=256, F_l=128, F_int=128),
+            AttentionGate(F_g=192, F_l=128, F_int=128),
+            AttentionGate(F_g=160, F_l=64, F_int=128),
+            AttentionGate(F_g=128, F_l=64, F_int=128),
+            AttentionGate(F_g=64, F_l=64, F_int=128),
+            AttentionGate(F_g=64, F_l=64, F_int=128),
+            # Add more attention gates if you have more skip connections
+        ])
+ 
 
-        # Combine NeRF output with decoded face features
-        x = torch.cat([x, rgb.permute(0, 3, 1, 2)], dim=1)  # Concatenate NeRF RGB with face features
-
-        # Pass the combined features through the output block
-        x = self.output_block(x)
-        return x
-
-    def create_3d_grid(self, B, H, W):
+class AttentionGate(nn.Module):
+    def __init__(self, F_g, F_l, F_int):
         """
-        Create a 3D grid of coordinates to pass through NeRF.
-        This is a simple grid for illustration. In practice, use real 3D sampling.
+        Args:
+            F_g: Number of channels in the gating signal (decoder feature map).
+            F_l: Number of channels in the skip connection (encoder feature map).
+            F_int: Number of intermediate channels.
         """
-        # Create a mesh grid in the range of [-1, 1] for x, y, z
-        grid_x, grid_y = torch.meshgrid(torch.linspace(-1, 1, H), torch.linspace(-1, 1, W))
-        grid_z = torch.linspace(0, 1, H)  # Sample z-axis points for simplicity
-        grid = torch.stack([grid_x, grid_y, grid_z], dim=-1)  # Shape (H, W, 3)
-        grid = grid.unsqueeze(0).repeat(B, 1, 1, 1)  # Repeat for batch size
-        return grid.to(torch.float32)
+        super(AttentionGate, self).__init__()
+        self.W_g = nn.Conv2d(F_g, F_int, kernel_size=1, stride=1, padding=0, bias=True)
+        self.W_x = nn.Conv2d(F_l, F_int, kernel_size=1, stride=1, padding=0, bias=True)
+        self.psi = nn.Conv2d(F_int, 1, kernel_size=1, stride=1, padding=0, bias=True)
+        self.relu = nn.ReLU(inplace=True)
+        self.sigmoid = nn.Sigmoid()
 
-class NeRF(nn.Module):
-    def __init__(self, depth=8, width=256):
-        super(NeRF, self).__init__()
-        self.depth = depth
-        self.width = width
-
-        layers = [nn.Linear(3, width), nn.ReLU()]
-        for _ in range(depth - 1):
-            layers.append(nn.Linear(width, width))
-            layers.append(nn.ReLU())
-
-        # Output layers for RGB color and density
-        self.fc_rgb = nn.Linear(width, 3)  # Output RGB color
-        self.fc_density = nn.Linear(width, 1)  # Output density
-
-        self.mlp = nn.Sequential(*layers)
-
-    def forward(self, x):
-        # x: input 3D coordinates (B, N, 3) where N is the number of sampled points
-        h = self.mlp(x)
-        rgb = torch.sigmoid(self.fc_rgb(h))  # RGB color
-        density = torch.relu(self.fc_density(h))  # Density value
-        return rgb, density
+    def forward(self, g, x):
+        """
+        Args:
+            g: Decoder feature map (gating signal).
+            x: Encoder feature map (skip connection).
+        Returns:
+            Weighted encoder feature map.
+        """
+        g1 = self.W_g(g)
+        x1 = self.W_x(x)
+        psi = self.relu(g1 + x1)
+        psi = self.sigmoid(self.psi(psi))
+        return x * psi
