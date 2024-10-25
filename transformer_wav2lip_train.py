@@ -196,11 +196,15 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   full_frame_loss = lpips_loss(gen_frame.to(device), gt_frame.to(device))
                   bottom_frame_loss = lpips_loss(g_bottom.to(device), gt_bottom.to(device))
 
-                  ms_ssim_value = ms_ssim(gen_frame, gt_frame, data_range=1.0)
+                  ms_ssim_value = 0.0
+
+                  if hparams.ssim_wt > 0:
+                    ms_ssim_value = ms_ssim(gen_frame, gt_frame, data_range=1.0)
+                    ssim_losses.append(ms_ssim_value)
                   
                   full_losses.append(full_frame_loss)
                   bottom_losses.append(bottom_frame_loss)
-                  ssim_losses.append(ms_ssim_value)
+                  
                 
                 # Average the loss over all frames
                 full_disc_loss = torch.mean(torch.stack(full_losses))
@@ -208,8 +212,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
                 bottom_disc_loss = torch.mean(torch.stack(bottom_losses))
                 running_bottom_disc_loss += bottom_disc_loss.item()
-
-                ssim_loss = torch.mean(torch.stack(ssim_losses))
+                
 
               if hparams.syncnet_wt > 0.:
                   sync_loss = get_sync_loss(mel, g)
@@ -225,10 +228,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               bottom_l1loss = recon_loss(g[:, :, :, H//2:, :], gt[:, :, :, H//2:, :])
 
               running_bottom_l1_loss += bottom_l1loss.item()
-
-              running_ssim_loss += ssim_loss.item()
               
-              loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss + hparams.ssim_wt * ssim_loss
+              loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss
               
               loss.backward()
               optimizer.step()
