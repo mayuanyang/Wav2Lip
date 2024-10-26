@@ -11,8 +11,8 @@ from PIL import Image
 from torch import nn
 import traceback
 
-image_cache = {} #multiprocessing.Manager().dict()
-orig_mel_cache = {} #multiprocessing.Manager().dict()
+image_cache = multiprocessing.Manager().dict()
+orig_mel_cache = multiprocessing.Manager().dict()
 
 syncnet_T = 5
 syncnet_mel_step_size = 16
