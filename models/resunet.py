@@ -85,34 +85,34 @@ class ProcessBlock(nn.Module):
         '''
 
         self.face_encoder_blocks = nn.ModuleList([
-            nn.Sequential(Conv2d(12, 96, kernel_size=3, stride=1, padding=1), #1+(7−1)×1=7
-                          Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #9
+            nn.Sequential(Conv2d(12, 96, kernel_size=3, stride=1, padding=1), #1+(3−1)×1=3
+                          Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #5
                           ), # 192,192
 
-            nn.Sequential(Conv2d(96, 96, kernel_size=7, stride=2, padding=3), #11+(7−1)×2=23
-              Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #25
+            nn.Sequential(Conv2d(96, 96, kernel_size=3, stride=2, padding=1), #5+(3−1)×2=9
+              Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #11
               ), # 96,96
 
-            nn.Sequential(Conv2d(96, 96, kernel_size=7, stride=2, padding=3), # 48,48, 27+(7−1)×2=39
-            Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #41
+            nn.Sequential(Conv2d(96, 96, kernel_size=3, stride=2, padding=1), # 48,48, 11+(3−1)×2=15
+            Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #17
             ),
 
-            nn.Sequential(Conv2d(96, 96, kernel_size=7, stride=2, padding=3), # 24,24, 43+(7−1)×2=55
-            Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #57
+            nn.Sequential(Conv2d(96, 96, kernel_size=3, stride=2, padding=1), # 24,24, 17+(3−1)×2=21
+            Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #23
             ),
 
-            nn.Sequential(Conv2d(96, 128, kernel_size=7, stride=2, padding=3), # 12,12, 59+(7−1)×2=71
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True)
-            ), #73
+            nn.Sequential(Conv2d(96, 128, kernel_size=3, stride=2, padding=1), # 12,12, 23+(3−1)×2=27
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True) # 29
+            ), 
 
-            nn.Sequential(Conv2d(128, 128, kernel_size=5, stride=2, padding=2), # 6,6, 75+(5−1)×2=83
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True)), #85
+            nn.Sequential(Conv2d(128, 128, kernel_size=3, stride=2, padding=1), # 6,6, 29+(3−1)×2=33
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True)), #35
 
-            nn.Sequential(Conv2d(128, 256, kernel_size=5, stride=2, padding=2), # 3,3, 85+(5−1)×2=93
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),), #95
+            nn.Sequential(Conv2d(128, 256, kernel_size=3, stride=2, padding=1), # 3,3, 35+(3−1)×2=39
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),), #41
             
-            nn.Sequential(Conv2d(256, 256, kernel_size=3, stride=1, padding=0), # 1, 1, 95+(3−1)×1=97
-            Conv2d(256, 256, kernel_size=1, stride=1, padding=0, residual=True))])
+            nn.Sequential(Conv2d(256, 256, kernel_size=3, stride=1, padding=0), # 1, 1, 41+(3−1)×1=43
+            Conv2d(256, 256, kernel_size=1, stride=1, padding=0, residual=True))]) # 45
 
         self.audio_encoder = nn.Sequential(
             Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
