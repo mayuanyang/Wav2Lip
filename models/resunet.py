@@ -181,63 +181,6 @@ class ProcessBlock(nn.Module):
             AttentionGate(F_g=96, F_l=96, F_int=128),
             # Add more attention gates if you have more skip connections
         ])
-    
-    def forward(self, face_features, audio_embedding):
-        """
-        Add NeRF for face feature enhancement in the decoder.
-        """
-        # Decode face features using the decoder
-        x = audio_embedding
-        for f in self.face_decoder_blocks:
-            x = f(x)
-        
-        # Sample 3D points (for simplicity, assume we have 3D coordinates here)
-        B, C, H, W = x.shape
-        grid = self.create_3d_grid(B, H, W)  # Sample 3D points for NeRF
-        rgb, density = self.nerf(grid)
-
-        # Combine NeRF output with decoded face features
-        x = torch.cat([x, rgb.permute(0, 3, 1, 2)], dim=1)  # Concatenate NeRF RGB with face features
-
-        # Pass the combined features through the output block
-        x = self.output_block(x)
-        return x
-
-    def create_3d_grid(self, B, H, W):
-        """
-        Create a 3D grid of coordinates to pass through NeRF.
-        This is a simple grid for illustration. In practice, use real 3D sampling.
-        """
-        # Create a mesh grid in the range of [-1, 1] for x, y, z
-        grid_x, grid_y = torch.meshgrid(torch.linspace(-1, 1, H), torch.linspace(-1, 1, W))
-        grid_z = torch.linspace(0, 1, H)  # Sample z-axis points for simplicity
-        grid = torch.stack([grid_x, grid_y, grid_z], dim=-1)  # Shape (H, W, 3)
-        grid = grid.unsqueeze(0).repeat(B, 1, 1, 1)  # Repeat for batch size
-        return grid.to(torch.float32)
-
-class NeRF(nn.Module):
-    def __init__(self, depth=8, width=256):
-        super(NeRF, self).__init__()
-        self.depth = depth
-        self.width = width
-
-        layers = [nn.Linear(3, width), nn.ReLU()]
-        for _ in range(depth - 1):
-            layers.append(nn.Linear(width, width))
-            layers.append(nn.ReLU())
-
-        # Output layers for RGB color and density
-        self.fc_rgb = nn.Linear(width, 3)  # Output RGB color
-        self.fc_density = nn.Linear(width, 1)  # Output density
-
-        self.mlp = nn.Sequential(*layers)
-
-    def forward(self, x):
-        # x: input 3D coordinates (B, N, 3) where N is the number of sampled points
-        h = self.mlp(x)
-        rgb = torch.sigmoid(self.fc_rgb(h))  # RGB color
-        density = torch.relu(self.fc_density(h))  # Density value
-        return rgb, density
 
 class AttentionGate(nn.Module):
     def __init__(self, F_g, F_l, F_int):
