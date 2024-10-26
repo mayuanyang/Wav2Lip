@@ -11,7 +11,7 @@ class ResUNet(nn.Module):
         self.blocks = nn.ModuleList()
 
         for i in range(num_of_blocks):
-            self.blocks.append(ProcessBlock(9))
+            self.blocks.append(ProcessBlock(12))
         
         print('The length of blocks', len(self.blocks))
         self.output_block = ProcessBlock(3)
@@ -85,23 +85,23 @@ class ProcessBlock(nn.Module):
         '''
 
         self.face_encoder_blocks = nn.ModuleList([
-            nn.Sequential(Conv2d(9, 64, kernel_size=7, stride=1, padding=3), #1+(7−1)×1=7
-                          Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #9
+            nn.Sequential(Conv2d(12, 96, kernel_size=3, stride=1, padding=1), #1+(7−1)×1=7
+                          Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #9
                           ), # 192,192
 
-            nn.Sequential(Conv2d(64, 64, kernel_size=7, stride=2, padding=3), #11+(7−1)×2=23
-              Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #25
+            nn.Sequential(Conv2d(96, 96, kernel_size=7, stride=2, padding=3), #11+(7−1)×2=23
+              Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #25
               ), # 96,96
 
-            nn.Sequential(Conv2d(64, 64, kernel_size=7, stride=2, padding=3), # 48,48, 27+(7−1)×2=39
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #41
+            nn.Sequential(Conv2d(96, 96, kernel_size=7, stride=2, padding=3), # 48,48, 27+(7−1)×2=39
+            Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #41
             ),
 
-            nn.Sequential(Conv2d(64, 64, kernel_size=7, stride=2, padding=3), # 24,24, 43+(7−1)×2=55
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #57
+            nn.Sequential(Conv2d(96, 96, kernel_size=7, stride=2, padding=3), # 24,24, 43+(7−1)×2=55
+            Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #57
             ),
 
-            nn.Sequential(Conv2d(64, 128, kernel_size=7, stride=2, padding=3), # 12,12, 59+(7−1)×2=71
+            nn.Sequential(Conv2d(96, 128, kernel_size=7, stride=2, padding=3), # 12,12, 59+(7−1)×2=71
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True)
             ), #73
 
@@ -151,20 +151,20 @@ class ProcessBlock(nn.Module):
             Conv2d(160, 160, kernel_size=3, stride=1, padding=1, residual=True),
             ), # 24, 24
 
-            nn.Sequential(Conv2dTranspose(224, 128, kernel_size=3, stride=2, padding=1, output_padding=1), 
+            nn.Sequential(Conv2dTranspose(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1), 
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             ), # 48, 48
 
-            nn.Sequential(Conv2dTranspose(192, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            nn.Sequential(Conv2dTranspose(224, 96, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True),
             ), # 96,96
             
             nn.Sequential(
-                Conv2dTranspose(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
-                Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+                Conv2dTranspose(192, 96, kernel_size=3, stride=2, padding=1, output_padding=1),
+                Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True),
             )]) 
 
-        self.output_block = nn.Sequential(Conv2d(128, 32, kernel_size=3, stride=1, padding=1),
+        self.output_block = nn.Sequential(Conv2d(192, 32, kernel_size=3, stride=1, padding=1),
             nn.Conv2d(32, output_block_channels, kernel_size=1, stride=1, padding=0),
             nn.Sigmoid())
         
@@ -175,10 +175,10 @@ class ProcessBlock(nn.Module):
             AttentionGate(F_g=256, F_l=256, F_int=128),
             AttentionGate(F_g=256, F_l=128, F_int=128),
             AttentionGate(F_g=192, F_l=128, F_int=128),
-            AttentionGate(F_g=160, F_l=64, F_int=128),
-            AttentionGate(F_g=128, F_l=64, F_int=128),
-            AttentionGate(F_g=64, F_l=64, F_int=128),
-            AttentionGate(F_g=64, F_l=64, F_int=128),
+            AttentionGate(F_g=160, F_l=96, F_int=128),
+            AttentionGate(F_g=128, F_l=96, F_int=128),
+            AttentionGate(F_g=96, F_l=96, F_int=128),
+            AttentionGate(F_g=96, F_l=96, F_int=128),
             # Add more attention gates if you have more skip connections
         ])
     

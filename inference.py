@@ -116,7 +116,7 @@ def face_detect(images):
   return results 
 
 def datagen(frames, mels, use_ref_img):
-  img_batch, mel_batch, frame_batch, coords_batch, ref_batch = [], [], [], [], []
+  img_batch, mel_batch, frame_batch, coords_batch, ref_batch, ref_batch2 = [], [], [], [], [], []
 
   if args.box[0] == -1:
     if not args.static:
@@ -128,6 +128,8 @@ def datagen(frames, mels, use_ref_img):
     y1, y2, x1, x2 = args.box
     face_det_results = [[f[y1: y2, x1:x2], (y1, y2, x1, x2)] for f in frames]
 
+  
+
   for i, m in enumerate(mels):
     idx = 0 if args.static else i%len(frames)
     frame_to_save = frames[idx].copy()
@@ -136,10 +138,20 @@ def datagen(frames, mels, use_ref_img):
     face = cv2.resize(face, (args.img_size, args.img_size))
     if use_ref_img:
       rdn_idx = random.randint(0, len(frames) - 1)
+      while rdn_idx == idx:
+        rdn_idx = random.randint(0, len(frames) - 1)
+      
       ref_face, _ = face_det_results[rdn_idx].copy()
       ref_face = cv2.resize(ref_face, (args.img_size, args.img_size))
       ref_batch.append(ref_face)
+
+      rdn_idx = random.randint(0, len(frames) - 1)
+      while rdn_idx  == idx:
+        rdn_idx = random.randint(0, len(frames) - 1)
       
+      ref_face2, _ = face_det_results[rdn_idx].copy()
+      ref_face2 = cv2.resize(ref_face2, (args.img_size, args.img_size))
+      ref_batch2.append(ref_face2)
     
       
     img_batch.append(face)
@@ -150,16 +162,17 @@ def datagen(frames, mels, use_ref_img):
     if len(img_batch) >= args.wav2lip_batch_size:
       img_batch, mel_batch = np.asarray(img_batch), np.asarray(mel_batch)
       ref_batch = np.asarray(ref_batch)
+      ref_batch2 = np.asarray(ref_batch2)
 
       img_masked = img_batch.copy()
       img_masked[:, args.img_size//2:] = 0
 
-      img_batch = np.concatenate((img_masked, img_batch, ref_batch), axis=3) / 255.
+      img_batch = np.concatenate((img_masked, img_batch, ref_batch, ref_batch2), axis=3) / 255.
       mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
       
 
       yield img_batch, mel_batch, frame_batch, coords_batch
-      img_batch, mel_batch, frame_batch, coords_batch, ref_batch = [], [], [], [], []
+      img_batch, mel_batch, frame_batch, coords_batch, ref_batch, ref_batch2 = [], [], [], [], [], []
 
   if len(img_batch) > 0:
     img_batch, mel_batch = np.asarray(img_batch), np.asarray(mel_batch)
@@ -168,7 +181,8 @@ def datagen(frames, mels, use_ref_img):
 
     if use_ref_img:
       ref_batch = np.asarray(ref_batch)
-      img_batch = np.concatenate((img_masked, img_batch, ref_batch), axis=3) / 255.
+      ref_batch2 = np.asarray(ref_batch2)
+      img_batch = np.concatenate((img_masked, img_batch, ref_batch, ref_batch2), axis=3) / 255.
     else:
       img_batch = np.concatenate((img_masked, img_batch, img_batch.copy()), axis=3) / 255.
     mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
