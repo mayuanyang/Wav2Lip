@@ -45,6 +45,7 @@ parser.add_argument('--syncnet_checkpoint_path', help='Load the pre-trained Expe
 
 parser.add_argument('--checkpoint_path', help='Resume from this checkpoint', default=None, type=str)
 parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
+parser.add_argument('--wandb_run_id', help='The run ID for wandb', required=False, type=str)
 parser.add_argument('--use_augmentation', help='Whether to use data augmentation', default=True, type=str2bool)
 parser.add_argument('--train_root', help='The train.txt and val.txt directory', default='filelists', type=str)
 parser.add_argument('--num_of_unet_layers', help='The train.txt and val.txt directory', default=2, type=int)
@@ -213,8 +214,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 bottom_disc_loss = torch.mean(torch.stack(bottom_losses))
                 running_bottom_disc_loss += bottom_disc_loss.item()
 
-                ssim_loss = torch.mean(torch.stack(ssim_losses))
-                running_ssim_loss += ssim_loss.item()
+                ssim_loss = 0.0
+                if len(ssim_losses) > 0:
+                  ssim_loss = torch.mean(torch.stack(ssim_losses))
+                  running_ssim_loss += ssim_loss.item()
                 
 
               if hparams.syncnet_wt > 0.:
@@ -427,13 +430,14 @@ if __name__ == "__main__":
       wandb.init(
         # set the wandb project where this run will be logged
         project="my-wav2lip",
-
+        id=args.wandb_run_id, 
+        resume="allow",
         # track hyperparameters and run metadata
         config={
         "learning_rate": hparams.initial_learning_rate,
         "architecture": "Wav2lip",
         "dataset": "MyOwn",
-        "epochs": 200000,
+        "epochs": 2000000,
         }
       )
 
