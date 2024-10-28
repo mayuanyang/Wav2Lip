@@ -199,7 +199,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   ms_ssim_value = 0.0
 
                   if hparams.ssim_wt > 0:
-                    ms_ssim_value = ms_ssim(gen_frame, gt_frame, data_range=1.0)
+                    ms_ssim_value = 1 - ms_ssim(gen_frame, gt_frame, data_range=1.0, size_average=True)
                     ssim_losses.append(ms_ssim_value)
                   
                   full_losses.append(full_frame_loss)
@@ -212,6 +212,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
                 bottom_disc_loss = torch.mean(torch.stack(bottom_losses))
                 running_bottom_disc_loss += bottom_disc_loss.item()
+
+                ssim_loss = torch.mean(torch.stack(ssim_losses))
+                running_ssim_loss += ssim_loss.item()
                 
 
               if hparams.syncnet_wt > 0.:
@@ -229,7 +232,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               running_bottom_l1_loss += bottom_l1loss.item()
               
-              loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss
+              loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss + hparams.ssim_wt * ssim_loss
               
               loss.backward()
               optimizer.step()
