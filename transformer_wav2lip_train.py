@@ -273,8 +273,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-              prog_bar.set_description('Step: {}, Img Loss: {}, Sync Loss: {}, L1: {}, Bottom L1: {}, Full Disc: {}, Bottom Disc: {}, SSIM: {}, LR: {}'.format(global_step, avg_img_loss,
-                                                                      running_sync_loss / (step + 1), avg_l1_loss, avg_bottom_l1_loss, avg_disc_loss, avg_bottom_disc_loss, avg_ssim_loss, current_lr))
+              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Bottom L1: {avg_bottom_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Bottom Disc: {avg_bottom_disc_loss:.5f}, SSIM: {avg_ssim_loss:.5f}, LR: {current_lr:.5f}")
               
               scheduler.step(avg_img_loss)
               
