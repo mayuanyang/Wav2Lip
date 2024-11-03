@@ -85,12 +85,12 @@ hparams = HParams(
   save_optimizer_state=True,
 
   syncnet_wt=0.4,
-	syncnet_num_workers=48,
-	syncnet_batch_size=170,
+	syncnet_num_workers=24,
+	syncnet_batch_size=530,
 	syncnet_face_lr=1e-5,
 	syncnet_audio_lr=2e-5,
 	syncnet_eval_interval=100000,
-	syncnet_checkpoint_interval=2000,
+	syncnet_checkpoint_interval=200,
 
   disc_wt=0.5,
 	bottom_disc_wt=0.6,
