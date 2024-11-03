@@ -98,8 +98,8 @@ hparams = HParams(
 
   disc_wt=0.5,
 	bottom_disc_wt=0.6,
-  l1_wt=0.8,
-	bottom_l1_wt=0.9,
+  l1_wt=0.7,
+	bottom_l1_wt=0.8,
   ssim_wt=0.0,
 	
   
