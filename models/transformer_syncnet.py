@@ -16,45 +16,45 @@ class TransformerSyncnet(nn.Module):
         '''
         self.face_encoder = nn.Sequential(
             
-            Conv2d(15, 32, kernel_size=3, stride=1, padding=1), #192x192, 1+(7−1)×1=7
-            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True), #192x192, 1+(7−1)×1=7
+            Conv2d(15, 32, kernel_size=3, stride=1, padding=1), #192x192, 1+(3−1)×1=3
+            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True), #192x192, 3+(3−1)×1=5
             
-            Conv2d(32, 64, kernel_size=3, stride=2, padding=1), #96x96, 7+(7−1)×2=7+12=19
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), # 19+(3−1)×1=19+2=21
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), # 21+(3−1)×1=19+2=23
+            Conv2d(32, 64, kernel_size=3, stride=2, padding=1), #96x96, 7
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), # 9
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), # 11
 
-            Conv2d(64, 128, kernel_size=3, stride=(1, 2), padding=1), #94x47, 23+(5−1)×1=23+4=27
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #94x47, 27+(3-1)x1=29
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #94x47, 29+(3-1)x1=31
+            Conv2d(64, 128, kernel_size=3, stride=(1, 2), padding=1), #94x47, 13
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #94x47, 15
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #94x47, 17
 
-            Conv2d(128, 256, kernel_size=3, stride=2, padding=1), # 47x24, 31 + (5-1)x2 = 39
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 47x24, 39+(3-1)x1=41
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 47x24, 41+(3-1)x1=43
+            Conv2d(128, 256, kernel_size=3, stride=2, padding=1), # 47x24, 19
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 47x24, 21
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 47x24, 23
 
-            Conv2d(256, 256, kernel_size=3, stride=2, padding=1), # 24x 12, 43+(5-1)x2=51
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 51+(3-1)x1=53
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 53+(3-1)x1=55
+            Conv2d(256, 256, kernel_size=3, stride=2, padding=1), # 24x 12, 25
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 27
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 29
 
-            Conv2d(256, 512, kernel_size=3, stride=1, padding=1), # 24x 12, 55+(3-1)x1=57
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 57+(3-1)x1=59
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 59+(3-1)x1=61
+            Conv2d(256, 512, kernel_size=3, stride=1, padding=1), # 24x 12, 31
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 33
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 35
 
-            Conv2d(512, 256, kernel_size=3, stride=2, padding=1), #12x6, 61+(5-1)x2=69
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #12x6, 69+(3-1)x1=71
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #12x6, 71+(3-1)x1=73
+            Conv2d(512, 256, kernel_size=3, stride=2, padding=1), #12x6, 37
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #12x6, 39
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #12x6, 41
 
-            Conv2d(256, 256, kernel_size=3, stride=(2,1), padding=1), #6x6, 73+(3-1)x2=77
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 77+(3-1)x1=79
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 79+(3-1)x1=81
+            Conv2d(256, 256, kernel_size=3, stride=(2,1), padding=1), #6x6, 43
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 45
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 47
 
-            Conv2d(256, 128, kernel_size=3, stride=1, padding=1), #6x6, 81+(3-1)x1=83
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #6x6, 83+(3-1)x1=85
+            Conv2d(256, 128, kernel_size=3, stride=1, padding=1), #6x6, 49
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #6x6, 51
 
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1), #6x6, 85+(3-1)x1=87
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #3x3, 87+(3-1)x1=89
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1), #6x6, 53
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #3x3, 55
 
-            Conv2d(128, 64, kernel_size=3, stride=2, padding=1), #3x3, 89+(3-1)x2=93, the 27th
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #3x3, 93+(3-1)x1=95, the 27th
+            Conv2d(128, 64, kernel_size=3, stride=2, padding=1), #3x3, 57
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #3x3, 59
             
             )
 
