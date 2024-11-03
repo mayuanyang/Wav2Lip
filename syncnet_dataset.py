@@ -151,7 +151,7 @@ class Dataset(object):
                         try:
                             img = cv2.resize(img, (hparams.img_size, hparams.img_size))                            
                             
-                            if len(face_image_cache) < hparams.image_cache_size:
+                            if len(face_image_cache) < hparams.syncnet_image_cache_size:
                               face_image_cache[fname] = img  # Cache the resized image
                             
                         except Exception as e:
@@ -208,7 +208,7 @@ class Dataset(object):
                     else:
                         wav = audio.load_wav(wavpath, hparams.sample_rate)
                         orig_mel = audio.melspectrogram(wav).T
-                        if len(orig_mel_cache) < hparams.audio_cache_size:
+                        if len(orig_mel_cache) < hparams.syncnet_audio_cache_size:
                           orig_mel_cache[wavpath] = orig_mel
                     
                 except Exception as e:
