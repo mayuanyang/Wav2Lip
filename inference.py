@@ -6,7 +6,21 @@ from tqdm import tqdm
 from glob import glob
 import torch, face_detection
 from models import ResUNet
+from realesrgan import RealESRGANer
+from basicsr.archs.rrdbnet_arch import RRDBNet
+from PIL import Image
+
 import platform
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 parser = argparse.ArgumentParser(description='Inference code to lip-sync videos in the wild using Wav2Lip models')
 
@@ -26,8 +40,7 @@ parser.add_argument('--outfile', type=str, help='Video path to save result. See 
 parser.add_argument('--static', type=bool, 
           help='If True, then use only first video frame for inference', default=False)
 
-parser.add_argument('--use_ref_img', type=bool, 
-          help='If True, then use random reference images concat to the input ', default=False)
+parser.add_argument('--use_ref_img', default=True, type=str2bool)
 
 parser.add_argument('--fps', type=float, help='Can be specified only if input is a static image (default: 25)', 
           default=25., required=False)
@@ -59,6 +72,8 @@ parser.add_argument('--nosmooth', default=False, action='store_true',
 
 parser.add_argument('--model_layers', default=2, type=int, 
       help='The number of layers that the model has')
+
+parser.add_argument('--use_esrgan', default=False, type=str2bool)
 
 args = parser.parse_args()
 args.img_size = 192
@@ -152,6 +167,9 @@ def datagen(frames, mels, use_ref_img):
       ref_face2, _ = face_det_results[rdn_idx].copy()
       ref_face2 = cv2.resize(ref_face2, (args.img_size, args.img_size))
       ref_batch2.append(ref_face2)
+    else:
+      ref_batch.append(face)
+      ref_batch2.append(face)
     
       
     img_batch.append(face)
@@ -166,6 +184,9 @@ def datagen(frames, mels, use_ref_img):
 
       img_masked = img_batch.copy()
       img_masked[:, args.img_size//2:] = 0
+
+
+      print('The length of img_masked, img_batch, ref_batch, ref_batch2', len(img_masked), len(img_batch), len(ref_batch), len(ref_batch2))
 
       img_batch = np.concatenate((img_masked, img_batch, ref_batch, ref_batch2), axis=3) / 255.
       mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
@@ -184,7 +205,7 @@ def datagen(frames, mels, use_ref_img):
       ref_batch2 = np.asarray(ref_batch2)
       img_batch = np.concatenate((img_masked, img_batch, ref_batch, ref_batch2), axis=3) / 255.
     else:
-      img_batch = np.concatenate((img_masked, img_batch, img_batch.copy()), axis=3) / 255.
+      img_batch = np.concatenate((img_masked, img_batch, ref_batch, ref_batch2), axis=3) / 255.
     mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
 
     yield img_batch, mel_batch, frame_batch, coords_batch
@@ -219,7 +240,55 @@ def load_model(path, lora_path=None, model_layers=2):
   model = model.to(device)
   return model.eval()
 
+def load_esrgan_model(checkpoint_path='checkpoints/RealESRGAN_x4plus.pth', device='cuda' if torch.cuda.is_available() else 'cpu'):
+    """
+    Loads the pre-trained Real-ESRGAN model for image enhancement.
+    """
+    # Define the model architecture for Real-ESRGAN
+    model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
+
+    # Instantiate RealESRGANer with the loaded model
+    esrgan = RealESRGANer(
+        scale=4,  # 4x upscaling
+        model_path=checkpoint_path,
+        model=model,
+        tile=0,  # No tiling by default
+        tile_pad=10,
+        pre_pad=0,
+        half=True,  # Use half-precision if supported
+        device=device
+    )
+
+    print("Real-ESRGAN model loaded successfully.")
+    return esrgan
+
+def enhance_image_with_esrgan(model, image):
+    """
+    Enhances an image using the Real-ESRGAN model.
+    Args:
+        model (RealESRGANer): The loaded Real-ESRGAN model.
+        image (PIL Image or numpy array): Image to enhance.
+    Returns:
+        Enhanced image as a PIL Image.
+    """
+    # Convert the image to a NumPy array if it's a PIL Image
+    if isinstance(image, Image.Image):
+        image = np.array(image)
+
+    # Enhance the image using Real-ESRGAN
+    enhanced_img_np, _ = model.enhance(image, outscale=2)  # Scale factor of 4
+
+    # Convert the enhanced image back to a PIL image
+    enhanced_img_pil = Image.fromarray(enhanced_img_np)
+    return enhanced_img_pil
+
 def main():
+  print('use gan', args.use_esrgan, args.use_ref_img)
+  global esrgan_model
+  if args.use_esrgan:
+    esrgan_model = load_esrgan_model()  # Load the ESRGAN model
+    print("ESRGAN model loaded for image enhancement.")
+
   if not os.path.isfile(args.face):
     raise ValueError('--face argument must be a valid path to video/image file')
 
@@ -310,6 +379,13 @@ def main():
     for p, f, c in zip(pred, frames, coords):
       y1, y2, x1, x2 = c
       p = cv2.resize(p.astype(np.uint8), (x2 - x1, y2 - y1))
+
+      if args.use_esrgan:
+        p = enhance_image_with_esrgan(esrgan_model, p)  # Apply ESRGAN enhancement
+        p = np.array(p)  # Convert PIL image to NumPy array if needed
+        p = cv2.resize(p, (x2 - x1, y2 - y1))  # Resize to match the original region shape
+
+
 
       f[y1:y2, x1:x2] = p
       out.write(f)
