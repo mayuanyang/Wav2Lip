@@ -153,6 +153,29 @@ class Dataset(object):
 
     def __len__(self):
         return len(self.all_videos)
+    
+    def get_ref_images(self, forbidden_images, img_names):
+      
+      # Filter out the forbidden images from img_names
+      available_images = [img for img in img_names if img not in forbidden_images]
+
+      # Initialize the list for reference window filenames
+      ref_window_fnames = []
+
+      needed_length = syncnet_T
+
+      # Check if we have enough unique images
+      if len(available_images) >= needed_length:
+        # Randomly select unique images if there are enough available
+        ref_window_fnames = random.sample(available_images, needed_length)
+      else:
+        # If not enough unique images, fill up with duplicates as necessary
+        while len(ref_window_fnames) < needed_length:
+          ref_window_fnames.extend(available_images)
+          # Trim the list to the exact needed length
+          ref_window_fnames = ref_window_fnames[:needed_length]
+
+      return ref_window_fnames  
 
     def __getitem__(self, idx):
         #start_time = time.perf_counter()
@@ -179,15 +202,10 @@ class Dataset(object):
             while wrong_img_name == img_name:
                 wrong_img_name = random.choice(img_names)
 
-            ref_img_name = random.choice(img_names)
-            while ref_img_name == img_name or ref_img_name == wrong_img_name:
-                ref_img_name = random.choice(img_names)
-
             window_fnames = self.get_window(img_name)
             wrong_window_fnames = self.get_window(wrong_img_name)
-            ref_window_fnames = self.get_window(ref_img_name)
 
-            if window_fnames is None or wrong_window_fnames is None or ref_window_fnames is None:
+            if window_fnames is None or wrong_window_fnames is None:
                 should_load_diff_video = True
                 continue
 
@@ -201,11 +219,25 @@ class Dataset(object):
                 should_load_diff_video = True
                 continue
             
-            ref_window = self.read_window(ref_window_fnames)
-            if ref_window is None:
+            # Create a set of forbidden image names for faster lookup
+            forbidden_images = set(window_fnames).union(set(wrong_window_fnames))
+            
+            # Initialize the list for reference window filenames
+            ref1_window_fnames = self.get_ref_images(forbidden_images, img_names)
+
+            forbidden_images = set(window_fnames).union(set(wrong_window_fnames)).union(set(ref1_window_fnames))
+            ref2_window_fnames = self.get_ref_images(forbidden_images, img_names)
+            
+            ref1_window = self.read_window(ref1_window_fnames)
+            if ref1_window is None:
                 should_load_diff_video = True
                 continue
 
+            ref2_window = self.read_window(ref2_window_fnames)
+            if ref2_window is None:
+                should_load_diff_video = True
+                continue
+            
             try:
                 wavpath = join(vidname, "audio.wav")
 
@@ -243,9 +275,11 @@ class Dataset(object):
 
                 wrong_window = self.prepare_window(wrong_window)
 
-                ref_window = self.prepare_window(ref_window)
+                ref1_window = self.prepare_window(ref1_window)
 
-                x = np.concatenate([window, wrong_window, ref_window], axis=0) # Concat via the channel axis
+                ref2_window = self.prepare_window(ref2_window)
+
+                x = np.concatenate([window, wrong_window, ref1_window, ref2_window], axis=0) # Concat via the channel axis
                 
 
                 x = torch.FloatTensor(x)
