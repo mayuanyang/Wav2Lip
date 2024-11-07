@@ -147,6 +147,8 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
 
   should_fill_ref_pool = len(ref_pool) == 0
 
+  ids_in_ref = []
+
   for i, m in enumerate(mels):
     idx = 0 if args.static else i%len(frames)
     frame_to_save = frames[idx].copy()
@@ -157,36 +159,48 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
     if should_fill_ref_pool:
       ref_pool.append(face)
     
+    
     if use_ref_img:
       if iteration <= 0:
-        rdn_idx = random.randint(0, len(frames) - 1)
-        while rdn_idx == idx:
           rdn_idx = random.randint(0, len(frames) - 1)
-        
-        ref_face, _ = face_det_results[rdn_idx].copy()
-        ref_face = cv2.resize(ref_face, (args.img_size, args.img_size))
-        ref_batch.append(ref_face)
 
-        rdn_idx = random.randint(0, len(frames) - 1)
-        while rdn_idx  == idx:
+          #print('The rdn_idx and cache 1', rdn_idx, ids_in_ref)
+          while rdn_idx == idx:
+              rdn_idx = random.randint(0, len(frames) - 1)
+          
+          ref_face, _ = face_det_results[rdn_idx].copy()
+          ref_face = cv2.resize(ref_face, (args.img_size, args.img_size))
+          ref_batch.append(ref_face)
+          ids_in_ref.append(rdn_idx)
+
           rdn_idx = random.randint(0, len(frames) - 1)
-        
-        ref_face2, _ = face_det_results[rdn_idx].copy()
-        ref_face2 = cv2.resize(ref_face2, (args.img_size, args.img_size))
-        ref_batch2.append(ref_face2)
+
+          #print('The rdn_idx and cache 2', rdn_idx, ids_in_ref)
+          while rdn_idx == idx or rdn_idx in ids_in_ref:
+              rdn_idx = random.randint(0, len(frames) - 1)
+          
+          ref_face2, _ = face_det_results[rdn_idx].copy()
+          ref_face2 = cv2.resize(ref_face2, (args.img_size, args.img_size))
+          ref_batch2.append(ref_face2)
+          ids_in_ref.append(rdn_idx)
       else:
-        
-        rdn_idx = random.randint(0, len(ref_pool) - 1)
-        while rdn_idx == idx:
           rdn_idx = random.randint(0, len(ref_pool) - 1)
-        
-        ref_batch.append(ref_pool[rdn_idx])
 
-        rdn_idx = random.randint(0, len(ref_pool) - 1)
-        while rdn_idx  == idx:
+          #print('The rdn_idx and cache 3', rdn_idx, ids_in_ref)
+          while rdn_idx == idx or rdn_idx in ids_in_ref:
+              rdn_idx = random.randint(0, len(ref_pool) - 1)
+          
+          ref_batch.append(ref_pool[rdn_idx])
+          ids_in_ref.append(rdn_idx)
+
           rdn_idx = random.randint(0, len(ref_pool) - 1)
-        
-        ref_batch2.append(ref_pool[rdn_idx])
+
+          #print('The rdn_idx and cache 4', rdn_idx, ids_in_ref)
+          while rdn_idx == idx or rdn_idx in ids_in_ref:
+              rdn_idx = random.randint(0, len(ref_pool) - 1)
+          
+          ref_batch2.append(ref_pool[rdn_idx])
+          ids_in_ref.append(rdn_idx)
 
     else:
       ref_batch.append(face)
@@ -211,6 +225,8 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
 
       yield img_batch, mel_batch, frame_batch, coords_batch
       img_batch, mel_batch, frame_batch, coords_batch, ref_batch, ref_batch2 = [], [], [], [], [], []
+    
+    ids_in_ref = []
 
   if len(img_batch) > 0:
     img_batch, mel_batch = np.asarray(img_batch), np.asarray(mel_batch)
