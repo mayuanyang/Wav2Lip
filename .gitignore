@@ -14,3 +14,4 @@ evaluation/test_filelists/lr*.txt
 *.webm
 *.mp3
 training
+input
