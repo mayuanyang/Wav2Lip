@@ -96,11 +96,11 @@ hparams = HParams(
 	syncnet_image_cache_size=35000,
 	syncnet_audio_cache_size=3000,
 
-  syncnet_wt=0.4,
-  disc_wt=0.5,
+  syncnet_wt=0.9,
+  disc_wt=0.7,
 	bottom_disc_wt=0.6,
-  l1_wt=0.4,
-	bottom_l1_wt=0.35,
+  l1_wt=1,
+	bottom_l1_wt=1,
   ssim_wt=0.0,
 	
   
