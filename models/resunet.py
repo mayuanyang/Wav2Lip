@@ -15,6 +15,8 @@ class ResUNet(nn.Module):
         
         print('The length of blocks', len(self.blocks))
         self.output_block = ProcessBlock(3)
+
+        self.face_enhancer = FaceEnhancer()
                 
         
     def forward(self, audio_sequences, face_sequences):
@@ -28,6 +30,9 @@ class ResUNet(nn.Module):
             
         step2_face_sequences = face_sequences + temp_output
         outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.attention_blocks, self.output_block.output_block)
+
+        print('The outputs shape', outputs.shape)
+        outputs = self.face_enhancer(outputs)
       
         return outputs
 
@@ -210,3 +215,73 @@ class AttentionGate(nn.Module):
         psi = self.relu(g1 + x1)
         psi = self.sigmoid(self.psi(psi))
         return encoded_features * psi
+
+class UNetBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(UNetBlock, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        self.relu = nn.ReLU(inplace=True)
+        self.norm = nn.BatchNorm2d(out_channels)
+
+    def forward(self, x):
+        x = self.relu(self.norm(self.conv1(x)))
+        x = self.relu(self.norm(self.conv2(x)))
+        return x
+
+class FaceEnhancer(nn.Module):
+    def __init__(self):
+        super(FaceEnhancer, self).__init__()
+        
+        # Downsampling blocks
+        self.enc1 = UNetBlock(3, 32)
+        self.enc2 = UNetBlock(32, 64)
+        self.enc3 = UNetBlock(64, 128)
+        self.enc4 = UNetBlock(128, 256)
+        
+        # Bottleneck
+        self.bottleneck = UNetBlock(256, 512)
+        
+        # Upsampling blocks
+        self.up4 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
+        self.dec4 = UNetBlock(512, 256)
+        
+        self.up3 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+        self.dec3 = UNetBlock(256, 128)
+        
+        self.up2 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.dec2 = UNetBlock(128, 64)
+        
+        self.up1 = nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2)
+        self.dec1 = UNetBlock(64, 32)
+        
+        # Final output layer
+        self.final_conv = nn.Conv2d(32, 3, kernel_size=1)
+    
+    def forward(self, x):
+        # Reshape to combine B and T for processing in U-Net
+        B, C, T, H, W = x.shape
+        x = x.view(B * T, C, H, W)
+        
+        # Downsampling path
+        enc1 = self.enc1(x)
+        enc2 = self.enc2(F.max_pool2d(enc1, 2))
+        enc3 = self.enc3(F.max_pool2d(enc2, 2))
+        enc4 = self.enc4(F.max_pool2d(enc3, 2))
+        
+        # Bottleneck
+        bottleneck = self.bottleneck(F.max_pool2d(enc4, 2))
+        
+        # Upsampling path
+        dec4 = self.dec4(torch.cat([self.up4(bottleneck), enc4], dim=1))
+        dec3 = self.dec3(torch.cat([self.up3(dec4), enc3], dim=1))
+        dec2 = self.dec2(torch.cat([self.up2(dec3), enc2], dim=1))
+        dec1 = self.dec1(torch.cat([self.up1(dec2), enc1], dim=1))
+        
+        # Final output layer
+        out = self.final_conv(dec1)
+        
+        # Reshape back to B, C, T, H, W
+        out = out.view(B, C, T, H, W)
+        
+        return out
