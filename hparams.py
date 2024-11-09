@@ -83,24 +83,24 @@ hparams = HParams(
 	checkpoint_interval=1000,
 	eval_interval=500000,
   save_optimizer_state=True,
-	image_cache_size=355000,
+	image_cache_size=455000,
 	audio_cache_size=35000,
 
   
 	syncnet_num_workers=24,
 	syncnet_batch_size=530,
-	syncnet_face_lr=1e-5,
-	syncnet_audio_lr=2e-5,
+	syncnet_face_lr=6e-6,
+	syncnet_audio_lr=8e-6,
 	syncnet_eval_interval=100000,
 	syncnet_checkpoint_interval=200,
 	syncnet_image_cache_size=35000,
 	syncnet_audio_cache_size=3000,
 
-  syncnet_wt=0.4,
-  disc_wt=0.5,
+  syncnet_wt=0.9,
+  disc_wt=0.7,
 	bottom_disc_wt=0.6,
-  l1_wt=0.4,
-	bottom_l1_wt=0.45,
+  l1_wt=1,
+	bottom_l1_wt=1,
   ssim_wt=0.0,
 	
   

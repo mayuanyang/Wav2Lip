@@ -75,6 +75,8 @@ parser.add_argument('--model_layers', default=2, type=int,
 
 parser.add_argument('--use_esrgan', default=False, type=str2bool)
 
+parser.add_argument('--iteration', type=int, help='Number of iteration to inference', default=2)
+
 args = parser.parse_args()
 args.img_size = 192
 
@@ -130,7 +132,7 @@ def face_detect(images):
   del detector
   return results 
 
-def datagen(frames, mels, use_ref_img):
+def datagen(frames, mels, use_ref_img, ref_pool, iteration):
   img_batch, mel_batch, frame_batch, coords_batch, ref_batch, ref_batch2 = [], [], [], [], [], []
 
   if args.box[0] == -1:
@@ -143,7 +145,9 @@ def datagen(frames, mels, use_ref_img):
     y1, y2, x1, x2 = args.box
     face_det_results = [[f[y1: y2, x1:x2], (y1, y2, x1, x2)] for f in frames]
 
-  
+  should_fill_ref_pool = len(ref_pool) == 0
+
+  ids_in_ref = []
 
   for i, m in enumerate(mels):
     idx = 0 if args.static else i%len(frames)
@@ -151,22 +155,53 @@ def datagen(frames, mels, use_ref_img):
     face, coords = face_det_results[idx].copy()
 
     face = cv2.resize(face, (args.img_size, args.img_size))
+    # Generate a unique filename
+    if should_fill_ref_pool:
+      ref_pool.append(face)
+    
+    
     if use_ref_img:
-      rdn_idx = random.randint(0, len(frames) - 1)
-      while rdn_idx == idx:
-        rdn_idx = random.randint(0, len(frames) - 1)
-      
-      ref_face, _ = face_det_results[rdn_idx].copy()
-      ref_face = cv2.resize(ref_face, (args.img_size, args.img_size))
-      ref_batch.append(ref_face)
+      if iteration <= 0:
+          rdn_idx = random.randint(0, len(frames) - 1)
 
-      rdn_idx = random.randint(0, len(frames) - 1)
-      while rdn_idx  == idx:
-        rdn_idx = random.randint(0, len(frames) - 1)
-      
-      ref_face2, _ = face_det_results[rdn_idx].copy()
-      ref_face2 = cv2.resize(ref_face2, (args.img_size, args.img_size))
-      ref_batch2.append(ref_face2)
+          #print('The rdn_idx and cache 1', rdn_idx, ids_in_ref)
+          while rdn_idx == idx:
+              rdn_idx = random.randint(0, len(frames) - 1)
+          
+          ref_face, _ = face_det_results[rdn_idx].copy()
+          ref_face = cv2.resize(ref_face, (args.img_size, args.img_size))
+          ref_batch.append(ref_face)
+          ids_in_ref.append(rdn_idx)
+
+          rdn_idx = random.randint(0, len(frames) - 1)
+
+          #print('The rdn_idx and cache 2', rdn_idx, ids_in_ref)
+          while rdn_idx == idx or rdn_idx in ids_in_ref:
+              rdn_idx = random.randint(0, len(frames) - 1)
+          
+          ref_face2, _ = face_det_results[rdn_idx].copy()
+          ref_face2 = cv2.resize(ref_face2, (args.img_size, args.img_size))
+          ref_batch2.append(ref_face2)
+          ids_in_ref.append(rdn_idx)
+      else:
+          rdn_idx = random.randint(0, len(ref_pool) - 1)
+
+          #print('The rdn_idx and cache 3', rdn_idx, ids_in_ref)
+          while rdn_idx == idx or rdn_idx in ids_in_ref:
+              rdn_idx = random.randint(0, len(ref_pool) - 1)
+          
+          ref_batch.append(ref_pool[rdn_idx])
+          ids_in_ref.append(rdn_idx)
+
+          rdn_idx = random.randint(0, len(ref_pool) - 1)
+
+          #print('The rdn_idx and cache 4', rdn_idx, ids_in_ref)
+          while rdn_idx == idx or rdn_idx in ids_in_ref:
+              rdn_idx = random.randint(0, len(ref_pool) - 1)
+          
+          ref_batch2.append(ref_pool[rdn_idx])
+          ids_in_ref.append(rdn_idx)
+
     else:
       ref_batch.append(face)
       ref_batch2.append(face)
@@ -185,15 +220,13 @@ def datagen(frames, mels, use_ref_img):
       img_masked = img_batch.copy()
       img_masked[:, args.img_size//2:] = 0
 
-
-      print('The length of img_masked, img_batch, ref_batch, ref_batch2', len(img_masked), len(img_batch), len(ref_batch), len(ref_batch2))
-
       img_batch = np.concatenate((img_masked, img_batch, ref_batch, ref_batch2), axis=3) / 255.
       mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
-      
 
       yield img_batch, mel_batch, frame_batch, coords_batch
       img_batch, mel_batch, frame_batch, coords_batch, ref_batch, ref_batch2 = [], [], [], [], [], []
+    
+    ids_in_ref = []
 
   if len(img_batch) > 0:
     img_batch, mel_batch = np.asarray(img_batch), np.asarray(mel_batch)
@@ -354,45 +387,47 @@ def main():
   input_frames = full_frames[:len(mel_chunks)]  
 
   batch_size = args.wav2lip_batch_size
-  gen = datagen(input_frames.copy(), mel_chunks, args.use_ref_img)
+  ref_pool = []
 
-  for i, (img_batch, mel_batch, frames, coords) in enumerate(tqdm(gen, 
-                      total=int(np.ceil(float(len(mel_chunks))/batch_size)))):
-    if i == 0:
-      model = load_model(args.checkpoint_path, args.lora_checkpoint_path, args.model_layers)
-      print ("Model loaded")
+  for x in range(args.iteration):
+    print('Iteration ', x)
+    gen = datagen(input_frames.copy(), mel_chunks, args.use_ref_img, ref_pool, x)
 
-      frame_h, frame_w = input_frames[0].shape[:-1]
-      out = cv2.VideoWriter('temp/result.avi', 
-                  cv2.VideoWriter_fourcc(*'DIVX'), fps, (frame_w, frame_h))
-    
-    img_batch = torch.FloatTensor(np.transpose(img_batch, (0, 3, 1, 2))).to(device)
-    
-    mel_batch = torch.FloatTensor(np.transpose(mel_batch, (0, 3, 1, 2))).to(device)
+    for i, (img_batch, mel_batch, frames, coords) in enumerate(tqdm(gen, 
+                        total=int(np.ceil(float(len(mel_chunks))/batch_size)))):
+      if i == 0:
+        model = load_model(args.checkpoint_path, args.lora_checkpoint_path, args.model_layers)
+        print ("Model loaded")
 
-    
-    with torch.no_grad():
-      pred = model(mel_batch, img_batch)
+        frame_h, frame_w = input_frames[0].shape[:-1]
+        out = cv2.VideoWriter(f'temp/result_{x}.avi', 
+                    cv2.VideoWriter_fourcc(*'DIVX'), fps, (frame_w, frame_h))
+      
+      img_batch = torch.FloatTensor(np.transpose(img_batch, (0, 3, 1, 2))).to(device)
+      
+      mel_batch = torch.FloatTensor(np.transpose(mel_batch, (0, 3, 1, 2))).to(device)
 
-    pred = pred.cpu().numpy().transpose(0, 2, 3, 1) * 255.
-    
-    for p, f, c in zip(pred, frames, coords):
-      y1, y2, x1, x2 = c
-      p = cv2.resize(p.astype(np.uint8), (x2 - x1, y2 - y1))
+      
+      with torch.no_grad():
+        pred = model(mel_batch, img_batch)
 
-      if args.use_esrgan:
-        p = enhance_image_with_esrgan(esrgan_model, p)  # Apply ESRGAN enhancement
-        p = np.array(p)  # Convert PIL image to NumPy array if needed
-        p = cv2.resize(p, (x2 - x1, y2 - y1))  # Resize to match the original region shape
+      pred = pred.cpu().numpy().transpose(0, 2, 3, 1) * 255.
+      
+      for p, f, c in zip(pred, frames, coords):
+        y1, y2, x1, x2 = c
+        p = cv2.resize(p.astype(np.uint8), (x2 - x1, y2 - y1))
 
+        if args.use_esrgan:
+          p = enhance_image_with_esrgan(esrgan_model, p)  # Apply ESRGAN enhancement
+          p = np.array(p)  # Convert PIL image to NumPy array if needed
+          p = cv2.resize(p, (x2 - x1, y2 - y1))  # Resize to match the original region shape
 
+        f[y1:y2, x1:x2] = p
+        out.write(f)
 
-      f[y1:y2, x1:x2] = p
-      out.write(f)
+    out.release()
 
-  out.release()
-
-  command = 'ffmpeg -y -i {} -i {} -strict -2 -q:v 1 {}'.format(args.audio, 'temp/result.avi', args.outfile)
+  command = 'ffmpeg -y -i {} -i {} -strict -2 -q:v 1 {}'.format(args.audio, f'temp/result_{args.iteration - 1}.avi', args.outfile)
   subprocess.call(command, shell=platform.system() != 'Windows')
 
 if __name__ == '__main__':
