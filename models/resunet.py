@@ -65,11 +65,8 @@ class ResUNet(nn.Module):
         x = output_block(x)
 
         if input_dim_size > 4:
-            
             x = torch.split(x, B, dim=0) # [(B, C, H, W)]
-            
             outputs = torch.stack(x, dim=2) # (B, C, T, H, W)
-
         else:
             outputs = x
             
@@ -259,8 +256,14 @@ class FaceEnhancer(nn.Module):
     
     def forward(self, x):
         # Reshape to combine B and T for processing in U-Net
-        B, C, T, H, W = x.shape
-        x = x.view(B * T, C, H, W)
+        B = x.size(0)
+        input_dim_size = len(x.size())
+        # if input_dim_size > 4:
+        #   B, C, T, H, W = x.shape
+        #   x = x.view(B * T, C, H, W)
+
+        if input_dim_size > 4:
+            x = torch.cat([x[:, :, i] for i in range(x.size(2))], dim=0)
         
         # Downsampling path
         enc1 = self.enc1(x)
@@ -278,9 +281,12 @@ class FaceEnhancer(nn.Module):
         dec1 = self.dec1(torch.cat([self.up1(dec2), enc1], dim=1))
         
         # Final output layer
-        out = self.final_conv(dec1)
+        x = self.final_conv(dec1)
+
+        if input_dim_size > 4:
+            x = torch.split(x, B, dim=0) # [(B, C, H, W)]
+            outputs = torch.stack(x, dim=2) # (B, C, T, H, W)
+        else:
+            outputs = x
         
-        # Reshape back to B, C, T, H, W
-        out = out.view(B, C, T, H, W)
-        
-        return out
+        return outputs

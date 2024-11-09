@@ -1,4 +1,5 @@
 from os import listdir, path
+from os.path import dirname, join, basename, isfile
 import numpy as np
 import scipy, cv2, os, sys, argparse, audio
 import json, subprocess, random, string
@@ -255,7 +256,7 @@ def _load(checkpoint_path):
                 map_location=lambda storage, loc: storage)
   return checkpoint
 
-def load_model(path, lora_path=None, model_layers=2):
+def load_model(path, lora_path=None, model_layers=1):
   model = ResUNet(model_layers)
   print("Load checkpoint from: {}".format(path))
   checkpoint = _load(path)
@@ -389,6 +390,9 @@ def main():
   batch_size = args.wav2lip_batch_size
   ref_pool = []
 
+  model = load_model(args.checkpoint_path, args.lora_checkpoint_path, args.model_layers)
+  print ("Model loaded")
+
   for x in range(args.iteration):
     print('Iteration ', x)
     gen = datagen(input_frames.copy(), mel_chunks, args.use_ref_img, ref_pool, x)
@@ -396,9 +400,6 @@ def main():
     for i, (img_batch, mel_batch, frames, coords) in enumerate(tqdm(gen, 
                         total=int(np.ceil(float(len(mel_chunks))/batch_size)))):
       if i == 0:
-        model = load_model(args.checkpoint_path, args.lora_checkpoint_path, args.model_layers)
-        print ("Model loaded")
-
         frame_h, frame_w = input_frames[0].shape[:-1]
         out = cv2.VideoWriter(f'temp/result_{x}.avi', 
                     cv2.VideoWriter_fourcc(*'DIVX'), fps, (frame_w, frame_h))
