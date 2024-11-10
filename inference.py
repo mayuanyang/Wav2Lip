@@ -272,7 +272,8 @@ def load_model(path, lora_path=None, model_layers=1):
   
 
   model = model.to(device)
-  return model.eval()
+  #return model.eval()
+  return model
 
 def load_esrgan_model(checkpoint_path='checkpoints/RealESRGAN_x4plus.pth', device='cuda' if torch.cuda.is_available() else 'cpu'):
     """
@@ -414,6 +415,7 @@ def main():
 
       pred = pred.cpu().numpy().transpose(0, 2, 3, 1) * 255.
       
+      i = 0
       for p, f, c in zip(pred, frames, coords):
         y1, y2, x1, x2 = c
         p = cv2.resize(p.astype(np.uint8), (x2 - x1, y2 - y1))
@@ -423,8 +425,11 @@ def main():
           p = np.array(p)  # Convert PIL image to NumPy array if needed
           p = cv2.resize(p, (x2 - x1, y2 - y1))  # Resize to match the original region shape
 
+        #cv2.imwrite('{}/{}_{}.jpg'.format('checkpoints/wav2lip_checkpoint/face-enhancer', x, i), p)
+
         f[y1:y2, x1:x2] = p
         out.write(f)
+        i += 1
 
     out.release()
 
