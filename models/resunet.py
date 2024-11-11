@@ -31,14 +31,17 @@ class ResUNet(nn.Module):
         step2_face_sequences = face_sequences + temp_output
         outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.attention_blocks, self.output_block.output_block)
 
+        # Select the last 3 groups from face_sequences
+        group1 = face_sequences[:, 3:6, :, :, :]
+        group2 = face_sequences[:, 6:9, :, :, :]
+        group3 = face_sequences[:, 9:12, :, :, :]
 
-        #x = torch.cat([face_sequences, outputs], dim=1)
-        # 1x1 convolution to match channels
-        conv1x1 = nn.Conv3d(12, 3, kernel_size=1)
-        aligned_face_sequences = conv1x1(face_sequences)
+        # Progressive residual connections
+        temp_output = group1 + group2  # First residual connection
+        temp_output = temp_output + group3  # Second residual connection
 
-        print('The shape', face_sequences.shape, outputs.shape)
-        x = aligned_face_sequences + outputs
+        # Perform the residual connection
+        x = temp_output + outputs
 
         outputs = self.face_enhancer(x)
       
@@ -267,9 +270,6 @@ class FaceEnhancer(nn.Module):
         # Reshape to combine B and T for processing in U-Net
         B = x.size(0)
         input_dim_size = len(x.size())
-        # if input_dim_size > 4:
-        #   B, C, T, H, W = x.shape
-        #   x = x.view(B * T, C, H, W)
 
         if input_dim_size > 4:
             x = torch.cat([x[:, :, i] for i in range(x.size(2))], dim=0)
