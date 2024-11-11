@@ -31,7 +31,9 @@ class ResUNet(nn.Module):
         step2_face_sequences = face_sequences + temp_output
         outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.attention_blocks, self.output_block.output_block)
 
-        outputs = self.face_enhancer(outputs)
+        x = torch.cat([face_sequences, outputs], dim=1)
+
+        outputs = self.face_enhancer(x)
       
         return outputs
 
@@ -230,7 +232,7 @@ class FaceEnhancer(nn.Module):
         super(FaceEnhancer, self).__init__()
         
         # Downsampling blocks
-        self.enc1 = UNetBlock(3, 32)
+        self.enc1 = UNetBlock(15, 32)
         self.enc2 = UNetBlock(32, 64)
         self.enc3 = UNetBlock(64, 128)
         self.enc4 = UNetBlock(128, 256)
