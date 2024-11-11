@@ -31,6 +31,7 @@ class ResUNet(nn.Module):
         step2_face_sequences = face_sequences + temp_output
         outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.attention_blocks, self.output_block.output_block)
 
+
         x = torch.cat([face_sequences, outputs], dim=1)
 
         outputs = self.face_enhancer(x)
@@ -231,64 +232,105 @@ class FaceEnhancer(nn.Module):
     def __init__(self):
         super(FaceEnhancer, self).__init__()
         
-        # Downsampling blocks
-        self.enc1 = UNetBlock(15, 32)
-        self.enc2 = UNetBlock(32, 64)
-        self.enc3 = UNetBlock(64, 128)
-        self.enc4 = UNetBlock(128, 256)
-        
-        # Bottleneck
-        self.bottleneck = UNetBlock(256, 512)
-        
-        # Upsampling blocks
-        self.up4 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
-        self.dec4 = UNetBlock(512, 256)
-        
-        self.up3 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
-        self.dec3 = UNetBlock(256, 128)
-        
-        self.up2 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
-        self.dec2 = UNetBlock(128, 64)
-        
-        self.up1 = nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2)
-        self.dec1 = UNetBlock(64, 32)
-        
-        # Final output layer
-        self.final_conv = nn.Conv2d(32, 3, kernel_size=1)
+        self.face_encoder_blocks = nn.ModuleList([
+            nn.Sequential(Conv2d(15, 96, kernel_size=3, stride=1, padding=1), #1+(3−1)×1=3
+                          Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #5
+                          ), # 192,192
+
+            nn.Sequential(Conv2d(96, 96, kernel_size=3, stride=2, padding=1), #5+(3−1)×2=9
+              Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #11
+              ), # 96,96
+
+            nn.Sequential(Conv2d(96, 96, kernel_size=3, stride=2, padding=1), # 48,48, 11+(3−1)×2=15
+            Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #17
+            ),
+
+            nn.Sequential(Conv2d(96, 96, kernel_size=3, stride=2, padding=1), # 24,24, 17+(3−1)×2=21
+            Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #23
+            ),
+
+            nn.Sequential(Conv2d(96, 128, kernel_size=3, stride=2, padding=1), # 12,12, 23+(3−1)×2=27
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True) # 29
+            ), 
+
+            nn.Sequential(Conv2d(128, 128, kernel_size=3, stride=2, padding=1), # 6,6, 29+(3−1)×2=33
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True)), #35
+
+            nn.Sequential(Conv2d(128, 256, kernel_size=3, stride=2, padding=1), # 3,3, 35+(3−1)×2=39
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),), #41
+            
+            nn.Sequential(Conv2d(256, 256, kernel_size=1, stride=1, padding=0), # 1, 1, 41+(3−1)×1=43
+            Conv2d(256, 256, kernel_size=1, stride=1, padding=0, residual=True))]) # 45
+
+
+        self.face_decoder_blocks = nn.ModuleList([
+            nn.Sequential(Conv2d(512, 256, kernel_size=1, stride=1, padding=0),
+                          Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),),
+
+            nn.Sequential(Conv2dTranspose(512, 256, kernel_size=3, stride=1, padding=0), # 3,3
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),),
+
+            nn.Sequential(Conv2dTranspose(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),), # 6, 6
+
+            nn.Sequential(Conv2dTranspose(384, 192, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True),
+            ), # 12, 12
+
+            nn.Sequential(Conv2dTranspose(320, 160, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2d(160, 160, kernel_size=3, stride=1, padding=1, residual=True),
+            ), # 24, 24
+
+            nn.Sequential(Conv2dTranspose(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1), 
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            ), # 48, 48
+
+            nn.Sequential(Conv2dTranspose(224, 96, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True),
+            ), # 96,96
+            
+            nn.Sequential(
+                Conv2dTranspose(192, 96, kernel_size=3, stride=2, padding=1, output_padding=1),
+                Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True),
+            )]) 
+
+        self.output_block = nn.Sequential(Conv2d(192, 32, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
+            nn.Sigmoid())
     
     def forward(self, x):
-        # Reshape to combine B and T for processing in U-Net
+        # audio_sequences = (B, T, 1, 80, 16)
         B = x.size(0)
-        input_dim_size = len(x.size())
-        # if input_dim_size > 4:
-        #   B, C, T, H, W = x.shape
-        #   x = x.view(B * T, C, H, W)
 
+        input_dim_size = len(x.size())
         if input_dim_size > 4:
             x = torch.cat([x[:, :, i] for i in range(x.size(2))], dim=0)
-        
-        # Downsampling path
-        enc1 = self.enc1(x)
-        enc2 = self.enc2(F.max_pool2d(enc1, 2))
-        enc3 = self.enc3(F.max_pool2d(enc2, 2))
-        enc4 = self.enc4(F.max_pool2d(enc3, 2))
-        
-        # Bottleneck
-        bottleneck = self.bottleneck(F.max_pool2d(enc4, 2))
-        
-        # Upsampling path
-        dec4 = self.dec4(torch.cat([self.up4(bottleneck), enc4], dim=1))
-        dec3 = self.dec3(torch.cat([self.up3(dec4), enc3], dim=1))
-        dec2 = self.dec2(torch.cat([self.up2(dec3), enc2], dim=1))
-        dec1 = self.dec1(torch.cat([self.up1(dec2), enc1], dim=1))
-        
-        # Final output layer
-        x = self.final_conv(dec1)
+
+        # Encoding path with skip connections
+        skips = []
+        for i, encoder_block in enumerate(self.face_encoder_blocks):
+            print('Handling encoding block', i)
+            x = encoder_block(x)
+            skips.append(x)  # Store the output for the skip connections
+
+        skips = skips[:-1]  # Remove the final layer from skip connections as it's the bottleneck
+
+        # Bottleneck (no skip connection here)
+        x = self.face_encoder_blocks[-1](x)  # Pass through the bottleneck block
+
+        # Decoding path with skip connections
+        print('Start decoding')
+        for i, decoder_block in enumerate(self.face_decoder_blocks):
+            print('Handling block', i)
+            x = decoder_block(torch.cat([x, skips[-(i+1)]], dim=1))  # Concatenate the skip connection
+
+        # Output block
+        x = self.output_block(torch.cat([x, skips[0]], dim=1))  # Final concatenation with the first skip
 
         if input_dim_size > 4:
             x = torch.split(x, B, dim=0) # [(B, C, H, W)]
             outputs = torch.stack(x, dim=2) # (B, C, T, H, W)
         else:
             outputs = x
-        
+            
         return outputs
