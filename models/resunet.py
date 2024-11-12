@@ -31,13 +31,23 @@ class ResUNet(nn.Module):
         step2_face_sequences = face_sequences + temp_output
         outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.attention_blocks, self.output_block.output_block)
 
+        
         # Select the last 3 groups from face_sequences
-        group1 = face_sequences[:, 3:6, :, :, :]
-        group2 = face_sequences[:, 6:9, :, :, :]
-        group3 = face_sequences[:, 9:12, :, :, :]
+        input_dim_size = len(face_sequences.size())
+        if input_dim_size > 4:
+          group0 = face_sequences[:, 0:3, :, :, :]
+          group1 = face_sequences[:, 3:6, :, :, :]
+          group2 = face_sequences[:, 6:9, :, :, :]
+          group3 = face_sequences[:, 9:12, :, :, :]
+        else:
+          group0 = face_sequences[:, 0:3, :, :]
+          group1 = face_sequences[:, 3:6, :, :]
+          group2 = face_sequences[:, 6:9, :, :]
+          group3 = face_sequences[:, 9:12, :, :]  
 
         # Progressive residual connections
-        temp_output = group1 + group2  # First residual connection
+        temp_output = group0 + group1  # First residual connection
+        temp_output = temp_output + group2  # First residual connection
         temp_output = temp_output + group3  # Second residual connection
 
         # Perform the residual connection
@@ -265,6 +275,8 @@ class FaceEnhancer(nn.Module):
         
         # Final output layer
         self.final_conv = nn.Conv2d(32, 3, kernel_size=1)
+        # self.final_conv = nn.Sequential(Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
+        #     nn.Sigmoid())
     
     def forward(self, x):
         # Reshape to combine B and T for processing in U-Net
