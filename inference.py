@@ -272,8 +272,7 @@ def load_model(path, lora_path=None, model_layers=1):
   
 
   model = model.to(device)
-  #return model.eval()
-  return model
+  return model.eval()
 
 def load_esrgan_model(checkpoint_path='checkpoints/RealESRGAN_x4plus.pth', device='cuda' if torch.cuda.is_available() else 'cpu'):
     """
