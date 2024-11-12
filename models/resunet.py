@@ -16,7 +16,7 @@ class ResUNet(nn.Module):
         print('The length of blocks', len(self.blocks))
         self.output_block = ProcessBlock(3)
 
-        self.face_enhancer = FaceEnhancer()
+        #self.face_enhancer = FaceEnhancer()
                 
         
     def forward(self, audio_sequences, face_sequences):
@@ -31,29 +31,44 @@ class ResUNet(nn.Module):
         step2_face_sequences = face_sequences + temp_output
         outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.attention_blocks, self.output_block.output_block)
 
+        outputs = torch.sigmoid(outputs)
+
         
         # Select the last 3 groups from face_sequences
-        input_dim_size = len(face_sequences.size())
-        if input_dim_size > 4:
-          group0 = face_sequences[:, 0:3, :, :, :]
-          group1 = face_sequences[:, 3:6, :, :, :]
-          group2 = face_sequences[:, 6:9, :, :, :]
-          group3 = face_sequences[:, 9:12, :, :, :]
-        else:
-          group0 = face_sequences[:, 0:3, :, :]
-          group1 = face_sequences[:, 3:6, :, :]
-          group2 = face_sequences[:, 6:9, :, :]
-          group3 = face_sequences[:, 9:12, :, :]  
+        # input_dim_size = len(face_sequences.size())
+        # if input_dim_size > 4:
+        #   group0 = face_sequences[:, 0:3, :, :, :]
+        #   group1 = face_sequences[:, 3:6, :, :, :]
+        #   group2 = face_sequences[:, 6:9, :, :, :]
+        #   group3 = face_sequences[:, 9:12, :, :, :]
+        # else:
+        #   group0 = face_sequences[:, 0:3, :, :]
+        #   group1 = face_sequences[:, 3:6, :, :]
+        #   group2 = face_sequences[:, 6:9, :, :]
+        #   group3 = face_sequences[:, 9:12, :, :]  
 
-        # Progressive residual connections
-        temp_output = group0 + group1  # First residual connection
-        temp_output = temp_output + group2  # First residual connection
-        temp_output = temp_output + group3  # Second residual connection
+        # # Progressive residual connections
+        # temp_output = group0 + group1  # First residual connection
+        # temp_output = temp_output + group2  # First residual connection
+        # temp_output = temp_output + group3  # Second residual connection
 
-        # Perform the residual connection
-        x = temp_output + outputs
+        # # Perform the residual connection
+        # x = temp_output + outputs
 
-        outputs = self.face_enhancer(x)
+        #outputs = self.face_enhancer(x)
+
+        # print('The shape', outputs.shape)
+        # min_H = outputs.min(dim=2)[0].min().item()
+        # max_H = outputs.max(dim=2)[0].max().item()
+        # min_W = outputs.min(dim=3)[0].min().item()
+        # max_W = outputs.max(dim=3)[0].max().item()
+
+        # print("Min H:", min_H)
+        # print("Max H:", max_H)
+        # print("Min W:", min_W)
+        # print("Max W:", max_W)
+
+        # #outputs = torch.clamp(outputs, min=0, max=1)
       
         return outputs
 
@@ -188,8 +203,7 @@ class ProcessBlock(nn.Module):
             )]) 
 
         self.output_block = nn.Sequential(Conv2d(192, 32, kernel_size=3, stride=1, padding=1),
-            nn.Conv2d(32, output_block_channels, kernel_size=1, stride=1, padding=0),
-            nn.Sigmoid())
+            nn.Conv2d(32, output_block_channels, kernel_size=1, stride=1, padding=0))
         
         # Define attention gates corresponding to each skip connection
         # Adjust F_g and F_l based on your architecture's channel dimensions
@@ -251,32 +265,69 @@ class FaceEnhancer(nn.Module):
     def __init__(self):
         super(FaceEnhancer, self).__init__()
         
-        # Downsampling blocks
-        self.enc1 = UNetBlock(3, 32)
-        self.enc2 = UNetBlock(32, 64)
-        self.enc3 = UNetBlock(64, 128)
-        self.enc4 = UNetBlock(128, 256)
+        self.face_encoder_blocks = nn.ModuleList([
+            nn.Sequential(Conv2d(3, 32, kernel_size=3, stride=1, padding=1), #1+(3−1)×1=3
+                          Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True), #5
+                          ), # 192,192
+
+            nn.Sequential(Conv2d(32, 64, kernel_size=3, stride=2, padding=1), #5+(3−1)×2=9
+              Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #11
+              ), # 96,96
+
+            nn.Sequential(Conv2d(64, 128, kernel_size=3, stride=2, padding=1), # 48,48, 11+(3−1)×2=15
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #17
+            ),
+
+            nn.Sequential(Conv2d(128, 256, kernel_size=3, stride=2, padding=1), # 24,24, 17+(3−1)×2=21
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #23
+            ),
+
+            nn.Sequential(Conv2d(256, 512, kernel_size=3, stride=2, padding=1), # 12,12, 23+(3−1)×2=27
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True) # 29
+            ), 
+
+            nn.Sequential(Conv2d(512, 1024, kernel_size=3, stride=2, padding=1), # 6,6, 29+(3−1)×2=33
+            Conv2d(1024, 1024, kernel_size=3, stride=1, padding=1, residual=True)), #35
+
+            ])
         
-        # Bottleneck
-        self.bottleneck = UNetBlock(256, 512)
-        
-        # Upsampling blocks
-        self.up4 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
-        self.dec4 = UNetBlock(512, 256)
-        
-        self.up3 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
-        self.dec3 = UNetBlock(256, 128)
-        
-        self.up2 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
-        self.dec2 = UNetBlock(128, 64)
-        
-        self.up1 = nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2)
-        self.dec1 = UNetBlock(64, 32)
-        
+        # Decoder blocks
+        self.face_decoder_blocks = nn.ModuleList([
+            nn.Sequential(
+                nn.ConvTranspose2d(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
+                nn.ReLU(inplace=True),
+                Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True)
+            ),  # Output: 12x12
+
+            nn.Sequential(
+                nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
+                nn.ReLU(inplace=True),
+                Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True)
+            ),  # Output: 24x24
+
+            nn.Sequential(
+                nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
+                nn.ReLU(inplace=True),
+                Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True)
+            ),  # Output: 48x48
+
+            nn.Sequential(
+                nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
+                nn.ReLU(inplace=True),
+                Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True)
+            ),  # Output: 96x96
+
+            nn.Sequential(
+                nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
+                nn.ReLU(inplace=True),
+                Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True)
+            ),  # Output: 192x192
+        ])
+
         # Final output layer
-        self.final_conv = nn.Conv2d(32, 3, kernel_size=1)
-        # self.final_conv = nn.Sequential(Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
-        #     nn.Sigmoid())
+        #self.final_conv = nn.Conv2d(32, 3, kernel_size=1)
+        self.final_conv = nn.Sequential(Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
+             nn.Sigmoid())
     
     def forward(self, x):
         # Reshape to combine B and T for processing in U-Net
@@ -286,23 +337,20 @@ class FaceEnhancer(nn.Module):
         if input_dim_size > 4:
             x = torch.cat([x[:, :, i] for i in range(x.size(2))], dim=0)
         
-        # Downsampling path
-        enc1 = self.enc1(x)
-        enc2 = self.enc2(F.max_pool2d(enc1, 2))
-        enc3 = self.enc3(F.max_pool2d(enc2, 2))
-        enc4 = self.enc4(F.max_pool2d(enc3, 2))
-        
-        # Bottleneck
-        bottleneck = self.bottleneck(F.max_pool2d(enc4, 2))
-        
-        # Upsampling path
-        dec4 = self.dec4(torch.cat([self.up4(bottleneck), enc4], dim=1))
-        dec3 = self.dec3(torch.cat([self.up3(dec4), enc3], dim=1))
-        dec2 = self.dec2(torch.cat([self.up2(dec3), enc2], dim=1))
-        dec1 = self.dec1(torch.cat([self.up1(dec2), enc1], dim=1))
-        
+        # Encoder forward pass with skip connections
+        enc_outputs = []
+        for encoder_block in self.face_encoder_blocks:
+            x = encoder_block(x)
+            enc_outputs.append(x)
+
+        # Decoder forward pass with skip connections
+        for i, decoder_block in enumerate(self.face_decoder_blocks):
+            x = decoder_block(x)
+            # Add skip connection from encoder
+            x = x + enc_outputs[-(i+2)]  # -2, -3, -4,... for skip connections in reverse order
+
         # Final output layer
-        x = self.final_conv(dec1)
+        x = self.final_conv(x)
 
         if input_dim_size > 4:
             x = torch.split(x, B, dim=0) # [(B, C, H, W)]
