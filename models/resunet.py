@@ -14,65 +14,37 @@ class ResUNet(nn.Module):
             self.blocks.append(ProcessBlock(12))
         
         print('The length of blocks', len(self.blocks))
-        self.output_block = ProcessBlock(3)
 
-        #self.face_enhancer = FaceEnhancer()
+        self.bn12 = nn.BatchNorm2d(12)
+
+        self.bn3 = nn.BatchNorm2d(3)
+
+        self.leaky_relu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
+        
+        self.output_block = ProcessBlock(3)
                 
         
     def forward(self, audio_sequences, face_sequences):
         temp_output = None
         face_input = face_sequences
-        for block in self.blocks:
+        activation = "RELU"
+
+        for i, block in enumerate(self.blocks):
             if temp_output is not None:
                 face_input = face_sequences + temp_output
-            
-            temp_output = self.forward_impl(audio_sequences, face_input, block.face_encoder_blocks, block.audio_encoder, block.face_decoder_blocks, block.attention_blocks, block.output_block)
-            
+            if len(self.blocks) > 1:
+                activation = "SIGMOID"
+            temp_output = self.forward_impl(audio_sequences, face_input, block.face_encoder_blocks, block.audio_encoder, block.face_decoder_blocks, block.attention_blocks, block.output_block, 12, activation)
+        
+        activation = "NONE"
         step2_face_sequences = face_sequences + temp_output
-        outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.attention_blocks, self.output_block.output_block)
+        outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.attention_blocks, self.output_block.output_block, 3, activation)
 
         outputs = torch.sigmoid(outputs)
-
-        
-        # Select the last 3 groups from face_sequences
-        # input_dim_size = len(face_sequences.size())
-        # if input_dim_size > 4:
-        #   group0 = face_sequences[:, 0:3, :, :, :]
-        #   group1 = face_sequences[:, 3:6, :, :, :]
-        #   group2 = face_sequences[:, 6:9, :, :, :]
-        #   group3 = face_sequences[:, 9:12, :, :, :]
-        # else:
-        #   group0 = face_sequences[:, 0:3, :, :]
-        #   group1 = face_sequences[:, 3:6, :, :]
-        #   group2 = face_sequences[:, 6:9, :, :]
-        #   group3 = face_sequences[:, 9:12, :, :]  
-
-        # # Progressive residual connections
-        # temp_output = group0 + group1  # First residual connection
-        # temp_output = temp_output + group2  # First residual connection
-        # temp_output = temp_output + group3  # Second residual connection
-
-        # # Perform the residual connection
-        # x = temp_output + outputs
-
-        #outputs = self.face_enhancer(x)
-
-        # print('The shape', outputs.shape)
-        # min_H = outputs.min(dim=2)[0].min().item()
-        # max_H = outputs.max(dim=2)[0].max().item()
-        # min_W = outputs.min(dim=3)[0].min().item()
-        # max_W = outputs.max(dim=3)[0].max().item()
-
-        # print("Min H:", min_H)
-        # print("Max H:", max_H)
-        # print("Min W:", min_W)
-        # print("Max W:", max_W)
-
-        # #outputs = torch.clamp(outputs, min=0, max=1)
       
         return outputs
 
-    def forward_impl(self, audio_sequences, face_sequences, face_encoder_blocks, audio_encoder, face_decoder_blocks, cross_att_blocks, output_block):
+    def forward_impl(self, audio_sequences, face_sequences, face_encoder_blocks, audio_encoder, face_decoder_blocks, cross_att_blocks, output_block, output_channels, activation):
         # audio_sequences = (B, T, 1, 80, 16)
         B = audio_sequences.size(0)
 
@@ -89,7 +61,7 @@ class ResUNet(nn.Module):
             this_face_sequence = f(this_face_sequence)
             face_features.append(this_face_sequence)
 
-        # NeRF-enhanced decoding
+        
         x = audio_embedding
         # Apply attention before concatenation
         for i, f in enumerate(face_decoder_blocks):
@@ -100,6 +72,11 @@ class ResUNet(nn.Module):
                 x = torch.cat((x, skip), dim=1)
 
         x = output_block(x)
+        if output_channels == 12:
+          if activation == "RELU":
+            x = self.leaky_relu(self.bn12(x))
+          elif activation == "SIGMOID":
+            x = torch.sigmoid(self.bn12(x))
 
         if input_dim_size > 4:
             x = torch.split(x, B, dim=0) # [(B, C, H, W)]
@@ -247,115 +224,3 @@ class AttentionGate(nn.Module):
         psi = self.relu(g1 + x1)
         psi = self.sigmoid(self.psi(psi))
         return encoded_features * psi
-
-class UNetBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(UNetBlock, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
-        self.relu = nn.ReLU(inplace=True)
-        self.norm = nn.BatchNorm2d(out_channels)
-
-    def forward(self, x):
-        x = self.relu(self.norm(self.conv1(x)))
-        x = self.relu(self.norm(self.conv2(x)))
-        return x
-
-class FaceEnhancer(nn.Module):
-    def __init__(self):
-        super(FaceEnhancer, self).__init__()
-        
-        self.face_encoder_blocks = nn.ModuleList([
-            nn.Sequential(Conv2d(3, 32, kernel_size=3, stride=1, padding=1), #1+(3−1)×1=3
-                          Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True), #5
-                          ), # 192,192
-
-            nn.Sequential(Conv2d(32, 64, kernel_size=3, stride=2, padding=1), #5+(3−1)×2=9
-              Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #11
-              ), # 96,96
-
-            nn.Sequential(Conv2d(64, 128, kernel_size=3, stride=2, padding=1), # 48,48, 11+(3−1)×2=15
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #17
-            ),
-
-            nn.Sequential(Conv2d(128, 256, kernel_size=3, stride=2, padding=1), # 24,24, 17+(3−1)×2=21
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #23
-            ),
-
-            nn.Sequential(Conv2d(256, 512, kernel_size=3, stride=2, padding=1), # 12,12, 23+(3−1)×2=27
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True) # 29
-            ), 
-
-            nn.Sequential(Conv2d(512, 1024, kernel_size=3, stride=2, padding=1), # 6,6, 29+(3−1)×2=33
-            Conv2d(1024, 1024, kernel_size=3, stride=1, padding=1, residual=True)), #35
-
-            ])
-        
-        # Decoder blocks
-        self.face_decoder_blocks = nn.ModuleList([
-            nn.Sequential(
-                nn.ConvTranspose2d(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
-                nn.ReLU(inplace=True),
-                Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True)
-            ),  # Output: 12x12
-
-            nn.Sequential(
-                nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
-                nn.ReLU(inplace=True),
-                Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True)
-            ),  # Output: 24x24
-
-            nn.Sequential(
-                nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
-                nn.ReLU(inplace=True),
-                Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True)
-            ),  # Output: 48x48
-
-            nn.Sequential(
-                nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
-                nn.ReLU(inplace=True),
-                Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True)
-            ),  # Output: 96x96
-
-            nn.Sequential(
-                nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
-                nn.ReLU(inplace=True),
-                Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True)
-            ),  # Output: 192x192
-        ])
-
-        # Final output layer
-        #self.final_conv = nn.Conv2d(32, 3, kernel_size=1)
-        self.final_conv = nn.Sequential(Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
-             nn.Sigmoid())
-    
-    def forward(self, x):
-        # Reshape to combine B and T for processing in U-Net
-        B = x.size(0)
-        input_dim_size = len(x.size())
-
-        if input_dim_size > 4:
-            x = torch.cat([x[:, :, i] for i in range(x.size(2))], dim=0)
-        
-        # Encoder forward pass with skip connections
-        enc_outputs = []
-        for encoder_block in self.face_encoder_blocks:
-            x = encoder_block(x)
-            enc_outputs.append(x)
-
-        # Decoder forward pass with skip connections
-        for i, decoder_block in enumerate(self.face_decoder_blocks):
-            x = decoder_block(x)
-            # Add skip connection from encoder
-            x = x + enc_outputs[-(i+2)]  # -2, -3, -4,... for skip connections in reverse order
-
-        # Final output layer
-        x = self.final_conv(x)
-
-        if input_dim_size > 4:
-            x = torch.split(x, B, dim=0) # [(B, C, H, W)]
-            outputs = torch.stack(x, dim=2) # (B, C, T, H, W)
-        else:
-            outputs = x
-        
-        return outputs
