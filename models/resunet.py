@@ -33,7 +33,7 @@ class ResUNet(nn.Module):
             if temp_output is not None:
                 face_input = face_sequences + temp_output
             if len(self.blocks) > 1:
-                activation = "SIGMOID"
+                activation = "RELU"
             temp_output = self.forward_impl(audio_sequences, face_input, block.face_encoder_blocks, block.audio_encoder, block.face_decoder_blocks, block.attention_blocks, block.output_block, 12, activation)
         
         activation = "NONE"
