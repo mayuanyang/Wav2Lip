@@ -37,7 +37,10 @@ class ResUNet(nn.Module):
             temp_output = self.forward_impl(audio_sequences, face_input, block.face_encoder_blocks, block.audio_encoder, block.face_decoder_blocks, block.attention_blocks, block.output_block, 12, activation)
         
         activation = "NONE"
-        step2_face_sequences = face_sequences + temp_output
+        if temp_output is not None:
+          step2_face_sequences = face_sequences + temp_output
+        else:
+          step2_face_sequences = face_sequences
         outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.attention_blocks, self.output_block.output_block, 3, activation)
 
         outputs = torch.sigmoid(outputs)
