@@ -37,7 +37,10 @@ class ResUNet(nn.Module):
             temp_output = self.forward_impl(audio_sequences, face_input, block.face_encoder_blocks, block.audio_encoder, block.face_decoder_blocks, block.attention_blocks, block.output_block, 12, activation)
         
         activation = "NONE"
-        step2_face_sequences = face_sequences + temp_output
+        if temp_output is not None:
+          step2_face_sequences = face_sequences + temp_output
+        else:
+          step2_face_sequences = face_sequences
         outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.attention_blocks, self.output_block.output_block, 3, activation)
 
         outputs = torch.sigmoid(outputs)
@@ -116,18 +119,18 @@ class ProcessBlock(nn.Module):
             Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #23
             ),
 
-            nn.Sequential(Conv2d(96, 128, kernel_size=3, stride=2, padding=1), # 12,12, 23+(3−1)×2=27
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True) # 29
+            nn.Sequential(Conv2d(96, 192, kernel_size=3, stride=2, padding=1), # 12,12, 23+(3−1)×2=27
+            Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True) # 29
             ), 
 
-            nn.Sequential(Conv2d(128, 128, kernel_size=3, stride=2, padding=1), # 6,6, 29+(3−1)×2=33
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True)), #35
+            nn.Sequential(Conv2d(192, 192, kernel_size=3, stride=2, padding=1), # 6,6, 29+(3−1)×2=33
+            Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True)), #35
 
-            nn.Sequential(Conv2d(128, 256, kernel_size=3, stride=2, padding=1), # 3,3, 35+(3−1)×2=39
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),), #41
+            nn.Sequential(Conv2d(192, 384, kernel_size=3, stride=2, padding=1), # 3,3, 35+(3−1)×2=39
+            Conv2d(384, 384, kernel_size=3, stride=1, padding=1, residual=True),), #41
             
-            nn.Sequential(Conv2d(256, 256, kernel_size=3, stride=1, padding=0), # 1, 1, 41+(3−1)×1=43
-            Conv2d(256, 256, kernel_size=1, stride=1, padding=0, residual=True))]) # 45
+            nn.Sequential(Conv2d(384, 384, kernel_size=3, stride=1, padding=0), # 1, 1, 41+(3−1)×1=43
+            Conv2d(384, 384, kernel_size=1, stride=1, padding=0, residual=True))]) # 45
 
         self.audio_encoder = nn.Sequential(
             Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
@@ -149,20 +152,20 @@ class ProcessBlock(nn.Module):
             Conv2d(512, 512, kernel_size=1, stride=1, padding=0, residual=True),)
 
         self.face_decoder_blocks = nn.ModuleList([
-            nn.Sequential(Conv2d(512, 256, kernel_size=1, stride=1, padding=0),
-                          Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),),
+            nn.Sequential(Conv2d(512, 384, kernel_size=1, stride=1, padding=0),
+                          Conv2d(384, 384, kernel_size=3, stride=1, padding=1, residual=True),),
 
-            nn.Sequential(Conv2dTranspose(512, 256, kernel_size=3, stride=1, padding=0), # 3,3
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),),
+            nn.Sequential(Conv2dTranspose(768, 448, kernel_size=3, stride=1, padding=0), # 3,3
+            Conv2d(448, 448, kernel_size=3, stride=1, padding=1, residual=True),),
 
-            nn.Sequential(Conv2dTranspose(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.Sequential(Conv2dTranspose(832, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),), # 6, 6
 
-            nn.Sequential(Conv2dTranspose(384, 192, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.Sequential(Conv2dTranspose(448, 192, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True),
             ), # 12, 12
 
-            nn.Sequential(Conv2dTranspose(320, 160, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.Sequential(Conv2dTranspose(384, 160, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(160, 160, kernel_size=3, stride=1, padding=1, residual=True),
             ), # 24, 24
 
@@ -185,10 +188,10 @@ class ProcessBlock(nn.Module):
         # Define attention gates corresponding to each skip connection
         # Adjust F_g and F_l based on your architecture's channel dimensions
         self.attention_blocks = nn.ModuleList([
-            AttentionGate(F_g=256, F_l=256, F_int=128),
-            AttentionGate(F_g=256, F_l=256, F_int=128),
-            AttentionGate(F_g=256, F_l=128, F_int=128),
-            AttentionGate(F_g=192, F_l=128, F_int=128),
+            AttentionGate(F_g=384, F_l=384, F_int=128),
+            AttentionGate(F_g=448, F_l=384, F_int=128),
+            AttentionGate(F_g=256, F_l=192, F_int=128),
+            AttentionGate(F_g=192, F_l=192, F_int=128),
             AttentionGate(F_g=160, F_l=96, F_int=128),
             AttentionGate(F_g=128, F_l=96, F_int=128),
             AttentionGate(F_g=96, F_l=96, F_int=128),

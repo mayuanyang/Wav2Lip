@@ -388,12 +388,6 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
       for param_group in optimizer.param_groups:
         param_group['lr'] = 0.0001
 
-    for name, param in model.named_parameters():
-      if 'face_enhancer' not in name:
-        param.requires_grad = False
-      else:
-         print('Not freeze', name)
-
     return model
 
 if __name__ == "__main__":
