@@ -120,7 +120,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     global global_step, global_epoch
     resumed_step = global_step
 
-    patience = 2000
+    patience = 5000
 
     current_lr = get_current_lr(optimizer)
     print('The learning rate is: {0}'.format(current_lr))
@@ -386,7 +386,13 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
 
     if optimizer != None:
       for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.0001
+        param_group['lr'] = 0.0005
+
+    # for name, param in model.named_parameters():
+    #   if 'face_enhancer' not in name:
+    #     param.requires_grad = False
+    #   else:
+    #      print('Not freeze', name)
 
     return model
 
