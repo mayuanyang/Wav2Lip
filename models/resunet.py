@@ -105,32 +105,42 @@ class ProcessBlock(nn.Module):
         self.face_encoder_blocks = nn.ModuleList([
             nn.Sequential(Conv2d(12, 96, kernel_size=3, stride=1, padding=1), #1+(3−1)×1=3
                           Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #5
+                          Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #5
+                          Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #5
                           ), # 192,192
 
             nn.Sequential(Conv2d(96, 96, kernel_size=3, stride=2, padding=1), #5+(3−1)×2=9
+              Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #11
+              Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #11
               Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #11
               ), # 96,96
 
             nn.Sequential(Conv2d(96, 96, kernel_size=3, stride=2, padding=1), # 48,48, 11+(3−1)×2=15
             Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #17
+            Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #17
             ),
 
             nn.Sequential(Conv2d(96, 96, kernel_size=3, stride=2, padding=1), # 24,24, 17+(3−1)×2=21
             Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #23
+            Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #23
             ),
 
             nn.Sequential(Conv2d(96, 192, kernel_size=3, stride=2, padding=1), # 12,12, 23+(3−1)×2=27
+            Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True), # 29
             Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True) # 29
             ), 
 
             nn.Sequential(Conv2d(192, 192, kernel_size=3, stride=2, padding=1), # 6,6, 29+(3−1)×2=33
-            Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True)), #35
+            Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True)
+            ), #35
 
             nn.Sequential(Conv2d(192, 384, kernel_size=3, stride=2, padding=1), # 3,3, 35+(3−1)×2=39
-            Conv2d(384, 384, kernel_size=3, stride=1, padding=1, residual=True),), #41
+            Conv2d(384, 384, kernel_size=3, stride=1, padding=1, residual=True),
+            ), #41
             
             nn.Sequential(Conv2d(384, 384, kernel_size=3, stride=1, padding=0), # 1, 1, 41+(3−1)×1=43
-            Conv2d(384, 384, kernel_size=1, stride=1, padding=0, residual=True))]) # 45
+            Conv2d(384, 384, kernel_size=1, stride=1, padding=0, residual=True)
+            )]) # 45
 
         self.audio_encoder = nn.Sequential(
             Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
@@ -167,18 +177,24 @@ class ProcessBlock(nn.Module):
 
             nn.Sequential(Conv2dTranspose(384, 160, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(160, 160, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(160, 160, kernel_size=3, stride=1, padding=1, residual=True),
             ), # 24, 24
 
             nn.Sequential(Conv2dTranspose(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1), 
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             ), # 48, 48
 
             nn.Sequential(Conv2dTranspose(224, 96, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True),
             ), # 96,96
             
             nn.Sequential(
                 Conv2dTranspose(192, 96, kernel_size=3, stride=2, padding=1, output_padding=1),
+                Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True),
+                Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True),
                 Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True),
             )]) 
 
