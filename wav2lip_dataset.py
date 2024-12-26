@@ -70,7 +70,7 @@ class Dataset(object):
                     3 for contrast
                     '''
                     if self.use_augmentation:
-                      option = random.choices([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 4, 4])[0] 
+                      option = random.choices([0, 0, 0, 0, 0, 0, 0, 0, 4, 4])[0] 
                       
                       if option == 1:
                           img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
