@@ -102,7 +102,7 @@ class ProcessBlock(nn.Module):
         '''
 
         self.face_encoder_blocks = nn.ModuleList([
-            nn.Sequential(Conv2d(12, 96, kernel_size=3, stride=1, padding=1), #1+(3−1)×1=3
+            nn.Sequential(Conv2d(9, 96, kernel_size=3, stride=1, padding=1), #1+(3−1)×1=3
                           Conv2d(96, 96, kernel_size=3, stride=1, padding=1, residual=True), #5
                           ), # 192,192
 

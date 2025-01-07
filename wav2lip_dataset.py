@@ -279,7 +279,8 @@ class Dataset(object):
 
                 ref2_window = self.prepare_window(ref2_window)
 
-                x = np.concatenate([window, wrong_window, ref1_window, ref2_window], axis=0) # Concat via the channel axis
+                # do not include the correct window so that no second half black
+                x = np.concatenate([wrong_window, ref1_window, ref2_window], axis=0) # Concat via the channel axis
                 
 
                 x = torch.FloatTensor(x)
