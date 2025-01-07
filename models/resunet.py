@@ -11,11 +11,11 @@ class ResUNet(nn.Module):
         self.blocks = nn.ModuleList()
 
         for i in range(num_of_blocks):
-            self.blocks.append(ProcessBlock(12))
+            self.blocks.append(ProcessBlock(9))
         
         print('The length of blocks', len(self.blocks))
 
-        self.bn12 = nn.BatchNorm2d(12)
+        self.bn9 = nn.BatchNorm2d(9)
 
         self.bn3 = nn.BatchNorm2d(3)
 
@@ -34,7 +34,7 @@ class ResUNet(nn.Module):
                 face_input = face_sequences + temp_output
             if len(self.blocks) > 1:
                 activation = "RELU"
-            temp_output = self.forward_impl(audio_sequences, face_input, block.face_encoder_blocks, block.audio_encoder, block.face_decoder_blocks, block.output_block, 12, activation)
+            temp_output = self.forward_impl(audio_sequences, face_input, block.face_encoder_blocks, block.audio_encoder, block.face_decoder_blocks, block.output_block, 9, activation)
         
         activation = "NONE"
         if temp_output is not None:
@@ -74,11 +74,11 @@ class ResUNet(nn.Module):
                 x = torch.cat((x, skip), dim=1)
 
         x = output_block(x)
-        if output_channels == 12:
+        if output_channels == 9:
           if activation == "RELU":
-            x = self.leaky_relu(self.bn12(x))
+            x = self.leaky_relu(self.bn9(x))
           elif activation == "SIGMOID":
-            x = torch.sigmoid(self.bn12(x))
+            x = torch.sigmoid(self.bn9(x))
 
         if input_dim_size > 4:
             x = torch.split(x, B, dim=0) # [(B, C, H, W)]
