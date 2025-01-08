@@ -11,7 +11,7 @@ class ResUNet(nn.Module):
         self.blocks = nn.ModuleList()
 
         for i in range(num_of_blocks):
-            self.blocks.append(ProcessBlock(9))
+            self.blocks.append(ProcessBlock(12))
         
         print('The length of blocks', len(self.blocks))
 
