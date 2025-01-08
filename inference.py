@@ -10,6 +10,7 @@ from models import ResUNet
 from realesrgan import RealESRGANer
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from PIL import Image
+from scipy.ndimage import gaussian_filter
 
 import platform
 
@@ -133,6 +134,65 @@ def face_detect(images):
   del detector
   return results 
 
+def prepare_window(window):
+        """
+        3 x T x H x W
+        Normalization: The pixel values of the images are divided by 255 to normalize them from a range of [0, 255] to [0, 1]. 
+        This is a common preprocessing step for image data in machine learning to help the model converge faster during training.
+        """
+        x = np.asarray(window) / 255.
+
+        """
+        Transposition: The method transposes the dimensions of the array using np.transpose(x, (3, 0, 1, 2)).
+        The original shape of x is assumed to be (T, H, W, C) where:
+        T is the number of images (time steps if treating images as a sequence).
+        H is the height of the images.
+        W is the width of the images.
+        C is the number of color channels (typically 3 for RGB images).
+        The transposition changes the shape to (C, T, H, W) which means:
+        C (number of channels) comes first.
+        T (number of images) comes second.
+        H (height of images) comes third.
+        W (width of images) comes fourth.
+        """
+        x = np.transpose(x, (3, 0, 1, 2))
+
+        return x
+
+def apply_gaussian_blur_to_bottom_half_vectorized(window, sigma=6):
+        blurred_window = window.copy()
+        blurred_window = prepare_window(blurred_window)
+        split_row = blurred_window.shape[-2] // 2  # e.g., 96 for 192 height
+
+        bottom_half = blurred_window[:, :, split_row:, :]  # Shape: (channels, frames, 96, 192)
+        blurred_bottom_half = gaussian_filter(bottom_half, sigma=(0, 0, sigma, sigma))
+        blurred_window[:, :, split_row:, :] = blurred_bottom_half
+
+        blurred_window = np.transpose(blurred_window, (1, 2, 3, 0)) * 255
+
+        # frames, H, W, c = blurred_window.shape
+
+        # output_dir = "checkpoints/wav2lip_checkpoint/no-blackout/"
+        # for i in range(frames):
+        #         # Extract the i-th frame
+        #         frame = blurred_window[i]
+        #         print('The image shape', frame.shape)
+
+        #         # # Convert RGB to BGR since OpenCV uses BGR format
+        #         #frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+        #         # Construct the filename with zero-padding (e.g., frame_0001.png)
+        #         filename = f"{i:04d}.png"
+        #         filepath = os.path.join(output_dir, filename)
+
+        #         # Save the image using OpenCV's imwrite
+        #         success = cv2.imwrite(filepath, frame)
+
+        #         print(f'Saving {success} to {filepath}')
+
+        return blurred_window
+
+
 def datagen(frames, mels, use_ref_img, ref_pool, iteration):
   img_batch, mel_batch, frame_batch, coords_batch, ref_batch, ref_batch2 = [], [], [], [], [], []
 
@@ -219,7 +279,10 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
       ref_batch2 = np.asarray(ref_batch2)
 
       img_masked = img_batch.copy()
-      img_masked[:, args.img_size//2:] = 0
+
+      # img_masked[:, args.img_size//2:] = 0
+      img_masked = apply_gaussian_blur_to_bottom_half_vectorized(img_masked)
+      print('The image shape 1', img_masked.shape)
 
       img_batch = np.concatenate((img_masked, img_batch, ref_batch, ref_batch2), axis=3) / 255.
       mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
@@ -232,7 +295,12 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
   if len(img_batch) > 0:
     img_batch, mel_batch = np.asarray(img_batch), np.asarray(mel_batch)
     img_masked = img_batch.copy()
-    img_masked[:, args.img_size//2:] = 0
+
+    
+    #img_masked[:, args.img_size//2:] = 0
+    img_masked = apply_gaussian_blur_to_bottom_half_vectorized(img_masked)
+
+    print('The image shape 2', img_masked.shape)
 
     if use_ref_img:
       ref_batch = np.asarray(ref_batch)
