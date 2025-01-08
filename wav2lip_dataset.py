@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from torch import nn
 import traceback
+import torch.nn.functional as F
+from scipy.ndimage import gaussian_filter
 
 image_cache = multiprocessing.Manager().dict()
 orig_mel_cache = multiprocessing.Manager().dict()
@@ -40,6 +42,9 @@ class Dataset(object):
                 return None
             window_fnames.append(frame)
         return window_fnames
+    
+    
+
 
     def read_window(self, window_fnames):
         if window_fnames is None: return None
@@ -271,7 +276,7 @@ class Dataset(object):
                 y is the window that without the second half black out
                 '''
 
-                window[:, :, window.shape[2]//2:] = 0.
+                window = self.apply_gaussian_blur_to_bottom_half(window)
 
                 wrong_window = self.prepare_window(wrong_window)
 
@@ -280,7 +285,7 @@ class Dataset(object):
                 ref2_window = self.prepare_window(ref2_window)
 
                 # do not include the correct window so that no second half black
-                x = np.concatenate([wrong_window, ref1_window, ref2_window], axis=0) # Concat via the channel axis
+                x = np.concatenate([window, wrong_window, ref1_window, ref2_window], axis=0) # Concat via the channel axis
                 
 
                 x = torch.FloatTensor(x)
@@ -296,3 +301,39 @@ class Dataset(object):
                 #print('An error has occured', vidname, img_name, wrong_img_name)
                 traceback.print_exc()   
                 continue
+    
+    def apply_gaussian_blur_to_bottom_half(self, window, sigma=6):
+        """
+        Applies Gaussian blur to the bottom half of each image in the window.
+
+        Parameters:
+        - window (np.ndarray): Input array with shape (channels, frames, height, width)
+        - sigma (float): Standard deviation for Gaussian kernel
+
+        Returns:
+        - blurred_window (np.ndarray): Array with Gaussian blur applied to the bottom half
+        """
+        # Create a copy to avoid modifying the original array
+        blurred_window = window.copy()
+
+        # Determine the row index to split the image vertically
+        split_row = blurred_window.shape[-2] // 2  # 192 // 2 = 96
+
+        # Apply Gaussian blur to the bottom half across all channels and frames
+        # Slicing the bottom half: rows 96 to 191
+        # The Gaussian filter is applied to each bottom half slice
+        # Vectorized operation without explicit loops
+        # Iterate over channels and frames
+        for c in range(blurred_window.shape[0]):
+            for f in range(blurred_window.shape[1]):
+                # Extract the bottom half of the current image slice
+                bottom_half = blurred_window[c, f, split_row:, :]
+
+                # Apply Gaussian blur to the bottom half
+                blurred_bottom_half = gaussian_filter(bottom_half, sigma=sigma)
+
+                # Replace the bottom half with the blurred version
+                blurred_window[c, f, split_row:, :] = blurred_bottom_half
+
+        return blurred_window
+
