@@ -276,7 +276,7 @@ class Dataset(object):
                 y is the window that without the second half black out
                 '''
 
-                window = self.apply_gaussian_blur_to_bottom_half(window)
+                window = self.apply_gaussian_blur_to_bottom_half_vectorized(window)
 
                 wrong_window = self.prepare_window(wrong_window)
 
@@ -302,38 +302,14 @@ class Dataset(object):
                 traceback.print_exc()   
                 continue
     
-    def apply_gaussian_blur_to_bottom_half(self, window, sigma=6):
-        """
-        Applies Gaussian blur to the bottom half of each image in the window.
-
-        Parameters:
-        - window (np.ndarray): Input array with shape (channels, frames, height, width)
-        - sigma (float): Standard deviation for Gaussian kernel
-
-        Returns:
-        - blurred_window (np.ndarray): Array with Gaussian blur applied to the bottom half
-        """
-        # Create a copy to avoid modifying the original array
+    def apply_gaussian_blur_to_bottom_half_vectorized(self, window, sigma=6):
         blurred_window = window.copy()
+        split_row = blurred_window.shape[-2] // 2  # e.g., 96 for 192 height
 
-        # Determine the row index to split the image vertically
-        split_row = blurred_window.shape[-2] // 2  # 192 // 2 = 96
-
-        # Apply Gaussian blur to the bottom half across all channels and frames
-        # Slicing the bottom half: rows 96 to 191
-        # The Gaussian filter is applied to each bottom half slice
-        # Vectorized operation without explicit loops
-        # Iterate over channels and frames
-        for c in range(blurred_window.shape[0]):
-            for f in range(blurred_window.shape[1]):
-                # Extract the bottom half of the current image slice
-                bottom_half = blurred_window[c, f, split_row:, :]
-
-                # Apply Gaussian blur to the bottom half
-                blurred_bottom_half = gaussian_filter(bottom_half, sigma=sigma)
-
-                # Replace the bottom half with the blurred version
-                blurred_window[c, f, split_row:, :] = blurred_bottom_half
+        bottom_half = blurred_window[:, :, split_row:, :]  # Shape: (channels, frames, 96, 192)
+        blurred_bottom_half = gaussian_filter(bottom_half, sigma=(0, 0, sigma, sigma))
+        blurred_window[:, :, split_row:, :] = blurred_bottom_half
 
         return blurred_window
+
 
