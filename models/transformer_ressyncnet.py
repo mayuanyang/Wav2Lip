@@ -45,7 +45,7 @@ class TransformerResSyncnet(nn.Module):
         super(TransformerResSyncnet, self).__init__()
         
         # Load the pretrained ResNet18 model for face encoding
-        self.face_encoder = models.resnet18(pretrained=True)
+        self.face_encoder = models.resnet50(pretrained=True)
         
         # Modify the first convolutional layer to accept 15 input channels
         self.face_encoder.conv1 = modify_resnet_conv1(self.face_encoder, in_channels=15)
@@ -74,7 +74,7 @@ class TransformerResSyncnet(nn.Module):
         self.relu = nn.LeakyReLU(0.01, inplace=True)
         
         # Fully connected layers
-        self.fc1 = nn.Linear(512, 256)
+        self.fc1 = nn.Linear(2048, 256)
         self.fc2 = nn.Linear(512, 256)
         self.fc3 = nn.Linear(512, 2)
         
