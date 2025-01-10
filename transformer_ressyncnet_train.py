@@ -18,6 +18,7 @@ import os, argparse
 from hparams import hparams
 from models.conv import Conv2d, Conv2dTranspose
 from syncnet_dataset import Dataset, samples
+from torch.cuda.amp import GradScaler, autocast
 
 import wandb
 
@@ -97,6 +98,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     
     global global_step, global_epoch, consecutive_threshold_count, current_training_loss
     
+    scaler = GradScaler()
     patience = 1000
 
     # Added by eddy
@@ -133,8 +135,12 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             ce_loss = cross_entropy_loss(output, y)
             
 
-            ce_loss.backward()
-            optimizer.step()
+            # ce_loss.backward()
+            # optimizer.step()
+
+            scaler.scale(ce_loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             global_step += 1
             avg_ce_loss += ce_loss.item()
