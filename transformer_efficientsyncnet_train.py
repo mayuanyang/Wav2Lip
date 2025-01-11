@@ -81,15 +81,18 @@ def cosine_loss(a, v, y):
     
     return loss
 
+def get_current_lr(optimizer):
+    # Assuming there is only one parameter group
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
 
-# added by eddy
 # Register hooks to print gradient norms
 def print_grad_norm(module, grad_input, grad_output):
     for i, grad in enumerate(grad_output):
-        if grad is not None and global_step % 500 == 0:
+        if grad is not None and global_step % 200 == 0:
             print(f'{module.__class__.__name__} - grad_output[{i}] norm: {grad.norm().item()}')
 
-# end added by eddy
+
 
 
 def train(device, model, train_data_loader, test_data_loader, optimizer,
@@ -99,18 +102,19 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     global global_step, global_epoch, consecutive_threshold_count, current_training_loss
     
     scaler = GradScaler()
-    patience = 1000
+    patience = 10000
 
     # Added by eddy
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=patience, verbose=True)
     
     if should_print_grad_norm:
       for name, module in model.named_modules():
-        if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear, nn.TransformerEncoderLayer)):
+        if isinstance(module, (nn.Conv2d, nn.Linear, nn.TransformerEncoderLayer)):
             module.register_backward_hook(print_grad_norm)
   
     
     while global_epoch < nepochs:
+        lr = get_current_lr(optimizer)
         # for param_group in optimizer.param_groups:
         #   print("The learning rates are: ", param_group['lr'])
         
@@ -157,10 +161,11 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
             scheduler.step(current_training_loss)
             
-            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}'.format(global_step, global_epoch, current_training_loss))
+            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}, LR: {3}'.format(global_step, global_epoch, current_training_loss, lr))
             metrics = {"train/ce_loss": current_training_loss, 
                        "train/step": global_step, 
-                       "train/epoch": global_epoch}
+                       "train/epoch": global_epoch,
+                       "train/lr": lr}
             
             if use_wandb:
               wandb.log({**metrics})
@@ -342,18 +347,18 @@ if __name__ == "__main__":
     model = TransformerEfficientNetB3Syncnet(num_heads=8, num_encoder_layers=6).to(device)
 
     # Freeze layers
-    for param in model.face_encoder.parameters():
-        param.requires_grad = False
+    # for param in model.face_encoder.parameters():
+    #     param.requires_grad = False
 
-    for param in model.audio_encoder.parameters():
-        param.requires_grad = False
+    # for param in model.audio_encoder.parameters():
+    #     param.requires_grad = False
 
-    # Unfreeze top layers
-    for param in model.face_encoder.features[-3:].parameters():
-        param.requires_grad = True
+    # # Unfreeze top layers
+    # for param in model.face_encoder.features[-3:].parameters():
+    #     param.requires_grad = True
 
-    for param in model.audio_encoder.features[-3:].parameters():
-        param.requires_grad = True
+    # for param in model.audio_encoder.features[-3:].parameters():
+    #     param.requires_grad = True
 
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 

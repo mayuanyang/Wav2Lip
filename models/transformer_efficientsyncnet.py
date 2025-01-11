@@ -104,15 +104,15 @@ class TransformerEfficientNetB3Syncnet(nn.Module):
         
         # Encode audio input
         audio_embedding = self.audio_encoder(audio)  # Shape: (batch_size, 1536)
-        
-        # Normalize embeddings
-        face_embedding = F.normalize(face_embedding, p=2, dim=1)
-        audio_embedding = F.normalize(audio_embedding, p=2, dim=1)
-        
+                
         # Concatenate embeddings
         combined = torch.cat((face_embedding, audio_embedding), dim=1)  # Shape: (batch_size, 768)
 
         combined = self.fc1(combined)
+
+        # Normalize embeddings
+        combined = F.normalize(combined, p=2, dim=1)
+        
         
         # Reshape for Transformer: (sequence_length, batch_size, embedding_dim)
         combined = combined.unsqueeze(0)  # Shape: (1, batch_size, 768)
