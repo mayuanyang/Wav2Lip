@@ -46,79 +46,99 @@ def initialize_weights(module):
         if module.bias is not None:
             nn.init.constant_(module.bias, 0)
 
+class CrossAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.1):
+        super(CrossAttention, self).__init__()
+        self.multihead_attn = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout)
+        self.layer_norm = nn.LayerNorm(embed_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.feed_forward = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim * 2),
+            nn.ReLU(),
+            nn.Linear(embed_dim * 2, embed_dim),
+            nn.Dropout(dropout)
+        )
+        self.norm_ff = nn.LayerNorm(embed_dim)
+    
+    def forward(self, query, key, value):
+        # query: (batch_size, embed_dim)
+        # key, value: (batch_size, embed_dim)
+        
+        # Reshape for MultiheadAttention: (seq_len, batch_size, embed_dim)
+        query = query.unsqueeze(0)  # (1, batch_size, embed_dim)
+        key = key.unsqueeze(0)      # (1, batch_size, embed_dim)
+        value = value.unsqueeze(0)  # (1, batch_size, embed_dim)
+        
+        attn_output, _ = self.multihead_attn(query, key, value)  # (1, batch_size, embed_dim)
+        attn_output = self.dropout(attn_output)
+        attn_output = self.layer_norm(attn_output + query)  # Residual connection
+        
+        # Feed Forward
+        ff_output = self.feed_forward(attn_output)  # (1, batch_size, embed_dim)
+        ff_output = self.norm_ff(ff_output + attn_output)  # Residual connection
+        
+        # Remove sequence dimension
+        ff_output = ff_output.squeeze(0)  # (batch_size, embed_dim)
+        return ff_output
+    
 class TransformerEfficientNetB3Syncnet(nn.Module):
-    def __init__(self, num_heads, num_encoder_layers):
+    def __init__(self, embed_dim=1536, num_heads=8, dropout=0.1):
         super(TransformerEfficientNetB3Syncnet, self).__init__()
         
-        # Load the pretrained EfficientNet-B3 model for face encoding
+        # Face Encoder
         self.face_encoder = models.efficientnet_b3(pretrained=True)
-        
-        # Modify the first convolutional layer to accept 15 input channels
         self.face_encoder.features[0][0] = modify_efficientnet_conv1(self.face_encoder, in_channels=15)
-        
-        # Remove the classifier to get embeddings instead of class scores
         self.face_encoder.classifier = nn.Identity()
         
-        # Similarly, load the pretrained EfficientNet-B3 model for audio encoding
+        # Audio Encoder
         self.audio_encoder = models.efficientnet_b3(pretrained=True)
-        
-        # Modify the first convolutional layer to accept 1 input channel
         self.audio_encoder.features[0][0] = modify_efficientnet_conv1(self.audio_encoder, in_channels=1)
-        
-        # Initialize audio_encoder's conv1 weights (since it's 1 channel)
-        with torch.no_grad():
-            if 1 < 3:
-                # If in_channels < 3, copy the first `in_channels` weights
-                self.audio_encoder.features[0][0].weight.copy_(
-                    self.audio_encoder.features[0][0].weight[:, :1, :, :]
-                )
-            elif 1 == 3:
-                # If in_channels == 3, weights are already copied in modify_efficientnet_conv1
-                pass
-            else:
-                # If in_channels > 3, already initialized in modify_efficientnet_conv1
-                pass
-        
-        # Remove the classifier to get embeddings instead of class scores
         self.audio_encoder.classifier = nn.Identity()
         
-        # Define the fully connected layers based on EfficientNet-B3's output features (1536)
-        self.fc1 = nn.Linear(3072, 768)
-        self.fc3 = nn.Linear(768, 2)
+        # Projection Layers (optional, to match embed_dim)
+        self.face_proj = nn.Linear(1536, embed_dim)
+        self.audio_proj = nn.Linear(1536, embed_dim)
         
-        # Initialize weights
+        # Initialize projections
+        self.face_proj.apply(initialize_weights)
+        self.audio_proj.apply(initialize_weights)
+        
+        # Cross-Attention Layer
+        self.cross_attn = CrossAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout)
+        
+        # Fully Connected Layers for Classification
+        self.fc1 = nn.Linear(embed_dim, 512)
+        self.relu1 = nn.ReLU()
+        self.dropout1 = nn.Dropout(dropout)
+        self.fc2 = nn.Linear(512, 2)
+        self.dropout2 = nn.Dropout(dropout)
+        
+        # Initialize FC layers
         self.fc1.apply(initialize_weights)
-        self.fc3.apply(initialize_weights)
-
-        # Transformer Encoder
-        self.transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=768, nhead=num_heads, dropout=0.3),
-            num_layers=num_encoder_layers
-        )
-        
-        self.relu = nn.LeakyReLU(0.01, inplace=True)
+        self.fc2.apply(initialize_weights)
         
     def forward(self, face, audio):
-        # Encode face input
-        face_embedding = self.face_encoder(face)  # Shape: (batch_size, 1536)
+        # Encode face and audio
+        face_embedding = self.face_encoder(face)    # (batch_size, 1536)
+        audio_embedding = self.audio_encoder(audio) # (batch_size, 1536)
         
-        # Encode audio input
-        audio_embedding = self.audio_encoder(audio)  # Shape: (batch_size, 1536)
-                
-        # Concatenate embeddings
-        combined = torch.cat((face_embedding, audio_embedding), dim=1)  # Shape: (batch_size, 768)
-
-        combined = self.fc1(combined)
-
-        # Normalize embeddings
-        combined = F.normalize(combined, p=2, dim=1)
+        # Project embeddings to common dimension
+        face_proj = self.face_proj(face_embedding)   # (batch_size, embed_dim)
+        audio_proj = self.audio_proj(audio_embedding) # (batch_size, embed_dim)
         
+        # Apply Cross-Attention
+        # Let's attend face to audio and audio to face, then combine
+        face_to_audio = self.cross_attn(face_proj, audio_proj, audio_proj)  # (batch_size, embed_dim)
+        audio_to_face = self.cross_attn(audio_proj, face_proj, face_proj)  # (batch_size, embed_dim)
         
-        # Reshape for Transformer: (sequence_length, batch_size, embedding_dim)
-        combined = combined.unsqueeze(0)  # Shape: (1, batch_size, 768)
+        # Combine the attended embeddings
+        combined = face_to_audio + audio_to_face  # (batch_size, embed_dim)
         
-        transformer_output = self.transformer_encoder(combined)  # Shape: (1, batch_size, 768)
-        out = self.relu(transformer_output)
-        out = self.fc3(out.squeeze(0))  # Shape: (batch_size, 2)
+        # Classification Layers
+        combined = self.fc1(combined)             # (batch_size, 512)
+        combined = self.relu1(combined)
+        combined = self.dropout1(combined)
+        out = self.fc2(combined)                   # (batch_size, 2)
+        out = self.dropout2(out)
         
         return out, audio_embedding, face_embedding

@@ -344,7 +344,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # Model
-    model = TransformerEfficientNetB3Syncnet(num_heads=8, num_encoder_layers=6).to(device)
+    model = TransformerEfficientNetB3Syncnet().to(device)
 
     # Freeze layers
     # for param in model.face_encoder.parameters():
