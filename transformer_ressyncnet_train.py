@@ -81,12 +81,10 @@ def cosine_loss(a, v, y):
     
     return loss
 
-
-# added by eddy
 # Register hooks to print gradient norms
 def print_grad_norm(module, grad_input, grad_output):
     for i, grad in enumerate(grad_output):
-        if grad is not None and global_step % 500 == 0:
+        if grad is not None and global_step % 200 == 0:
             print(f'{module.__class__.__name__} - grad_output[{i}] norm: {grad.norm().item()}')
 
 # end added by eddy
@@ -339,7 +337,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # Model
-    model = TransformerResSyncnet(num_heads=8, num_encoder_layers=6).to(device)
+    model = TransformerResSyncnet().to(device)
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
     
