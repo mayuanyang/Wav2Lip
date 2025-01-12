@@ -81,14 +81,16 @@ def cosine_loss(a, v, y):
     
     return loss
 
+def get_current_lr(optimizer):
+    # Assuming there is only one parameter group
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
+    
 # Register hooks to print gradient norms
 def print_grad_norm(module, grad_input, grad_output):
     for i, grad in enumerate(grad_output):
         if grad is not None and global_step % 200 == 0:
             print(f'{module.__class__.__name__} - grad_output[{i}] norm: {grad.norm().item()}')
-
-# end added by eddy
-
 
 def train(device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=None, checkpoint_interval=None, nepochs=None, should_print_grad_norm=False):
@@ -104,13 +106,12 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     
     if should_print_grad_norm:
       for name, module in model.named_modules():
-        if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear, nn.TransformerEncoderLayer)):
+        if isinstance(module, (nn.Conv2d, nn.Linear, nn.TransformerEncoderLayer)):
             module.register_backward_hook(print_grad_norm)
   
     
     while global_epoch < nepochs:
-        # for param_group in optimizer.param_groups:
-        #   print("The learning rates are: ", param_group['lr'])
+        lr = get_current_lr(optimizer)
         
         avg_ce_loss = 0.
         
@@ -131,10 +132,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             y = y.to(device)                        
             
             ce_loss = cross_entropy_loss(output, y)
-            
-
-            # ce_loss.backward()
-            # optimizer.step()
 
             scaler.scale(ce_loss).backward()
             scaler.step(optimizer)
@@ -155,10 +152,11 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
             scheduler.step(current_training_loss)
             
-            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}'.format(global_step, global_epoch, current_training_loss))
+            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}, LR: {3}'.format(global_step, global_epoch, current_training_loss, lr))
             metrics = {"train/ce_loss": current_training_loss, 
                        "train/step": global_step, 
-                       "train/epoch": global_epoch}
+                       "train/epoch": global_epoch,
+                       "train/lr": lr}
             
             if use_wandb:
               wandb.log({**metrics})
