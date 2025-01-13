@@ -143,6 +143,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             # optimizer.step()
 
             scaler.scale(ce_loss).backward()
+            
+            # **Apply Gradient Clipping Here**
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
             scaler.step(optimizer)
             scaler.update()
 
@@ -187,12 +191,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 
             
         global_epoch += 1
-        # if should_print_grad_norm or global_step % 20==0:
-        #   for param in model.parameters():
-        #         if param.grad is not None:
-        #             print('The gradient is ', param.grad.norm())
-        # Clip gradients
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         
 
 # Added by eddy
@@ -345,20 +343,6 @@ if __name__ == "__main__":
 
     # Model
     model = TransformerEfficientNetB3Syncnet().to(device)
-
-    # Freeze layers
-    # for param in model.face_encoder.parameters():
-    #     param.requires_grad = False
-
-    # for param in model.audio_encoder.parameters():
-    #     param.requires_grad = False
-
-    # # Unfreeze top layers
-    # for param in model.face_encoder.features[-3:].parameters():
-    #     param.requires_grad = True
-
-    # for param in model.audio_encoder.features[-3:].parameters():
-    #     param.requires_grad = True
 
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
