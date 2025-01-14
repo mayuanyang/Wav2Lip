@@ -95,6 +95,10 @@ class TransformerResSyncnet(nn.Module):
         face_proj = self.face_proj(face_embedding)   # (batch_size, embed_dim)
         audio_proj = self.audio_proj(audio_embedding) # (batch_size, embed_dim)
         
+        # normalise them
+        audio_proj = F.normalize(audio_proj, p=2, dim=1)
+        face_proj = F.normalize(face_proj, p=2, dim=1)
+        
         # Apply Cross-Attention
         # Let's attend face to audio and audio to face, then combine
         face_to_audio = self.cross_attn(face_proj, audio_proj, audio_proj)  # (batch_size, embed_dim)
