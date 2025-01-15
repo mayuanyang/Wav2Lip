@@ -43,7 +43,7 @@ def modify_resnet_conv1(resnet, in_channels):
 
 
 def initialize_weights(module):
-    if isinstance(module, nn.Linear) or isinstance(module, nn.Conv2d) :
+    if isinstance(module, nn.Linear):
         nn.init.kaiming_normal_(module.weight)
         if module.bias is not None:
             nn.init.constant_(module.bias, 0)
