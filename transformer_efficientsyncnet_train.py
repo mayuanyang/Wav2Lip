@@ -138,15 +138,12 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             
             ce_loss = cross_entropy_loss(output, y)
             
-
-            # ce_loss.backward()
-            # optimizer.step()
-
             scaler.scale(ce_loss).backward()
-            
-            # **Apply Gradient Clipping Here**
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
+            # **Apply Gradient Clipping Here**
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             scaler.step(optimizer)
             scaler.update()
 
