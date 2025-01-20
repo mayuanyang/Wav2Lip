@@ -49,7 +49,7 @@ def initialize_weights(module):
             nn.init.constant_(module.bias, 0)
 
 class TransformerResSyncnet(nn.Module):
-    def __init__(self, embed_dim=512, num_heads=8, dropout=0.1):
+    def __init__(self, num_cross_attn_layers=2, embed_dim=512, num_heads=8, dropout=0.1):
         super(TransformerResSyncnet, self).__init__()
         
         # Face Encoder
@@ -58,13 +58,11 @@ class TransformerResSyncnet(nn.Module):
         self.face_encoder.fc = nn.Identity()
         
         # Audio Encoder
-                # Similarly, modify the audio_encoder if necessary
         self.audio_encoder = models.resnet18(pretrained=True)
         self.audio_encoder.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
-
         self.audio_encoder.fc = nn.Identity()
         
-        # Projection Layers (optional, to match embed_dim)
+        # Projection Layers (to match embed_dim)
         self.face_proj = nn.Linear(2048, embed_dim)
         self.audio_proj = nn.Linear(512, embed_dim)
         
@@ -72,8 +70,15 @@ class TransformerResSyncnet(nn.Module):
         self.face_proj.apply(initialize_weights)
         self.audio_proj.apply(initialize_weights)
         
-        # Cross-Attention Layer
-        self.cross_attn = CrossAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout)
+        # Separate Cross-Attention Layers for Each Direction
+        self.cross_attn_face_to_audio = nn.ModuleList([
+            CrossAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout)
+            for _ in range(num_cross_attn_layers)
+        ])
+        self.cross_attn_audio_to_face = nn.ModuleList([
+            CrossAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout)
+            for _ in range(num_cross_attn_layers)
+        ])
         
         # Fully Connected Layers for Classification
         self.fc1 = nn.Linear(embed_dim, 512)
@@ -88,24 +93,30 @@ class TransformerResSyncnet(nn.Module):
         
     def forward(self, face, audio):
         # Encode face and audio
-        face_embedding = self.face_encoder(face)    # (batch_size, 1536)
-        audio_embedding = self.audio_encoder(audio) # (batch_size, 1536)
+        face_embedding = self.face_encoder(face)    # (batch_size, 2048)
+        audio_embedding = self.audio_encoder(audio) # (batch_size, 512)
         
         # Project embeddings to common dimension
         face_proj = self.face_proj(face_embedding)   # (batch_size, embed_dim)
         audio_proj = self.audio_proj(audio_embedding) # (batch_size, embed_dim)
         
-        # normalise them
-        audio_proj = F.normalize(audio_proj, p=2, dim=1)
+        # Normalize embeddings
         face_proj = F.normalize(face_proj, p=2, dim=1)
+        audio_proj = F.normalize(audio_proj, p=2, dim=1)
         
-        # Apply Cross-Attention
-        # Let's attend face to audio and audio to face, then combine
-        face_to_audio = self.cross_attn(face_proj, audio_proj, audio_proj)  # (batch_size, embed_dim)
-        audio_to_face = self.cross_attn(audio_proj, face_proj, face_proj)  # (batch_size, embed_dim)
+        # Apply Multiple Cross-Attention Layers with Residual Connections
+        for i in range(len(self.cross_attn_face_to_audio)):
+            # Cross-Attention: Face attends to Audio
+            face_to_audio = self.cross_attn_face_to_audio[i](face_proj, audio_proj, audio_proj)  # (batch_size, embed_dim)
+            # Cross-Attention: Audio attends to Face
+            audio_to_face = self.cross_attn_audio_to_face[i](audio_proj, face_proj, face_proj)  # (batch_size, embed_dim)
+            
+            # Residual Connections
+            face_proj = face_proj + face_to_audio  # (batch_size, embed_dim)
+            audio_proj = audio_proj + audio_to_face  # (batch_size, embed_dim)
         
-        # Combine the attended embeddings
-        combined = face_to_audio + audio_to_face  # (batch_size, embed_dim)
+        # Combine the final embeddings
+        combined = face_proj + audio_proj  # (batch_size, embed_dim)
         
         # Classification Layers
         combined = self.fc1(combined)             # (batch_size, 512)
