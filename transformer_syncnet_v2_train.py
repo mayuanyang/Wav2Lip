@@ -20,6 +20,7 @@ from models.conv import Conv2d, Conv2dTranspose
 from syncnet_dataset import Dataset, samples
 
 import wandb
+from torch.cuda.amp import GradScaler, autocast
 
 
 def str2bool(v):
@@ -107,7 +108,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear, nn.TransformerEncoderLayer)):
             module.register_backward_hook(print_grad_norm)
   
-    
+    scaler = GradScaler()
     while global_epoch < nepochs:
         # for param_group in optimizer.param_groups:
         #   print("The learning rates are: ", param_group['lr'])
@@ -133,12 +134,14 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             ce_loss = cross_entropy_loss(output, y)
             
 
-            ce_loss.backward()
+            scaler.scale(ce_loss).backward()
 
             # **Apply Gradient Clipping Here**
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
             global_step += 1
             avg_ce_loss += ce_loss.item()
