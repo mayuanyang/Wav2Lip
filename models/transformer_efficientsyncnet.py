@@ -50,7 +50,7 @@ def initialize_weights(module):
 
     
 class TransformerEfficientNetB3Syncnet(nn.Module):
-    def __init__(self, num_cross_attn_layers=2, embed_dim=512, num_heads=8, dropout=0.1):
+    def __init__(self, num_cross_attn_layers=4, embed_dim=512, num_heads=8, dropout=0.1):
         super(TransformerEfficientNetB3Syncnet, self).__init__()
         
         # Face Encoder
