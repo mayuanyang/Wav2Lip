@@ -228,6 +228,7 @@ class Dataset(object):
                 x = x.transpose(2, 0, 1)
                 x = x[:, x.shape[1]//2:]
 
+                # Each face_window contains 5 images and each image has 3 channels, concatenate them through the channel channel yield a 15 channels image, the x shape is 15x96x192
                 x = torch.FloatTensor(x)
                 mel = torch.FloatTensor(mel.T).unsqueeze(0)
 
