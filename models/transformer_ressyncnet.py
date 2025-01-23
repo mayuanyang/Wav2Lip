@@ -58,13 +58,13 @@ class TransformerResSyncnet(nn.Module):
         self.face_encoder.fc = nn.Identity()
         
         # Audio Encoder
-        self.audio_encoder = models.resnet50(pretrained=True)
+        self.audio_encoder = models.resnet18(pretrained=True)
         self.audio_encoder.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.audio_encoder.fc = nn.Identity()
         
         # Projection Layers (to match embed_dim)
         self.face_proj = nn.Linear(2048, embed_dim)
-        self.audio_proj = nn.Linear(2048, embed_dim)
+        self.audio_proj = nn.Linear(512, embed_dim)
         
         # Initialize projections
         self.face_proj.apply(initialize_weights)
