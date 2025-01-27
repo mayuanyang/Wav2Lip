@@ -106,40 +106,50 @@ class TransformerSyncnetV2(nn.Module):
         
 
     def forward(self, face_embedding, audio_embedding):
-
+        # Encode the face and audio embeddings
         face_embedding = self.face_encoder(face_embedding)
         audio_embedding = self.audio_encoder(audio_embedding)
 
-        audio_embedding = audio_embedding.view(audio_embedding.size(0), -1)
-        face_embedding = face_embedding.view(face_embedding.size(0), -1)
+        # Normalize embeddings at the very beginning
+        face_embedding = F.normalize(face_embedding, p=2, dim=1)
+        audio_embedding = F.normalize(audio_embedding, p=2, dim=1)
 
+        # Flatten the embeddings
+        face_embedding = face_embedding.view(face_embedding.size(0), -1)
+        audio_embedding = audio_embedding.view(audio_embedding.size(0), -1)
+
+        # Apply fully connected layer to the face embedding
         face_embedding = self.fc1(face_embedding)
 
-        # normalise them
-        audio_embedding = F.normalize(audio_embedding, p=2, dim=1)
-        face_embedding = F.normalize(face_embedding, p=2, dim=1)
-
-        original_audio = audio_embedding
+        # Save original normalized embeddings for residual connections
         original_face = face_embedding
+        original_audio = audio_embedding
 
         # Apply Multiple Cross-Attention Layers with Residual Connections
         for i in range(len(self.cross_attn_face_to_audio)):
             # Cross-Attention: Face attends to Audio
-            face_to_audio = self.cross_attn_face_to_audio[i](face_embedding, audio_embedding, audio_embedding)  # (batch_size, embed_dim)
+            face_to_audio = self.cross_attn_face_to_audio[i](
+                face_embedding, audio_embedding, audio_embedding
+            )  # (batch_size, embed_dim)
+
             # Cross-Attention: Audio attends to Face
-            audio_to_face = self.cross_attn_audio_to_face[i](audio_embedding, face_embedding, face_embedding)  # (batch_size, embed_dim)
-            
+            audio_to_face = self.cross_attn_audio_to_face[i](
+                audio_embedding, face_embedding, face_embedding
+            )  # (batch_size, embed_dim)
+
             # Residual Connections
             face_embedding = face_embedding + face_to_audio  # (batch_size, embed_dim)
-            audio_embedding = audio_embedding + audio_to_face # (batch_size, embed_dim)
-        
+            audio_embedding = audio_embedding + audio_to_face  # (batch_size, embed_dim)
+
         # Combine the final embeddings
         combined = face_embedding + audio_embedding  # (batch_size, embed_dim)
 
-        # another residual connection from both encoders
-        combined = combined + original_audio + original_face
+        # Another residual connection from both original embeddings
+        combined = combined + original_face + original_audio
 
+        # Apply activation and final fully connected layer
         out = self.relu(combined)
         out = self.fc3(out)
-        
+
         return out, audio_embedding, face_embedding
+
