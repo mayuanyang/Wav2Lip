@@ -119,6 +119,9 @@ class TransformerSyncnetV2(nn.Module):
         audio_embedding = F.normalize(audio_embedding, p=2, dim=1)
         face_embedding = F.normalize(face_embedding, p=2, dim=1)
 
+        original_audio = audio_embedding
+        original_face = face_embedding
+
         # Apply Multiple Cross-Attention Layers with Residual Connections
         for i in range(len(self.cross_attn_face_to_audio)):
             # Cross-Attention: Face attends to Audio
@@ -132,6 +135,9 @@ class TransformerSyncnetV2(nn.Module):
         
         # Combine the final embeddings
         combined = face_embedding + audio_embedding  # (batch_size, embed_dim)
+
+        # another residual connection from both encoders
+        combined = combined + original_audio + original_face
 
         out = self.relu(combined)
         out = self.fc3(out)
