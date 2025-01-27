@@ -120,6 +120,7 @@ class TransformerSyncnetV2(nn.Module):
 
         # Apply fully connected layer to the face embedding
         face_embedding = self.fc1(face_embedding)
+        face_embedding = F.normalize(face_embedding, p=2, dim=1)
 
         # Save original normalized embeddings for residual connections
         original_face = face_embedding
