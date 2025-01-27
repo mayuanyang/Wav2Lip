@@ -110,6 +110,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
   
     scaler = GradScaler()
     while global_epoch < nepochs:
+        lr = get_current_lr(optimizer)
         # for param_group in optimizer.param_groups:
         #   print("The learning rates are: ", param_group['lr'])
         
@@ -158,10 +159,11 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
             scheduler.step(current_training_loss)
             
-            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}'.format(global_step, global_epoch, current_training_loss))
+            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}, LR: {3}'.format(global_step, global_epoch, current_training_loss, lr))
             metrics = {"train/ce_loss": current_training_loss, 
                        "train/step": global_step, 
-                       "train/epoch": global_epoch}
+                       "train/epoch": global_epoch,
+                       "train/lr": lr}
             
             if use_wandb:
               wandb.log({**metrics})
@@ -180,7 +182,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             samples[first_true_index] = False
 
             print('Adding negative samples, the current samples are', samples)
-                
             
         global_epoch += 1
         
@@ -191,6 +192,10 @@ def print_current_lr(optimizer):
     for param_group in optimizer.param_groups:
         print("LR", param_group['lr'])
 
+def get_current_lr(optimizer):
+    # Assuming there is only one parameter group
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
 
 def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler):
     #eval_steps = 1400
@@ -203,6 +208,7 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, sch
     prog_bar = tqdm(enumerate(test_data_loader))
     losses = []
     while 1:
+        
         for step, (x, mel, y) in enumerate(test_data_loader):
 
             model.eval()
