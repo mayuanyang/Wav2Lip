@@ -127,11 +127,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
             mel = mel.to(device)
 
-            output, audio_embedding, face_embedding = model(x, mel)
-            
-            y = y.to(device)                        
-            
-            ce_loss = cross_entropy_loss(output, y)
+            with autocast():
+              output, audio_embedding, face_embedding = model(x, mel)
+              y = y.to(device)                        
+              ce_loss = cross_entropy_loss(output, y)
 
             scaler.scale(ce_loss).backward()
 

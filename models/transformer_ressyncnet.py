@@ -49,7 +49,7 @@ def initialize_weights(module):
             nn.init.constant_(module.bias, 0)
 
 class TransformerResSyncnet(nn.Module):
-    def __init__(self, num_cross_attn_layers=2, embed_dim=512, num_heads=8, dropout=0.1):
+    def __init__(self, num_encoder_layers=6, embed_dim=256, num_heads=8, dropout=0.1):
         super(TransformerResSyncnet, self).__init__()
         
         # Face Encoder
@@ -70,25 +70,18 @@ class TransformerResSyncnet(nn.Module):
         self.face_proj.apply(initialize_weights)
         self.audio_proj.apply(initialize_weights)
         
-        # Separate Cross-Attention Layers for Each Direction
-        self.cross_attn_face_to_audio = nn.ModuleList([
-            CrossAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout)
-            for _ in range(num_cross_attn_layers)
-        ])
-        self.cross_attn_audio_to_face = nn.ModuleList([
-            CrossAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout)
-            for _ in range(num_cross_attn_layers)
-        ])
+        self.transformer_encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=512, nhead=num_heads, dropout=0.1),
+            num_layers=num_encoder_layers
+        )
         
         # Fully Connected Layers for Classification
-        self.fc1 = nn.Linear(embed_dim, 512)
-        self.relu1 = nn.ReLU()
+        
+        self.relu = nn.LeakyReLU(0.01, inplace=True)
         self.dropout1 = nn.Dropout(dropout)
         self.fc2 = nn.Linear(512, 2)
-        self.dropout2 = nn.Dropout(dropout)
         
         # Initialize FC layers
-        self.fc1.apply(initialize_weights)
         self.fc2.apply(initialize_weights)
         
     def forward(self, face, audio):
@@ -104,25 +97,17 @@ class TransformerResSyncnet(nn.Module):
         face_proj = F.normalize(face_proj, p=2, dim=1)
         audio_proj = F.normalize(audio_proj, p=2, dim=1)
         
-        # Apply Multiple Cross-Attention Layers with Residual Connections
-        for i in range(len(self.cross_attn_face_to_audio)):
-            # Cross-Attention: Face attends to Audio
-            face_to_audio = self.cross_attn_face_to_audio[i](face_proj, audio_proj, audio_proj)  # (batch_size, embed_dim)
-            # Cross-Attention: Audio attends to Face
-            audio_to_face = self.cross_attn_audio_to_face[i](audio_proj, face_proj, face_proj)  # (batch_size, embed_dim)
-            
-            # Residual Connections
-            face_proj = face_proj + face_to_audio  # (batch_size, embed_dim)
-            audio_proj = audio_proj + audio_to_face # (batch_size, embed_dim)
+
+        # Concatenate lip frames and audio features
+        combined = torch.cat((face_proj, audio_proj), dim=1)
         
-        # Combine the final embeddings
-        combined = face_proj + audio_proj  # (batch_size, embed_dim)
-        
-        # Classification Layers
-        combined = self.fc1(combined)             # (batch_size, 512)
-        combined = self.relu1(combined)
-        combined = self.dropout1(combined)
-        out = self.fc2(combined)                   # (batch_size, 2)
-        out = self.dropout2(out)
+        # Make sure combined is 1-dimensional
+        combined = combined.view(combined.size(0), -1)
+
+        # Pass through the Transformer encoder, the input size is 1024
+        transformer_output = self.transformer_encoder(combined)
+        out = self.relu(transformer_output)
+        out = self.fc2(out)
+        out = self.dropout1(out)
         
         return out, audio_embedding, face_embedding
