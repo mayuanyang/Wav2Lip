@@ -17,15 +17,15 @@ class TransformerSyncnet(nn.Module):
         '''
         self.face_encoder = nn.Sequential(
             
-            Conv2d(15, 128, kernel_size=3, stride=1, padding=1), #192x192, 1+(3−1)×1=3
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #192x192, 3+(3−1)×1=5
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #192x192, 3+(3−1)×1=5
+            Conv2d(15, 64, kernel_size=3, stride=1, padding=1), #192x192, 1+(3−1)×1=3
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #192x192, 3+(3−1)×1=5
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #192x192, 3+(3−1)×1=5
             
-            Conv2d(128, 128, kernel_size=3, stride=2, padding=1), #96x96, 7
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), # 9
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), # 11
+            Conv2d(64, 64, kernel_size=3, stride=2, padding=1), #96x96, 7
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), # 9
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), # 11
 
-            Conv2d(128, 128, kernel_size=3, stride=(1, 2), padding=1), #94x47, 13
+            Conv2d(64, 128, kernel_size=3, stride=(1, 2), padding=1), #94x47, 13
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #94x47, 15
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #94x47, 17
 
@@ -105,6 +105,8 @@ class TransformerSyncnet(nn.Module):
 
         face_embedding = self.face_encoder(face_embedding)
         audio_embedding = self.audio_encoder(audio_embedding)
+
+        
 
         audio_embedding = audio_embedding.view(audio_embedding.size(0), -1)
         face_embedding = face_embedding.view(face_embedding.size(0), -1)
