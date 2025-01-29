@@ -25,6 +25,7 @@ from models.conv import Conv2d, Conv2dTranspose
 from wav2lip_dataset import Dataset, syncnet_T
 import torch.nn.functional as F
 from pytorch_msssim import ms_ssim
+from torch.cuda.amp import autocast
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -167,76 +168,78 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               indiv_mels = indiv_mels.to(device)
 
               gt = gt.to(device)
-              g = model(indiv_mels, x)
-              
-              # Compare two images
-              '''
-              The g and gt shape is torch.Size([2, 3, 5, 192, 192]), and vgg is expecting [batch, channels, h, w]
-              the 5 here represent the number of frames, so we either need to loop through them or combine them
-              we choose to collapse
-              '''
-              num_of_frames = g.shape[2]
-              full_losses = []
-              bottom_losses = []
-              ssim_losses = []
-              full_disc_loss = 0
-              bottom_disc_loss = 0
 
-              if hparams.disc_wt > 0:
-                for i in range(num_of_frames):
-                  # Extract the i-th frame from gen_image and gt_image
-                  gen_frame = g[:, :, i, :, :]  # Shape: [batch_size, 3, 192, 192]
-                  gt_frame = gt[:, :, i, :, :]    # Shape: [batch_size, 3, 192, 192]
-
-                  _, _, H, _ = gen_frame.shape
-                  g_bottom = gen_frame[:, :, H//2:, :]
-                  gt_bottom = gt_frame[:, :, H//2:, :]
-
-                  # Now you can process the individual frames, e.g., pass them through a model
-                  # For example:
-                  full_frame_loss = lpips_loss(gen_frame.to(device), gt_frame.to(device))
-                  bottom_frame_loss = lpips_loss(g_bottom.to(device), gt_bottom.to(device))
-
-                  ms_ssim_value = 0.0
-
-                  if hparams.ssim_wt > 0:
-                    ms_ssim_value = 1 - ms_ssim(gen_frame, gt_frame, data_range=1.0, size_average=True)
-                    ssim_losses.append(ms_ssim_value)
-                  
-                  full_losses.append(full_frame_loss)
-                  bottom_losses.append(bottom_frame_loss)
-                  
+              with autocast():
+                g = model(indiv_mels, x)
                 
-                # Average the loss over all frames
-                full_disc_loss = torch.mean(torch.stack(full_losses))
-                running_disc_loss += full_disc_loss.item()
+                # Compare two images
+                '''
+                The g and gt shape is torch.Size([2, 3, 5, 192, 192]), and vgg is expecting [batch, channels, h, w]
+                the 5 here represent the number of frames, so we either need to loop through them or combine them
+                we choose to collapse
+                '''
+                num_of_frames = g.shape[2]
+                full_losses = []
+                bottom_losses = []
+                ssim_losses = []
+                full_disc_loss = 0
+                bottom_disc_loss = 0
 
-                bottom_disc_loss = torch.mean(torch.stack(bottom_losses))
-                running_bottom_disc_loss += bottom_disc_loss.item()
+                if hparams.disc_wt > 0:
+                  for i in range(num_of_frames):
+                    # Extract the i-th frame from gen_image and gt_image
+                    gen_frame = g[:, :, i, :, :]  # Shape: [batch_size, 3, 192, 192]
+                    gt_frame = gt[:, :, i, :, :]    # Shape: [batch_size, 3, 192, 192]
 
-                ssim_loss = 0.0
-                if len(ssim_losses) > 0:
-                  ssim_loss = torch.mean(torch.stack(ssim_losses))
-                  running_ssim_loss += ssim_loss.item()
+                    _, _, H, _ = gen_frame.shape
+                    g_bottom = gen_frame[:, :, H//2:, :]
+                    gt_bottom = gt_frame[:, :, H//2:, :]
+
+                    # Now you can process the individual frames, e.g., pass them through a model
+                    # For example:
+                    full_frame_loss = lpips_loss(gen_frame.to(device), gt_frame.to(device))
+                    bottom_frame_loss = lpips_loss(g_bottom.to(device), gt_bottom.to(device))
+
+                    ms_ssim_value = 0.0
+
+                    if hparams.ssim_wt > 0:
+                      ms_ssim_value = 1 - ms_ssim(gen_frame, gt_frame, data_range=1.0, size_average=True)
+                      ssim_losses.append(ms_ssim_value)
+                    
+                    full_losses.append(full_frame_loss)
+                    bottom_losses.append(bottom_frame_loss)
+                    
+                  
+                  # Average the loss over all frames
+                  full_disc_loss = torch.mean(torch.stack(full_losses))
+                  running_disc_loss += full_disc_loss.item()
+
+                  bottom_disc_loss = torch.mean(torch.stack(bottom_losses))
+                  running_bottom_disc_loss += bottom_disc_loss.item()
+
+                  ssim_loss = 0.0
+                  if len(ssim_losses) > 0:
+                    ssim_loss = torch.mean(torch.stack(ssim_losses))
+                    running_ssim_loss += ssim_loss.item()
+                  
+
+                if hparams.syncnet_wt > 0.:
+                    sync_loss = get_sync_loss(mel, g)
+                else:
+                    sync_loss = 0.
+
+                l1loss = recon_loss(g, gt)
+
+                running_l1_loss += l1loss.item()
+
+                _, _, _, H, _ = g.shape
+
+                bottom_l1loss = recon_loss(g[:, :, :, H//2:, :], gt[:, :, :, H//2:, :])
+
+                running_bottom_l1_loss += bottom_l1loss.item()
                 
-
-              if hparams.syncnet_wt > 0.:
-                  sync_loss = get_sync_loss(mel, g)
-              else:
-                  sync_loss = 0.
-
-              l1loss = recon_loss(g, gt)
-
-              running_l1_loss += l1loss.item()
-
-              _, _, _, H, _ = g.shape
-
-              bottom_l1loss = recon_loss(g[:, :, :, H//2:, :], gt[:, :, :, H//2:, :])
-
-              running_bottom_l1_loss += bottom_l1loss.item()
-              
-              loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss + hparams.ssim_wt * ssim_loss
-              
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss + hparams.ssim_wt * ssim_loss
+                
               loss.backward()
               optimizer.step()
 
