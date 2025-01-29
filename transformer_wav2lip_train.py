@@ -1,7 +1,7 @@
 from os.path import dirname, join, basename, isfile
 from tqdm import tqdm
 
-from models import TransformerSyncnet
+from models import TransformerResSyncnet
 from models import ResUNet
 import torch
 
@@ -84,7 +84,7 @@ def save_sample_images(x, g, gt, global_step, checkpoint_dir):
 
 
 device = torch.device("cuda" if use_cuda else "cpu")
-syncnet = TransformerSyncnet(num_heads=8, num_encoder_layers=6).to(device)
+syncnet = TransformerResSyncnet().to(device)
 for p in syncnet.parameters():
     p.requires_grad = False
 
