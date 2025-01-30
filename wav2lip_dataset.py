@@ -24,9 +24,10 @@ cross_entropy_loss = nn.CrossEntropyLoss()
 recon_loss = nn.L1Loss()
 
 class Dataset(object):
-    def __init__(self, split, data_root, train_root, use_augmentation):
+    def __init__(self, split, data_root, train_root, use_augmentation, img_size_factor=1):
         self.all_videos = get_image_list(data_root, split, train_root)
         self.use_augmentation = use_augmentation
+        self.img_size_factor = img_size_factor
 
     def get_frame_id(self, frame):
         return int(basename(frame).split('.')[0])
@@ -59,7 +60,7 @@ class Dataset(object):
                     if img is None:
                         break
                     try:
-                        img = cv2.resize(img, (hparams.img_size, hparams.img_size))                       
+                        img = cv2.resize(img, (hparams.img_size * self.img_size_factor, hparams.img_size * self.img_size_factor))                       
                         if len(image_cache) < hparams.image_cache_size:
                           image_cache[fname] = img  # Cache the resized image and prevent OOM
                     
@@ -302,7 +303,7 @@ class Dataset(object):
                 traceback.print_exc()   
                 continue
     
-    def apply_gaussian_blur_to_bottom_half_vectorized(self, window, sigma=6):
+    def apply_gaussian_blur_to_bottom_half_vectorized(self, window, sigma=8):
         blurred_window = window.copy()
         split_row = blurred_window.shape[-2] // 2  # e.g., 96 for 192 height
 
