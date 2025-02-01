@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-import math
+
 
 from .conv import Conv2dTranspose, Conv2d, nonorm_Conv2d
 
@@ -23,7 +23,8 @@ class ResUNet384(nn.Module):
         
         self.output_block = ProcessBlock384(3)
                 
-        
+
+
     def forward(self, audio_sequences, face_sequences):
         temp_output = None
         face_input = face_sequences
@@ -102,36 +103,37 @@ class ProcessBlock384(nn.Module):
         '''
 
         self.face_encoder_blocks = nn.ModuleList([
-            nn.Sequential(Conv2d(12, 96, kernel_size=7, stride=1, padding=3), #1+(7−1)×1=7
-                          Conv2d(96, 96, kernel_size=7, stride=1, padding=3, residual=True), #7+(7-1)*1=13
-                          
+            nn.Sequential(Conv2d(12, 64, kernel_size=7, stride=1, padding=3), #1+(7−1)×1=7
+                          Conv2d(64, 64, kernel_size=7, stride=1, padding=3, residual=True), #7+(7-1)*1=13
+                          Conv2d(64, 64, kernel_size=7, stride=1, padding=3, residual=True), #13+(7-1)*1=19
                           ), # 384,384
             
-            nn.Sequential(Conv2d(96, 192, kernel_size=7, stride=2, padding=3), #13+(7−1)×2=25
-                          Conv2d(192, 192, kernel_size=7, stride=1, padding=3, residual=True), #25+(7-1)*1=31
+            nn.Sequential(Conv2d(64, 192, kernel_size=3, stride=2, padding=1), #13+(7−1)×2=25
+                          Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True), #25+(7-1)*1=31
+                          Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True), #25+(7-1)*1=31
                           ), # 192,192
 
-            nn.Sequential(Conv2d(192, 192, kernel_size=7, stride=2, padding=3), #31+(7−1)×2=43
-              Conv2d(192, 192, kernel_size=7, stride=1, padding=3, residual=True), #49
+            nn.Sequential(Conv2d(192, 192, kernel_size=3, stride=2, padding=1), #31+(7−1)×2=43
+              Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True), #49
               ), # 96,96
 
-            nn.Sequential(Conv2d(192, 192, kernel_size=7, stride=2, padding=3), # 48,48, 49+(7−1)×2=61
-            Conv2d(192, 192, kernel_size=7, stride=1, padding=3, residual=True), #67
+            nn.Sequential(Conv2d(192, 192, kernel_size=3, stride=2, padding=1), # 48,48, 49+(7−1)×2=61
+            Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True), #67
             ),
 
-            nn.Sequential(Conv2d(192, 384, kernel_size=7, stride=2, padding=3), # 24,24, 67+(7−1)×2=79
-            Conv2d(384, 384, kernel_size=7, stride=1, padding=3, residual=True), #85
+            nn.Sequential(Conv2d(192, 192, kernel_size=3, stride=2, padding=1), # 24,24, 67+(7−1)×2=79
+            Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True), #85
             ),
 
-            nn.Sequential(Conv2d(384, 384, kernel_size=7, stride=2, padding=3), # 12,12, 85+(7−1)×2=97
-            Conv2d(384, 384, kernel_size=7, stride=1, padding=3, residual=True), # 103
+            nn.Sequential(Conv2d(192, 192, kernel_size=3, stride=2, padding=1), # 12,12, 85+(7−1)×2=97
+            Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True), # 103
             ), 
 
-            nn.Sequential(Conv2d(384, 384, kernel_size=5, stride=2, padding=2), # 6,6, 103+(5−1)×2=111
-            Conv2d(384, 384, kernel_size=5, stride=1, padding=2, residual=True) # 115
+            nn.Sequential(Conv2d(192, 192, kernel_size=5, stride=2, padding=2), # 6,6, 103+(5−1)×2=111
+            Conv2d(192, 192, kernel_size=5, stride=1, padding=2, residual=True) # 115
             ), 
 
-            nn.Sequential(Conv2d(384, 384, kernel_size=5, stride=2, padding=2), # 3,3, 115+(5−1)×2=123
+            nn.Sequential(Conv2d(192, 384, kernel_size=5, stride=2, padding=2), # 3,3, 115+(5−1)×2=123
             Conv2d(384, 384, kernel_size=5, stride=1, padding=2, residual=True), # 127
             ), 
             
@@ -162,15 +164,15 @@ class ProcessBlock384(nn.Module):
             nn.Sequential(Conv2dTranspose(640, 320, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(320, 320, kernel_size=5, stride=1, padding=2, residual=True),), # 6, 6
 
-            nn.Sequential(Conv2dTranspose(704, 352, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.Sequential(Conv2dTranspose(512, 352, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(352, 352, kernel_size=5, stride=1, padding=2, residual=True),
             ), # 12, 12
 
-            nn.Sequential(Conv2dTranspose(736, 368, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.Sequential(Conv2dTranspose(544, 368, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(368, 368, kernel_size=5, stride=1, padding=2, residual=True),
             ), # 24, 24
 
-            nn.Sequential(Conv2dTranspose(752, 376, kernel_size=3, stride=2, padding=1, output_padding=1), 
+            nn.Sequential(Conv2dTranspose(560, 376, kernel_size=3, stride=2, padding=1, output_padding=1), 
             Conv2d(376, 376, kernel_size=5, stride=1, padding=2, residual=True),
             ), # 48, 48
 
@@ -188,5 +190,5 @@ class ProcessBlock384(nn.Module):
             )
             ]) 
 
-        self.output_block = nn.Sequential(nn.Conv2d(208, output_block_channels, kernel_size=1, stride=1, padding=0))
+        self.output_block = nn.Sequential(nn.Conv2d(176, output_block_channels, kernel_size=1, stride=1, padding=0))
         
