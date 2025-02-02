@@ -47,7 +47,7 @@ class Dataset(object):
     
 
 
-    def read_window(self, window_fnames):
+    def read_window(self, window_fnames, is_gt):
         if window_fnames is None: return None
         window = []
         for fname in window_fnames:
@@ -75,7 +75,7 @@ class Dataset(object):
                     2 for brightness
                     3 for contrast
                     '''
-                    if self.use_augmentation:
+                    if self.use_augmentation and not is_gt:
                       option = random.choices([0, 0, 0, 0, 0, 0, 0, 0, 4, 4])[0] 
                       
                       if option == 1:
@@ -215,12 +215,12 @@ class Dataset(object):
                 should_load_diff_video = True
                 continue
 
-            window = self.read_window(window_fnames)
+            window = self.read_window(window_fnames, True)
             if window is None:
                 should_load_diff_video = True
                 continue
 
-            wrong_window = self.read_window(wrong_window_fnames)
+            wrong_window = self.read_window(wrong_window_fnames, False)
             if wrong_window is None:
                 should_load_diff_video = True
                 continue
@@ -234,12 +234,12 @@ class Dataset(object):
             forbidden_images = set(window_fnames).union(set(wrong_window_fnames)).union(set(ref1_window_fnames))
             ref2_window_fnames = self.get_ref_images(forbidden_images, img_names)
             
-            ref1_window = self.read_window(ref1_window_fnames)
+            ref1_window = self.read_window(ref1_window_fnames, False)
             if ref1_window is None:
                 should_load_diff_video = True
                 continue
 
-            ref2_window = self.read_window(ref2_window_fnames)
+            ref2_window = self.read_window(ref2_window_fnames, False)
             if ref2_window is None:
                 should_load_diff_video = True
                 continue

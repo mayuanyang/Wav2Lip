@@ -115,6 +115,7 @@ class ProcessBlock384(nn.Module):
 
             nn.Sequential(Conv2d(192, 192, kernel_size=3, stride=2, padding=1), #31+(7−1)×2=43
               Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True), #49
+              Conv2d(192, 192, kernel_size=3, stride=1, padding=1, residual=True), #49
               ), # 96,96
 
             nn.Sequential(Conv2d(192, 192, kernel_size=3, stride=2, padding=1), # 48,48, 49+(7−1)×2=61
@@ -178,15 +179,18 @@ class ProcessBlock384(nn.Module):
 
             nn.Sequential(Conv2dTranspose(568, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(128, 128, kernel_size=5, stride=1, padding=2, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             ), # 96,96
             
             nn.Sequential(
                 Conv2dTranspose(320, 160, kernel_size=3, stride=2, padding=1, output_padding=1),
                 Conv2d(160, 160, kernel_size=5, stride=1, padding=2, residual=True),
+                Conv2d(160, 160, kernel_size=3, stride=1, padding=1, residual=True),
             ),
             nn.Sequential(
                 Conv2dTranspose(352, 112, kernel_size=3, stride=2, padding=1, output_padding=1),
                 Conv2d(112, 112, kernel_size=5, stride=1, padding=2, residual=True),
+                Conv2d(112, 112, kernel_size=3, stride=1, padding=1, residual=True),
             )
             ]) 
 
