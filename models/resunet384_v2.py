@@ -61,6 +61,8 @@ class ResUNet384V2(nn.Module):
             num_layers=2
         )
 
+        self.projection = nn.Conv2d(512, 8, kernel_size=1, bias=False)  # 1x1 convolution
+
         self.relu = nn.LeakyReLU(0.01, inplace=True)
         self.unet = UNet()
 
@@ -100,9 +102,9 @@ class ResUNet384V2(nn.Module):
         out = self.relu(transformer_output)
 
         out = out.view(B*T, 512, 1, 1)  # Shape: [10, 512, 1, 1] 10 is the BatchSzie * TimeStep
-        C = 8  # Number of additional channels
-        projection = nn.Conv2d(512, C, kernel_size=1)  # 1x1 convolution
-        projected = projection(out)  # Shape: [10, C, 1, 1]
+        
+        
+        projected = self.projection(out)  # Shape: [10, C, 1, 1]
 
         # Upsample to [10, C, 384, 384] using interpolation
         upsampled = torch.nn.functional.interpolate(projected, size=(384, 384), mode='bilinear', align_corners=False)  # Shape: [10, C, 384, 384]
