@@ -39,7 +39,7 @@ class CrossAttention(nn.Module):
 
 class ResUNet384V2(nn.Module):
     def __init__(self, num_of_blocks=2):
-        super(ResUNet384, self).__init__()
+        super(ResUNet384V2, self).__init__()
         self.face_encoder1 = nn.Sequential(
             Conv2d(12, 64, kernel_size=7, stride=1, padding=3),
             Conv2d(64, 64, kernel_size=7, stride=1, padding=3, residual=True),

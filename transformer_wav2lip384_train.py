@@ -2,7 +2,7 @@ from os.path import dirname, join, basename, isfile
 from tqdm import tqdm
 
 from models import TransformerSyncnet
-from models import ResUNet384
+from models import ResUNet384, ResUNet384V2
 import torch
 
 import wandb
@@ -48,8 +48,9 @@ parser.add_argument('--checkpoint_path', help='Resume from this checkpoint', def
 parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
 parser.add_argument('--wandb_run_id', help='The run ID for wandb', required=False, type=str)
 parser.add_argument('--use_augmentation', help='Whether to use data augmentation', default=True, type=str2bool)
-parser.add_argument('--train_root', help='The train.txt and val.txt directory', default='filelists', type=str)
-parser.add_argument('--num_of_unet_layers', help='The train.txt and val.txt directory', default=2, type=int)
+parser.add_argument('--train_root', help='the folder that contains train.txt and val.txt', default='filelists', type=str)
+parser.add_argument('--num_of_unet_layers', help='The num of layers for resunet', default=2, type=int)
+parser.add_argument('--version', help='The train.txt and val.txt directory', default='v1', type=str)
 args = parser.parse_args()
 
 
@@ -58,6 +59,7 @@ global_epoch = 0
 num_of_unet_layers = 2
 use_wandb=True
 use_augmentation= True
+version = 'v1'
 use_cuda = torch.cuda.is_available()
 
 
@@ -460,6 +462,7 @@ if __name__ == "__main__":
     checkpoint_dir = args.checkpoint_dir
     use_wandb = args.use_wandb
     use_augmentation = args.use_augmentation
+    version = args.version
 
     # Dataset and Dataloader setup
     train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation, img_size_factor=2)
@@ -476,7 +479,11 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # Model
-    model = ResUNet384(args.num_of_unet_layers).to(device)
+    if version == 'v1':
+      model = ResUNet384(args.num_of_unet_layers).to(device)
+    else:
+      model = ResUNet384V2(args.num_of_unet_layers).to(device)
+
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
