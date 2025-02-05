@@ -302,6 +302,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               loss.backward()
               optimizer.step()
 
+              # **Apply Gradient Clipping Here**
+              torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
               if global_step % checkpoint_interval == 0:
                   save_sample_images(x, g, gt, global_step, checkpoint_dir)
 
@@ -337,7 +340,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Bottom L1: {avg_bottom_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Bottom Disc: {avg_bottom_disc_loss:.5f}, SSIM: {avg_ssim_loss:.5f}, LR: {current_lr:.7f}")
               
-              scheduler.step(avg_img_loss)
+              scheduler.step(loss)
               
               metrics = {
                   "train/overall_loss": avg_img_loss, 
