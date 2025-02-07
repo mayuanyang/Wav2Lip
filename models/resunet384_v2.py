@@ -4,38 +4,6 @@ from torch.nn import functional as F
 
 from .conv import Conv2dTranspose, Conv2d, nonorm_Conv2d
 
-class CrossAttention(nn.Module):
-    def __init__(self, in_channels, audio_dim, num_heads=8):
-        super().__init__()
-        self.num_heads = num_heads
-        self.dim_head = in_channels // num_heads
-
-        self.audio_to_kv = nn.Linear(audio_dim, 2 * in_channels)
-        self.face_to_q = nn.Conv2d(in_channels, in_channels, kernel_size=1)
-        self.proj = nn.Conv2d(in_channels, in_channels, kernel_size=1)
-
-    def forward(self, x, audio_embedding):
-        B, C, H, W = x.shape
-        audio_embedding = audio_embedding.view(B, -1)
-        
-        kv = self.audio_to_kv(audio_embedding)
-        k, v = kv.chunk(2, dim=1)
-        
-        q = self.face_to_q(x)
-        q = q.reshape(B, self.num_heads, self.dim_head, H * W).permute(0, 1, 3, 2)
-        
-        k = k.reshape(B, self.num_heads, self.dim_head, 1).permute(0, 1, 3, 2)
-        v = v.reshape(B, self.num_heads, self.dim_head, 1).permute(0, 1, 3, 2)
-        
-        # Scaled dot-product attention
-        attn = torch.matmul(q, k.transpose(-2, -1)) / (self.dim_head ** 0.5)
-        attn = attn.softmax(dim=-1)
-        
-        out = torch.matmul(attn, v)
-        out = out.permute(0, 1, 3, 2).reshape(B, C, H, W)
-        out = self.proj(out)
-        
-        return x + out * 0.1
 
 class ResUNet384V2(nn.Module):
     def __init__(self, num_of_blocks=2):
@@ -111,7 +79,6 @@ class ResUNet384V2(nn.Module):
             Conv2d(1024, 512, kernel_size=3, stride=1, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
-        #self.cross_attn4 = CrossAttention(512, 512)
 
         self.face_decoder3 = nn.Sequential(
             Conv2dTranspose(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
@@ -121,7 +88,7 @@ class ResUNet384V2(nn.Module):
             Conv2d(512, 256, kernel_size=3, stride=1, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
-        #self.cross_attn3 = CrossAttention(256, 512)
+        
 
         self.face_decoder2 = nn.Sequential(
             Conv2dTranspose(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
@@ -131,13 +98,17 @@ class ResUNet384V2(nn.Module):
             Conv2d(256, 128, kernel_size=3, stride=1, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
-        #self.cross_attn2 = CrossAttention(128, 512)
+        
 
         self.face_decoder1 = nn.Sequential(
             Conv2dTranspose(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
-        #self.cross_attn1 = CrossAttention(64, 512)
+        
+        self.fd_conv1 = nn.Sequential(
+            Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+        )
 
         self.output_block = nn.Sequential(
             nn.Conv2d(64, 3, kernel_size=1, stride=1, padding=0),
@@ -147,8 +118,6 @@ class ResUNet384V2(nn.Module):
         def check_nan(tensor, name):
           if torch.isnan(tensor).any():
               print('NaN problem', f"NaN in {name}") 
-          
-
          
         B = audio_sequences.size(0)
         input_dim_size = len(face_sequences.size())
@@ -185,7 +154,7 @@ class ResUNet384V2(nn.Module):
 
         deface4 = self.face_decoder4(bottlenet)
         check_nan(deface4, "deface4")
-        #deface4 = self.cross_attn4(deface4, audio_embedding)
+        
         check_nan(deface4, "cross_attn4")
         cat4 = torch.cat([deface4, face4], dim=1)
         cat4 = self.fd_conv4(cat4)
@@ -193,23 +162,26 @@ class ResUNet384V2(nn.Module):
 
         deface3 = self.face_decoder3(cat4)
         check_nan(deface3, "face_decoder3")
-        #deface3 = self.cross_attn3(deface3, audio_embedding)
+        
         cat3 = torch.cat([deface3, face3], dim=1)
         cat3 = self.fd_conv3(cat3)
         check_nan(cat3, "fd_conv3")
 
         deface2 = self.face_decoder2(cat3)
         check_nan(deface2, "face_decoder2")
-        #deface2 = self.cross_attn2(deface2, audio_embedding)
+        
         cat2 = torch.cat([deface2, face2], dim=1)
         cat2 = self.fd_conv2(cat2)
         check_nan(cat2, "fd_conv2")
-
+        
         deface1 = self.face_decoder1(cat2)
         check_nan(deface1, "face_decoder1")
-        #deface1 = self.cross_attn1(deface1, audio_embedding)
-        
-        x = self.output_block(deface1)
+
+        cat1 = torch.cat([deface1, face1], dim=1)
+        cat1 = self.fd_conv1(cat1)
+        check_nan(cat1, "fd_conv1")
+
+        x = self.output_block(cat1)
         check_nan(x, "output_block")
 
         if input_dim_size > 4:
