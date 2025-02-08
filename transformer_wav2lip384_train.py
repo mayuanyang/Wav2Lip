@@ -215,6 +215,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         running_ssim_loss = 0.0
 
         running_triplet_loss = 0.0
+        # Set the number of accumulation steps
+        accumulation_steps = 2
+        accumulation_counter = 0  # counts how many batches have been accumulated
         for step, (x, indiv_mels, mel, gt) in prog_bar:
             #print("The x shape", x.shape)
             if x.shape[0] == hparams.batch_size:
@@ -280,30 +283,41 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   if len(ssim_losses) > 0:
                     ssim_loss = torch.mean(torch.stack(ssim_losses))
                     running_ssim_loss += ssim_loss.item()
-                  
-
-                if hparams.syncnet_wt > 0.:
-                    sync_loss = get_sync_loss(mel, g)
-                else:
-                    sync_loss = 0.
-
-                l1loss = recon_loss(g, gt)
-
-                running_l1_loss += l1loss.item()
-
-                _, _, _, H, _ = g.shape
-
-                bottom_l1loss = recon_loss(g[:, :, :, H//2:, :], gt[:, :, :, H//2:, :])
-
-                running_bottom_l1_loss += bottom_l1loss.item()
                 
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss + hparams.ssim_wt * ssim_loss
-                
+
+              if hparams.syncnet_wt > 0.:
+                  sync_loss = get_sync_loss(mel, g)
+              else:
+                  sync_loss = 0.
+
+              l1loss = recon_loss(g, gt)
+
+              running_l1_loss += l1loss.item()
+
+              _, _, _, H, _ = g.shape
+
+              bottom_l1loss = recon_loss(g[:, :, :, H//2:, :], gt[:, :, :, H//2:, :])
+
+              running_bottom_l1_loss += bottom_l1loss.item()
+              
+              loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss + hparams.ssim_wt * ssim_loss
+              
+                      # Scale loss to account for gradient accumulation
+              loss = loss / accumulation_steps
               loss.backward()
-              optimizer.step()
 
-              # **Apply Gradient Clipping Here**
-              torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+              accumulation_counter += 1
+
+              # Once we've accumulated enough mini-batches, update the weights
+              if accumulation_counter == accumulation_steps:
+                  # Apply gradient clipping
+                  torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+                  optimizer.step()
+                  scheduler.step(loss)  # Optionally, you might want to update scheduler per optimizer.step()
+
+                  # Reset the accumulation counter
+                  accumulation_counter = 0
 
               if global_step % checkpoint_interval == 0:
                   save_sample_images(x, g, gt, global_step, checkpoint_dir)
@@ -340,7 +354,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Bottom L1: {avg_bottom_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Bottom Disc: {avg_bottom_disc_loss:.5f}, SSIM: {avg_ssim_loss:.5f}, LR: {current_lr:.7f}")
               
-              scheduler.step(loss)
               
               metrics = {
                   "train/overall_loss": avg_img_loss, 
@@ -451,7 +464,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
 
     if optimizer != None:
       for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.0005
+        param_group['lr'] = 0.0001
 
     # for name, param in model.named_parameters():
     #   if 'face_enhancer' not in name:
