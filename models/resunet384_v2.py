@@ -11,6 +11,7 @@ class ResUNet384V2(nn.Module):
         self.face_encoder1 = nn.Sequential(
             Conv2d(12, 64, kernel_size=7, stride=1, padding=3),
             Conv2d(64, 64, kernel_size=7, stride=1, padding=3, residual=True),
+            Conv2d(64, 64, kernel_size=7, stride=1, padding=3, residual=True),
         )
         self.fe_down1 = nn.Sequential(
             Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
@@ -102,6 +103,7 @@ class ResUNet384V2(nn.Module):
 
         self.face_decoder1 = nn.Sequential(
             Conv2dTranspose(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
