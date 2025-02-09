@@ -25,7 +25,7 @@ from models.conv import Conv2d, Conv2dTranspose
 from wav2lip_dataset import Dataset, syncnet_T
 import torch.nn.functional as F
 from pytorch_msssim import ms_ssim
-from torch.cuda.amp import autocast
+from torch.cuda.amp import autocast, GradScaler
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -201,6 +201,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     syncnet_wt = hparams.syncnet_wt
     sync_loss = 0.
 
+    scaler = GradScaler()
+
     while global_epoch < nepochs:
         current_lr = get_current_lr(optimizer)
                 
@@ -215,9 +217,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         running_ssim_loss = 0.0
 
         running_triplet_loss = 0.0
-        # Set the number of accumulation steps
-        accumulation_steps = 2
-        accumulation_counter = 0  # counts how many batches have been accumulated
+        
         for step, (x, indiv_mels, mel, gt) in prog_bar:
             #print("The x shape", x.shape)
             if x.shape[0] == hparams.batch_size:
@@ -243,7 +243,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 num_of_frames = g.shape[2]
                 full_losses = []
                 bottom_losses = []
-                ssim_losses = []
+                
                 full_disc_loss = 0
                 bottom_disc_loss = 0
 
@@ -253,71 +253,50 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                     gen_frame = g[:, :, i, :, :]  # Shape: [batch_size, 3, 192, 192]
                     gt_frame = gt[:, :, i, :, :]    # Shape: [batch_size, 3, 192, 192]
 
-                    _, _, H, _ = gen_frame.shape
-                    g_bottom = gen_frame[:, :, H//2:, :]
-                    gt_bottom = gt_frame[:, :, H//2:, :]
-
-                    # Now you can process the individual frames, e.g., pass them through a model
-                    # For example:
                     full_frame_loss = lpips_loss(gen_frame.to(device), gt_frame.to(device))
-                    bottom_frame_loss = lpips_loss(g_bottom.to(device), gt_bottom.to(device))
-
-                    ms_ssim_value = 0.0
-
-                    if hparams.ssim_wt > 0:
-                      ms_ssim_value = 1 - ms_ssim(gen_frame, gt_frame, data_range=1.0, size_average=True)
-                      ssim_losses.append(ms_ssim_value)
-                    
                     full_losses.append(full_frame_loss)
-                    bottom_losses.append(bottom_frame_loss)
+
+                    if hparams.bottom_disc_wt > 0:
+                      _, _, H, _ = gen_frame.shape
+                      g_bottom = gen_frame[:, :, H//2:, :]
+                      gt_bottom = gt_frame[:, :, H//2:, :]
+                      bottom_frame_loss = lpips_loss(g_bottom.to(device), gt_bottom.to(device))
+                      bottom_losses.append(bottom_frame_loss)
                     
                   
                   # Average the loss over all frames
                   full_disc_loss = torch.mean(torch.stack(full_losses))
                   running_disc_loss += full_disc_loss.item()
-
-                  bottom_disc_loss = torch.mean(torch.stack(bottom_losses))
-                  running_bottom_disc_loss += bottom_disc_loss.item()
-
-                  ssim_loss = 0.0
-                  if len(ssim_losses) > 0:
-                    ssim_loss = torch.mean(torch.stack(ssim_losses))
-                    running_ssim_loss += ssim_loss.item()
+                  
+                  if len(bottom_losses) > 0:
+                    bottom_disc_loss = torch.mean(torch.stack(bottom_losses))
+                    running_bottom_disc_loss += bottom_disc_loss.item()
                 
 
-              if hparams.syncnet_wt > 0.:
-                  sync_loss = get_sync_loss(mel, g)
-              else:
-                  sync_loss = 0.
+                if hparams.syncnet_wt > 0.:
+                    sync_loss = get_sync_loss(mel, g)
+                else:
+                    sync_loss = 0.
 
-              l1loss = recon_loss(g, gt)
+                l1loss = recon_loss(g, gt)
 
-              running_l1_loss += l1loss.item()
+                running_l1_loss += l1loss.item()
 
-              _, _, _, H, _ = g.shape
+                bottom_l1loss = 0
+                if hparams.bottom_l1_wt > 0:
+                  _, _, _, H, _ = g.shape
 
-              bottom_l1loss = recon_loss(g[:, :, :, H//2:, :], gt[:, :, :, H//2:, :])
+                  bottom_l1loss = recon_loss(g[:, :, :, H//2:, :], gt[:, :, :, H//2:, :])
 
-              running_bottom_l1_loss += bottom_l1loss.item()
+                  running_bottom_l1_loss += bottom_l1loss.item()
+                
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss
               
-              loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss + hparams.ssim_wt * ssim_loss
+              scaler.scale(loss).backward()
+              scaler.step(optimizer)
+              scaler.update()
               
-                      # Scale loss to account for gradient accumulation
-              loss = loss / accumulation_steps
-              loss.backward()
 
-              accumulation_counter += 1
-
-              # Once we've accumulated enough mini-batches, update the weights
-              if accumulation_counter == accumulation_steps:
-                  # Apply gradient clipping
-                  torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
-                  optimizer.step()
-                  scheduler.step(loss)  # Optionally, you might want to update scheduler per optimizer.step()
-
-                  # Reset the accumulation counter
-                  accumulation_counter = 0
 
               if global_step % checkpoint_interval == 0:
                   save_sample_images(x, g, gt, global_step, checkpoint_dir)
@@ -345,14 +324,12 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               avg_bottom_disc_loss = running_bottom_disc_loss / (step + 1)
 
-              avg_ssim_loss = running_ssim_loss / (step + 1)
-
               
               if global_step % hparams.eval_interval == 0:
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Bottom L1: {avg_bottom_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Bottom Disc: {avg_bottom_disc_loss:.5f}, SSIM: {avg_ssim_loss:.5f}, LR: {current_lr:.7f}")
+              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Bottom L1: {avg_bottom_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Bottom Disc: {avg_bottom_disc_loss:.5f}, LR: {current_lr:.7f}")
               
               
               metrics = {
@@ -362,7 +339,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   "train/sync_loss": running_sync_loss / (step + 1), 
                   "train/disc_loss": avg_disc_loss,
                   "train/bottom_disc_loss": avg_bottom_disc_loss,
-                  "train/ssim_loss": avg_ssim_loss,
                   "params/step": global_step,
                   "params/learning_rate": current_lr,
                   "params/l1_wt": hparams.l1_wt,
