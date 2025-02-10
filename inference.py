@@ -6,7 +6,7 @@ import json, subprocess, random, string
 from tqdm import tqdm
 from glob import glob
 import torch, face_detection
-from models import ResUNet
+from models import ResUNet384V2
 from realesrgan import RealESRGANer
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from PIL import Image
@@ -52,7 +52,7 @@ parser.add_argument('--pads', nargs='+', type=int, default=[0, 10, 0, 0],
 
 parser.add_argument('--face_det_batch_size', type=int, 
           help='Batch size for face detection', default=16)
-parser.add_argument('--wav2lip_batch_size', type=int, help='Batch size for Wav2Lip model(s)', default=128)
+parser.add_argument('--wav2lip_batch_size', type=int, help='Batch size for Wav2Lip model(s)', default=16)
 
 parser.add_argument('--resize_factor', default=1, type=int, 
       help='Reduce the resolution by this factor. Sometimes, best results are obtained at 480p or 720p')
@@ -80,7 +80,7 @@ parser.add_argument('--use_esrgan', default=False, type=str2bool)
 parser.add_argument('--iteration', type=int, help='Number of iteration to inference', default=2)
 
 args = parser.parse_args()
-args.img_size = 192
+args.img_size = 384
 
 if os.path.isfile(args.face) and args.face.split('.')[1] in ['jpg', 'png', 'jpeg']:
   args.static = True
@@ -159,7 +159,7 @@ def prepare_window(window):
 
         return x
 
-def apply_gaussian_blur_to_bottom_half_vectorized(window, sigma=6):
+def apply_gaussian_blur_to_bottom_half_vectorized(window, sigma=8):
         blurred_window = window.copy()
         blurred_window = prepare_window(blurred_window)
         split_row = blurred_window.shape[-2] // 2  # e.g., 96 for 192 height
@@ -325,7 +325,7 @@ def _load(checkpoint_path):
   return checkpoint
 
 def load_model(path, lora_path=None, model_layers=1):
-  model = ResUNet(model_layers)
+  model = ResUNet384V2(model_layers)
   print("Load checkpoint from: {}".format(path))
   checkpoint = _load(path)
   s = checkpoint["state_dict"]
