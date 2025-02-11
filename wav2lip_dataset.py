@@ -353,8 +353,8 @@ class Dataset(object):
                 height = y_max - y_min
 
                 # Define a padding factor (e.g., 50% larger in each direction).
-                pad_width_factor = 0.2  # Adjust this value as needed.
-                pad_height_factor = 0.5  # Adjust this value as needed.
+                pad_width_factor = 0.6  # Adjust this value as needed.
+                pad_height_factor = 0.6  # Adjust this value as needed.
                 pad_x = int(width * pad_width_factor)
                 pad_y = int(height * pad_height_factor)
 
