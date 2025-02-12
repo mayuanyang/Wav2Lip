@@ -9,26 +9,26 @@ class ResUNet384V2(nn.Module):
     def __init__(self, num_of_blocks=2):
         super(ResUNet384V2, self).__init__()
         self.face_encoder1 = nn.Sequential(
-            Conv2d(12, 128, kernel_size=7, stride=1, padding=3),
-            Conv2d(128, 128, kernel_size=7, stride=1, padding=3, residual=True),
-            Conv2d(128, 128, kernel_size=7, stride=1, padding=3, residual=True),
+            Conv2d(12, 64, kernel_size=7, stride=1, padding=3),
+            Conv2d(64, 64, kernel_size=7, stride=1, padding=3, residual=True),
+            Conv2d(64, 64, kernel_size=7, stride=1, padding=3, residual=True),
         )
         self.fe_down1 = nn.Sequential(
-            Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.face_encoder2 = nn.Sequential(
-            Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
         self.fe_down2 = nn.Sequential(
-            Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
 
         self.face_encoder3 = nn.Sequential(
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+            Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
         self.fe_down3 = nn.Sequential(
@@ -96,28 +96,28 @@ class ResUNet384V2(nn.Module):
         
 
         self.face_decoder2 = nn.Sequential(
-            Conv2dTranspose(256, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2dTranspose(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
         self.fd_conv2 = nn.Sequential(
-            Conv2d(512, 256, kernel_size=3, stride=1, padding=1),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(256, 128, kernel_size=3, stride=1, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
 
         self.face_decoder1 = nn.Sequential(
-            Conv2dTranspose(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2dTranspose(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.fd_conv1 = nn.Sequential(
-            Conv2d(256, 128, kernel_size=3, stride=1, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
 
         self.output_block = nn.Sequential(
-            nn.Conv2d(128, 3, kernel_size=1, stride=1, padding=0),
+            nn.Conv2d(64, 3, kernel_size=1, stride=1, padding=0),
             nn.Sigmoid())
 
     def forward(self, audio_sequences, face_sequences):

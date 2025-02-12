@@ -323,6 +323,7 @@ class Dataset(object):
         C, T, H, W = window.shape
         frames = np.transpose(window, (1, 2, 3, 0)).copy()  # now shape: (T, H, W, C)
         blurred_frames = []
+        
 
         for frame in frames:
             frame_rgb = (frame * 255).astype(np.uint8)
@@ -368,6 +369,8 @@ class Dataset(object):
                 frame[y_min_expanded:y_max_expanded, x_min_expanded:x_max_expanded] = [0, 0, 0]
                 blurred_frames.append(frame)
             else:
+                h, w, _ = frame.shape
+                split_row = h // 2
                 top_half = frame[:split_row, :, :]
                 bottom_half = frame[split_row:, :, :]
                 # Use a relatively strong blur for the bottom half
