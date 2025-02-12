@@ -13,6 +13,7 @@ from PIL import Image
 from scipy.ndimage import gaussian_filter
 
 import platform
+import mediapipe as mp
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -159,38 +160,81 @@ def prepare_window(window):
 
         return x
 
-def apply_gaussian_blur_to_bottom_half_vectorized(window, sigma=8):
-        blurred_window = window.copy()
-        blurred_window = prepare_window(blurred_window)
-        split_row = blurred_window.shape[-2] // 2  # e.g., 96 for 192 height
+LIPS_LANDMARKS = [
+    61, 185, 40, 39, 37, 0, 267, 269, 270, 409,
+    291, 146, 91, 181, 84, 17, 314, 405, 320, 307,
+    375, 321, 311, 308, 324, 318, 402, 317, 14, 87
+]
 
-        bottom_half = blurred_window[:, :, split_row:, :]  # Shape: (channels, frames, 96, 192)
-        blurred_bottom_half = gaussian_filter(bottom_half, sigma=(0, 0, sigma, sigma))
-        blurred_window[:, :, split_row:, :] = blurred_bottom_half
+def apply_dynamic_blur(window, sigma=12):
+        mp_face_mesh = mp.solutions.face_mesh
+        face_mesh = mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
+        # This function assumes window has shape (C, T, H, W)
+        # It applies a gaussian blur to the mouth region and gradually diffuses it outward.
+        
+        
+        C, T, H, W = window.shape
+        frames = window.copy()  # now shape: (T, H, W, C)
+        blurred_frames = []
+        
 
-        blurred_window = np.transpose(blurred_window, (1, 2, 3, 0)) * 255
+        for frame in frames:
+            frame_rgb = (frame).astype(np.uint8)
 
-        # frames, H, W, c = blurred_window.shape
+            results = face_mesh.process(frame_rgb)
 
-        # output_dir = "checkpoints/wav2lip_checkpoint/no-blackout/"
-        # for i in range(frames):
-        #         # Extract the i-th frame
-        #         frame = blurred_window[i]
-        #         print('The image shape', frame.shape)
+            if results.multi_face_landmarks:
+                # Get the mouth landmarks (MediaPipe Face Mesh landmarks for mouth are from 61 to 80)
+                mouth_points = []
+                h, w, _ = frame.shape
+                split_row = h // 2
+                for idx in LIPS_LANDMARKS:
+                    lm = results.multi_face_landmarks[0].landmark[idx]
+                    x, y = int(lm.x * w), int(lm.y * h)
+                    mouth_points.append([x, y])
 
-        #         # # Convert RGB to BGR since OpenCV uses BGR format
-        #         #frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                # Convert the list of mouth points to a NumPy array for easier manipulation.
+                mouth_points = np.array(mouth_points)
 
-        #         # Construct the filename with zero-padding (e.g., frame_0001.png)
-        #         filename = f"{i:04d}.png"
-        #         filepath = os.path.join(output_dir, filename)
+                # Compute the bounding rectangle coordinates.
+                x_min = np.min(mouth_points[:, 0])
+                x_max = np.max(mouth_points[:, 0])
+                y_min = np.min(mouth_points[:, 1])
+                y_max = np.max(mouth_points[:, 1])
 
-        #         # Save the image using OpenCV's imwrite
-        #         success = cv2.imwrite(filepath, frame)
+                # Calculate the width and height of the mouth region.
+                width = x_max - x_min
+                height = y_max - y_min
 
-        #         print(f'Saving {success} to {filepath}')
+                # Define a padding factor (e.g., 50% larger in each direction).
+                pad_width_factor = 0.6  # Adjust this value as needed.
+                pad_height_factor = 0.6  # Adjust this value as needed.
+                pad_x = int(width * pad_width_factor)
+                pad_y = int(height * pad_height_factor)
 
-        return blurred_window
+                # Expand the rectangle and ensure the coordinates stay within frame boundaries.
+                x_min_expanded = max(x_min - pad_x, 0)
+                y_min_expanded = max(y_min - pad_y, 0)
+                x_max_expanded = min(x_max + pad_x, w)
+                y_max_expanded = min(y_max + pad_y, h)
+
+                # Black out the expanded rectangular region.
+                frame[y_min_expanded:y_max_expanded, x_min_expanded:x_max_expanded] = [0, 0, 0]
+                blurred_frames.append(frame)
+            else:
+                h, w, _ = frame.shape
+                split_row = h // 2
+                top_half = frame[:split_row, :, :]
+                bottom_half = frame[split_row:, :, :]
+                # Use a relatively strong blur for the bottom half
+                blurred_bottom = cv2.GaussianBlur(bottom_half, (0, 0), sigmaX=sigma, sigmaY=sigma)
+                frame_blurred = np.vstack([top_half, blurred_bottom])
+                blurred_frames.append(frame_blurred)            
+
+        # Reassemble the frames and convert back to (C, T, H, W)
+        result = np.stack(blurred_frames, axis=0)  # shape: (T, H, W, C)
+        #result = np.transpose(result, (0, 1, 2, 3))  # shape: (C, T, H, W)
+        return result
 
 
 def datagen(frames, mels, use_ref_img, ref_pool, iteration):
@@ -281,8 +325,8 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
       img_masked = img_batch.copy()
 
       # img_masked[:, args.img_size//2:] = 0
-      img_masked = apply_gaussian_blur_to_bottom_half_vectorized(img_masked)
-      print('The image shape 1', img_masked.shape)
+      img_masked = apply_dynamic_blur(img_masked)
+      #print('The image shape 1', img_masked.shape, img_batch.shape)
 
       img_batch = np.concatenate((img_masked, img_batch, ref_batch, ref_batch2), axis=3) / 255.
       mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
@@ -298,7 +342,7 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
 
     
     #img_masked[:, args.img_size//2:] = 0
-    img_masked = apply_gaussian_blur_to_bottom_half_vectorized(img_masked)
+    img_masked = apply_dynamic_blur(img_masked)
 
     print('The image shape 2', img_masked.shape)
 
