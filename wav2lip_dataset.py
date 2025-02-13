@@ -369,14 +369,35 @@ class Dataset(object):
                 frame[y_min_expanded:y_max_expanded, x_min_expanded:x_max_expanded] = [0, 0, 0]
                 blurred_frames.append(frame)
             else:
+                # Assume this code is inside your processing loop for each frame.
                 h, w, _ = frame.shape
                 split_row = h // 2
+
+                # Split the frame into the top and bottom halves.
                 top_half = frame[:split_row, :, :]
                 bottom_half = frame[split_row:, :, :]
-                # Use a relatively strong blur for the bottom half
-                blurred_bottom = cv2.GaussianBlur(bottom_half, (0, 0), sigmaX=sigma, sigmaY=sigma)
-                frame_blurred = np.vstack([top_half, blurred_bottom])
-                blurred_frames.append(frame_blurred)            
+
+                # For clarity, compute the height of the bottom half.
+                bottom_height = h - split_row
+
+                # Define the rectangle size as a percentage of the bottom half's dimensions.
+                rectangle_height = int(bottom_height * 0.65)  # 30% of the bottom half height
+                rectangle_width = int(w * 0.8)              # 30% of the full frame width
+
+                # Calculate coordinates to center the rectangle in the bottom half.
+                start_x = (w - rectangle_width) // 2
+                end_x = start_x + rectangle_width
+                start_y = (bottom_height - rectangle_height) // 2
+                end_y = start_y + rectangle_height
+
+                print('Rectangle dimensions and coordinates:', rectangle_height, rectangle_width, start_x, end_x, start_y, end_y)
+
+                # Fill the specific rectangle in the bottom half with black.
+                bottom_half[start_y:end_y, start_x:end_x] = [0, 0, 0]
+
+                # Reassemble the full frame from the top and modified bottom halves.
+                frame_masked = np.vstack([top_half, bottom_half])
+                blurred_frames.append(frame_masked)     
 
         # Reassemble the frames and convert back to (C, T, H, W)
         result = np.stack(blurred_frames, axis=0)  # shape: (T, H, W, C)
