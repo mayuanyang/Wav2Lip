@@ -207,17 +207,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         current_lr = get_current_lr(optimizer)
                 
         #print('Starting Epoch: {}'.format(global_epoch))
-        running_sync_loss, running_l1_loss = 0., 0.
+        running_sync_loss, running_stage1_l1_loss, running_final_l1_loss = 0., 0.
         prog_bar = tqdm(enumerate(train_data_loader))
-        running_img_loss = 0.0
-        running_disc_loss = 0.0
-        running_bottom_disc_loss = 0.0
-        running_bottom_l1_loss = 0.0
-        running_bottom_l1_loss = 0.0
-        running_ssim_loss = 0.0
-
-        running_triplet_loss = 0.0
-        
+        running_stage1_img_loss = 0.0
+        running_final_img_loss = 0.0
+        running_stage1_disc_loss = 0.0
+        running_final_disc_loss = 0.0
+                
         for step, (x, indiv_mels, mel, gt) in prog_bar:
             #print("The x shape", x.shape)
             if x.shape[0] == hparams.batch_size:
@@ -232,7 +228,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               gt = gt.to(device)
 
               with autocast():
-                g = model(indiv_mels, x)
+                stage1_output, final_outputs = model(indiv_mels, x)
                 
                 # Compare two images
                 '''
@@ -240,70 +236,57 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 the 5 here represent the number of frames, so we either need to loop through them or combine them
                 we choose to collapse
                 '''
-                num_of_frames = g.shape[2]
-                full_losses = []
-                bottom_losses = []
+                num_of_frames = stage1_output.shape[2]
+                stage1_perceptual_frame_losses = []
+                final_perceptual__frame_losses = []
                 
-                full_disc_loss = 0
-                bottom_disc_loss = 0
-
+                stage1_disc_loss = 0
+                
                 if hparams.disc_wt > 0:
                   for i in range(num_of_frames):
                     # Extract the i-th frame from gen_image and gt_image
-                    gen_frame = g[:, :, i, :, :]  # Shape: [batch_size, 3, 192, 192]
-                    gt_frame = gt[:, :, i, :, :]    # Shape: [batch_size, 3, 192, 192]
+                    stage1_gen_frame = stage1_output[:, :, i, :, :]  # Shape: [batch_size, 3, 384, 384]
+                    final_gen_frame = final_outputs[:, :, i, :, :]  # Shape: [batch_size, 3, 384, 384]
+                    gt_frame = gt[:, :, i, :, :]    # Shape: [batch_size, 3, 384, 384]
 
-                    full_frame_loss = lpips_loss(gen_frame.to(device), gt_frame.to(device))
-                    full_losses.append(full_frame_loss)
-
-                    if hparams.bottom_disc_wt > 0:
-                      _, _, H, _ = gen_frame.shape
-                      g_bottom = gen_frame[:, :, H//2:, :]
-                      gt_bottom = gt_frame[:, :, H//2:, :]
-                      bottom_frame_loss = lpips_loss(g_bottom.to(device), gt_bottom.to(device))
-                      bottom_losses.append(bottom_frame_loss)
-                    
+                    stage1_frame_loss = lpips_loss(stage1_gen_frame.to(device), gt_frame.to(device))
+                    stage1_perceptual_frame_losses.append(stage1_frame_loss)
+                    final_perceptual__frame_losses.append(final_gen_frame)
                   
                   # Average the loss over all frames
-                  full_disc_loss = torch.mean(torch.stack(full_losses))
-                  running_disc_loss += full_disc_loss.item()
-                  
-                  if len(bottom_losses) > 0:
-                    bottom_disc_loss = torch.mean(torch.stack(bottom_losses))
-                    running_bottom_disc_loss += bottom_disc_loss.item()
-                
+                  stage1_disc_loss = torch.mean(torch.stack(stage1_perceptual_frame_losses))
+                  final_disc_loss = torch.mean(torch.stack(final_perceptual__frame_losses))
+                  running_stage1_disc_loss += stage1_disc_loss.item()
+                  running_final_disc_loss += final_disc_loss.item()
 
                 if hparams.syncnet_wt > 0.:
-                    sync_loss = get_sync_loss(mel, g)
+                    sync_loss = get_sync_loss(mel, stage1_output)
                 else:
                     sync_loss = 0.
 
-                l1loss = recon_loss(g, gt)
+                stage1_l1loss = recon_loss(stage1_output, gt)
+                final_l1loss = recon_loss(final_outputs, gt)
 
-                running_l1_loss += l1loss.item()
-
-                bottom_l1loss = 0
-                if hparams.bottom_l1_wt > 0:
-                  _, _, _, H, _ = g.shape
-
-                  bottom_l1loss = recon_loss(g[:, :, :, H//2:, :], gt[:, :, :, H//2:, :])
-
-                  running_bottom_l1_loss += bottom_l1loss.item()
+                running_stage1_l1_loss += stage1_l1loss.item()
+                running_final_l1_loss += final_l1loss.item()
                 
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss
+                stage1_loss = syncnet_wt * sync_loss + hparams.l1_wt * stage1_l1loss + hparams.disc_wt * stage1_disc_loss
+                
+                final_loss = hparams.l1_wt * final_l1loss + hparams.disc_wt * final_disc_loss
+                
+                combined_loss = stage1_loss + final_loss
               
-              scaler.scale(loss).backward()
+              scaler.scale(combined_loss).backward()
               scaler.step(optimizer)
               scaler.update()
-              
-
 
               if global_step % checkpoint_interval == 0:
-                  save_sample_images(x, g, gt, global_step, checkpoint_dir)
+                  save_sample_images(x, stage1_output, gt, global_step, checkpoint_dir)
 
               global_step += 1
 
-              running_img_loss += loss.item()
+              running_stage1_img_loss += stage1_loss.item()
+              running_final_img_loss += final_loss.item()
 
               if hparams.syncnet_wt > 0.:
                   running_sync_loss += sync_loss.item()
@@ -314,38 +297,46 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   save_checkpoint(
                       model, optimizer, global_step, checkpoint_dir, global_epoch)
 
-              avg_img_loss = (running_img_loss) / (step + 1)
+              avg_stage1_img_loss = (running_stage1_img_loss) / (step + 1)
 
-              avg_l1_loss = running_l1_loss / (step + 1)
+              avg_stage1_l1_loss = running_stage1_l1_loss / (step + 1)
 
-              avg_bottom_l1_loss = running_bottom_l1_loss / (step + 1)
+              avg_stage1_disc_loss = running_stage1_disc_loss / (step + 1)
+              
+              avg_final_img_loss = (running_final_img_loss) / (step + 1)
 
-              avg_disc_loss = running_disc_loss / (step + 1)
+              avg_final_l1_loss = running_final_l1_loss / (step + 1)
 
-              avg_bottom_disc_loss = running_bottom_disc_loss / (step + 1)
-
+              avg_final_disc_loss = running_final_disc_loss / (step + 1)
               
               if global_step % hparams.eval_interval == 0:
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Bottom L1: {avg_bottom_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Bottom Disc: {avg_bottom_disc_loss:.5f}, LR: {current_lr:.7f}")
+              prog_bar.set_description(
+                  f"Epoch: {global_epoch}, "
+                  f"Step: {global_step:.0f}, "
+                  f"Sync Loss: {running_sync_loss / (step + 1):.5f}, "
+                  f"S1 Loss: {avg_stage1_img_loss:.5f}, "
+                  f"S1 L1: {avg_stage1_l1_loss:.5f}, "
+                  f"S1 Disc: {avg_stage1_disc_loss:.5f}, "
+                  f"Final Loss: {avg_final_img_loss:.5f}, "
+                  f"Final L1: {avg_final_l1_loss:.5f}, "
+                  f"Final Disc: {avg_final_disc_loss:.5f}, "
+                  f"LR: {current_lr:.7f}"
+              )
               
               
               metrics = {
-                  "train/overall_loss": avg_img_loss, 
-                  "train/avg_l1": avg_l1_loss, 
-                  "train/avg_bottom_l1": avg_bottom_l1_loss, 
+                  "train/s1_overall_loss": avg_stage1_img_loss, 
+                  "train/s1_avg_l1": avg_stage1_l1_loss, 
                   "train/sync_loss": running_sync_loss / (step + 1), 
-                  "train/disc_loss": avg_disc_loss,
-                  "train/bottom_disc_loss": avg_bottom_disc_loss,
+                  "train/s1_disc_loss": avg_stage1_disc_loss,
                   "params/step": global_step,
                   "params/learning_rate": current_lr,
                   "params/l1_wt": hparams.l1_wt,
-                  "params/bottom_l1_wt": hparams.bottom_l1_wt,
                   "params/syncnet_wt": hparams.syncnet_wt,
                   "params/disc_wt": hparams.disc_wt,
-                  "params/bottom_disc_wt": hparams.bottom_disc_wt,
                   }
               if use_wandb: 
                 wandb.log({**metrics})
@@ -369,11 +360,11 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, sch
               indiv_mels = indiv_mels.to(device)
               mel = mel.to(device)
 
-              g = model(indiv_mels, x)
+              stage1_output, final_output = model(indiv_mels, x)
 
-              sync_loss = get_sync_loss(mel, g)
+              sync_loss = get_sync_loss(mel, final_output)
               
-              l1loss = recon_loss(g, gt)
+              l1loss = recon_loss(final_output, gt)
 
               sync_losses.append(sync_loss.item())
               recon_losses.append(l1loss.item())

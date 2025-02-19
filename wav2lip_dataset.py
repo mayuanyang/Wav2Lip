@@ -38,8 +38,7 @@ class Dataset(object):
         self.use_augmentation = use_augmentation
         self.img_size_factor = img_size_factor
         self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
-
+        
     def get_frame_id(self, frame):
         return int(basename(frame).split('.')[0])
 
@@ -324,11 +323,12 @@ class Dataset(object):
         frames = np.transpose(window, (1, 2, 3, 0)).copy()  # now shape: (T, H, W, C)
         blurred_frames = []
         
+        face_mesh = self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
 
         for frame in frames:
             frame_rgb = (frame * 255).astype(np.uint8)
 
-            results = self.face_mesh.process(frame_rgb)
+            results = face_mesh.process(frame_rgb)
 
             if results.multi_face_landmarks:
                 # Get the mouth landmarks (MediaPipe Face Mesh landmarks for mouth are from 61 to 80)
@@ -369,7 +369,6 @@ class Dataset(object):
                 frame[y_min_expanded:y_max_expanded, x_min_expanded:x_max_expanded] = [0, 0, 0]
                 blurred_frames.append(frame)
             else:
-                # Assume this code is inside your processing loop for each frame.
                 h, w, _ = frame.shape
                 split_row = h // 2
 

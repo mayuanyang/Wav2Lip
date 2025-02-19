@@ -98,12 +98,7 @@ hparams = HParams(
 
   syncnet_wt=0.,
   disc_wt=1,
-	bottom_disc_wt=0.,
   l1_wt=0.1,
-	bottom_l1_wt=0.,
-  ssim_wt=0.0,
-	
-  
 )
 
 

@@ -119,6 +119,8 @@ class ResUNet384V2(nn.Module):
         self.output_block = nn.Sequential(
             nn.Conv2d(64, 3, kernel_size=1, stride=1, padding=0),
             nn.Sigmoid())
+        
+        self.face_enhancer = FaceEnhancer()
 
     def forward(self, audio_sequences, face_sequences):
         def check_nan(tensor, name):
@@ -188,13 +190,163 @@ class ResUNet384V2(nn.Module):
         cat1 = self.fd_conv1(cat1)
         check_nan(cat1, "fd_conv1")
 
-        x = self.output_block(cat1)
-        check_nan(x, "output_block")
+        stage1_output = self.output_block(cat1)
+        check_nan(stage1_output, "output_block")
+        
+        # Extract channels 4 to 12 from face_sequences
+        channels_to_concat = face_sequences[:, 3:12, :, :]  # Shape: (B, 9, H, W)
+
+        # Concatenate x with the extracted channels
+        new_embedding = torch.cat((stage1_output, channels_to_concat), dim=1)  # Shape: (B, 12, H, W)
+        stage2_output = self.face_enhancer(audio_embedding, new_embedding)
 
         if input_dim_size > 4:
-            x = torch.split(x, B, dim=0)
-            outputs = torch.stack(x, dim=2)
-        else:
-            outputs = x
+            outputs = torch.split(stage2_output, B, dim=0)
+            outputs = torch.stack(outputs, dim=2)
             
-        return outputs
+            stage1_output = torch.split(stage1_output, B, dim=0)
+            stage1_output = torch.stack(stage1_output, dim=2)
+        else:
+            outputs = stage2_output
+            
+        return stage1_output, outputs
+
+
+class FaceEnhancer(nn.Module):
+    def __init__(self):
+        super(FaceEnhancer, self).__init__()
+        self.face_encoder1 = nn.Sequential(
+            Conv2d(12, 32, kernel_size=7, stride=1, padding=3),
+            Conv2d(32, 32, kernel_size=7, stride=1, padding=3, residual=True),
+        )
+        self.fe_down1 = nn.Sequential(
+            Conv2d(32, 32, kernel_size=3, stride=2, padding=1),
+        )
+        
+        self.face_encoder2 = nn.Sequential(
+            Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+        self.fe_down2 = nn.Sequential(
+            Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+
+        self.face_encoder3 = nn.Sequential(
+            Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+        self.fe_down3 = nn.Sequential(
+            Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+
+        self.face_encoder4 = nn.Sequential(
+            Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+        self.fe_down4 = nn.Sequential(
+            Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+        
+        self.audio_encoder = nn.Sequential(
+            Conv2d(1024, 512, kernel_size=3, stride=1, padding=1), 
+        ) 
+
+        self.bottlenet = nn.Sequential(
+            Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
+        )
+
+        self.face_audio_learner = nn.Sequential(
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+        
+        # Decoder with cross-attention
+        self.face_decoder4 = nn.Sequential(
+            Conv2dTranspose(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+        self.fd_conv4 = nn.Sequential(
+            Conv2d(512, 256, kernel_size=3, stride=1, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+
+        self.face_decoder3 = nn.Sequential(
+            Conv2dTranspose(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+        self.fd_conv3 = nn.Sequential(
+            Conv2d(256, 128, kernel_size=3, stride=1, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+        
+
+        self.face_decoder2 = nn.Sequential(
+            Conv2dTranspose(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+        self.fd_conv2 = nn.Sequential(
+            Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+        
+
+        self.face_decoder1 = nn.Sequential(
+            Conv2dTranspose(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+        
+        self.fd_conv1 = nn.Sequential(
+            Conv2d(64, 32, kernel_size=3, stride=1, padding=1),
+            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+
+        self.output_block = nn.Sequential(
+            nn.Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
+            nn.Sigmoid())
+
+    def forward(self, audio_sequences, face_sequences):         
+        
+        face1 = self.face_encoder1(face_sequences)
+        fed1 = self.fe_down1(face1)
+
+        face2 = self.face_encoder2(fed1)
+        fed2 = self.fe_down2(face2)
+
+        face3 = self.face_encoder3(fed2)
+        fed3 = self.fe_down3(face3)
+        
+        face4 = self.face_encoder4(fed3)
+        fed4 = self.fe_down4(face4)
+        
+        audio_embedding = self.audio_encoder(audio_sequences)
+        
+        bottlenet = self.bottlenet(fed4)
+        bottlenet = bottlenet + audio_embedding
+        bottlenet = self.face_audio_learner(bottlenet)
+
+        deface4 = self.face_decoder4(bottlenet)
+        
+        cat4 = torch.cat([deface4, face4], dim=1)
+        cat4 = self.fd_conv4(cat4)
+
+        deface3 = self.face_decoder3(cat4)
+        
+        cat3 = torch.cat([deface3, face3], dim=1)
+        cat3 = self.fd_conv3(cat3)
+        
+        deface2 = self.face_decoder2(cat3)
+        
+        cat2 = torch.cat([deface2, face2], dim=1)
+        cat2 = self.fd_conv2(cat2)
+        
+        deface1 = self.face_decoder1(cat2)
+
+        cat1 = torch.cat([deface1, face1], dim=1)
+        cat1 = self.fd_conv1(cat1)
+        
+        x = self.output_block(cat1)
+        
+                   
+        return x
