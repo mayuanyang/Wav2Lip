@@ -553,7 +553,7 @@ def main():
 
       
       with torch.no_grad():
-        pred = model(mel_batch, img_batch)
+        stage1, pred = model(mel_batch, img_batch)
 
       pred = pred.cpu().numpy().transpose(0, 2, 3, 1) * 255.
       
