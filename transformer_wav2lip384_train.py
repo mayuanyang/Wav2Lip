@@ -438,7 +438,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
 
     if optimizer != None:
       for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.0001
+        param_group['lr'] = 0.00005
 
     # for name, param in model.named_parameters():
     #   if 'face_enhancer' not in name:
