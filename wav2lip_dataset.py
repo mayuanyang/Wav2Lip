@@ -38,6 +38,7 @@ class Dataset(object):
         self.use_augmentation = use_augmentation
         self.img_size_factor = img_size_factor
         self.mp_face_mesh = mp.solutions.face_mesh
+        self.face_mesh = self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
         
     def get_frame_id(self, frame):
         return int(basename(frame).split('.')[0])
@@ -54,9 +55,6 @@ class Dataset(object):
             window_fnames.append(frame)
         return window_fnames
     
-    
-
-
     def read_window(self, window_fnames, is_gt):
         if window_fnames is None: return None
         window = []
@@ -323,12 +321,11 @@ class Dataset(object):
         frames = np.transpose(window, (1, 2, 3, 0)).copy()  # now shape: (T, H, W, C)
         blurred_frames = []
         
-        face_mesh = self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
 
         for frame in frames:
             frame_rgb = (frame * 255).astype(np.uint8)
 
-            results = face_mesh.process(frame_rgb)
+            results = self.face_mesh.process(frame_rgb)
 
             if results.multi_face_landmarks:
                 # Get the mouth landmarks (MediaPipe Face Mesh landmarks for mouth are from 61 to 80)
@@ -389,7 +386,7 @@ class Dataset(object):
                 start_y = (bottom_height - rectangle_height) // 2
                 end_y = start_y + rectangle_height
 
-                print('Rectangle dimensions and coordinates:', rectangle_height, rectangle_width, start_x, end_x, start_y, end_y)
+                #print('Rectangle dimensions and coordinates:', rectangle_height, rectangle_width, start_x, end_x, start_y, end_y)
 
                 # Fill the specific rectangle in the bottom half with black.
                 bottom_half[start_y:end_y, start_x:end_x] = [0, 0, 0]
