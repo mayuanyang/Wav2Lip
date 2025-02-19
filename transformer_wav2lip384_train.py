@@ -65,7 +65,7 @@ use_cuda = torch.cuda.is_available()
 
 print('use_cuda: {}'.format(use_cuda))
 
-def save_sample_images(x, g, gt, global_step, checkpoint_dir):
+def save_sample_images(x, g, gt, global_step, checkpoint_dir, prefix):
     '''
     refs: Reference images (extracted from the input x with channels 3 onward).
     inps: Input images (extracted from the input x with the first 3 channels).
@@ -82,7 +82,7 @@ def save_sample_images(x, g, gt, global_step, checkpoint_dir):
     collage = np.concatenate((refs, inps, g, gt), axis=-2)
     for batch_idx, c in enumerate(collage):
         for t in range(len(c)):
-            cv2.imwrite('{}/{}_{}.jpg'.format(folder, batch_idx, t), c[t])
+            cv2.imwrite('{}/{}_{}_{}.jpg'.format(folder, prefix, batch_idx, t), c[t])
 
 
 
@@ -207,7 +207,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         current_lr = get_current_lr(optimizer)
                 
         #print('Starting Epoch: {}'.format(global_epoch))
-        running_sync_loss, running_stage1_l1_loss, running_final_l1_loss = 0., 0.
+        running_sync_loss, running_stage1_l1_loss, running_final_l1_loss = 0., 0., 0.
         prog_bar = tqdm(enumerate(train_data_loader))
         running_stage1_img_loss = 0.0
         running_final_img_loss = 0.0
@@ -250,8 +250,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                     gt_frame = gt[:, :, i, :, :]    # Shape: [batch_size, 3, 384, 384]
 
                     stage1_frame_loss = lpips_loss(stage1_gen_frame.to(device), gt_frame.to(device))
+                    final_frame_loss = lpips_loss(final_gen_frame.to(device), gt_frame.to(device))
                     stage1_perceptual_frame_losses.append(stage1_frame_loss)
-                    final_perceptual__frame_losses.append(final_gen_frame)
+                    final_perceptual__frame_losses.append(final_frame_loss)
                   
                   # Average the loss over all frames
                   stage1_disc_loss = torch.mean(torch.stack(stage1_perceptual_frame_losses))
@@ -281,7 +282,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               scaler.update()
 
               if global_step % checkpoint_interval == 0:
-                  save_sample_images(x, stage1_output, gt, global_step, checkpoint_dir)
+                  save_sample_images(x, stage1_output, gt, global_step, checkpoint_dir, 'S1')
+                  save_sample_images(x, final_outputs, gt, global_step, checkpoint_dir, 'F')
 
               global_step += 1
 
@@ -330,8 +332,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               metrics = {
                   "train/s1_overall_loss": avg_stage1_img_loss, 
                   "train/s1_avg_l1": avg_stage1_l1_loss, 
-                  "train/sync_loss": running_sync_loss / (step + 1), 
                   "train/s1_disc_loss": avg_stage1_disc_loss,
+                  
+                  "train/final_overall_loss": avg_final_img_loss, 
+                  "train/final_avg_l1": avg_final_l1_loss, 
+                  "train/final_disc_loss": avg_final_disc_loss,
+                  
+                  "train/sync_loss": running_sync_loss / (step + 1), 
                   "params/step": global_step,
                   "params/learning_rate": current_lr,
                   "params/l1_wt": hparams.l1_wt,
