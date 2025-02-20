@@ -135,61 +135,42 @@ class ResUNet384V2(nn.Module):
         audio_embedding = self.audio_encoder(audio_sequences)
 
         face1 = self.face_encoder1(face_sequences)
-        check_nan(face1, "face_encoder1")
         fed1 = self.fe_down1(face1)
-        check_nan(fed1, "fed1")
 
         face2 = self.face_encoder2(fed1)
-        check_nan(face2, "face2")
         fed2 = self.fe_down2(face2)
-        check_nan(fed2, "fed2")
 
         face3 = self.face_encoder3(fed2)
-        check_nan(face3, "face3")
         fed3 = self.fe_down3(face3)
-        check_nan(fed3, "fed3")
 
         face4 = self.face_encoder4(fed3)
-        check_nan(face4, "face4")
         fed4 = self.fe_down4(face4)
-        check_nan(fed4, "fed4")
         
         bottlenet = self.bottlenet(fed4)
         bottlenet = bottlenet + audio_embedding
         bottlenet = self.face_audio_learner(bottlenet)
-        check_nan(bottlenet, "bottlenet")
 
         deface4 = self.face_decoder4(bottlenet)
-        check_nan(deface4, "deface4")
         
-        check_nan(deface4, "cross_attn4")
         cat4 = torch.cat([deface4, face4], dim=1)
         cat4 = self.fd_conv4(cat4)
-        check_nan(cat4, "fd_conv4")
 
         deface3 = self.face_decoder3(cat4)
-        check_nan(deface3, "face_decoder3")
         
         cat3 = torch.cat([deface3, face3], dim=1)
         cat3 = self.fd_conv3(cat3)
-        check_nan(cat3, "fd_conv3")
 
         deface2 = self.face_decoder2(cat3)
-        check_nan(deface2, "face_decoder2")
         
         cat2 = torch.cat([deface2, face2], dim=1)
         cat2 = self.fd_conv2(cat2)
-        check_nan(cat2, "fd_conv2")
         
         deface1 = self.face_decoder1(cat2)
-        check_nan(deface1, "face_decoder1")
 
         cat1 = torch.cat([deface1, face1], dim=1)
         cat1 = self.fd_conv1(cat1)
-        check_nan(cat1, "fd_conv1")
 
         x = self.output_block(cat1)
-        check_nan(x, "output_block")
 
         if input_dim_size > 4:
             x = torch.split(x, B, dim=0)
