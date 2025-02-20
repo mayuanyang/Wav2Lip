@@ -158,30 +158,27 @@ class Dataset(object):
                             all_read = False
                             break
                     
+                    '''
+                    Data augmentation
+                    0 means unchange
+                    1 for grayscale
+                    2 for brightness
+                    3 for contrast
+                    '''
                     if self.use_augmentation:
-                      '''
-                      Data augmentation
-                      0 means unchange
-                      1 for grayscale
-                      2 for brightness
-                      3 for contrast
-                      '''
-                      option = random.choices([0, 1, 2, 3, 4])[0] 
+                      option = random.choices([0, 0, 0, 0, 0, 0, 0, 0, 4, 4])[0] 
                       
                       if option == 1:
                           img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                           img = cv2.merge([img_gray, img_gray, img_gray])
-                          
                       elif option == 2:
                           brightness_factor = np.random.uniform(0.7, 1.3)
                           img = cv2.convertScaleAbs(img, alpha=brightness_factor, beta=0)
-                          
                       elif option == 3:
                           contrast_factor = np.random.uniform(0.7, 1.3)
                           img = cv2.convertScaleAbs(img, alpha=contrast_factor, beta=0)
                       elif option == 4:
-                          angle = np.random.uniform(1, 15)
-                          angle = np.random.uniform(-angle, angle)
+                          angle = np.random.uniform(-15, 15)  # Random angle between -15 and 15 degrees
 
                           # Get the image dimensions
                           (h, w) = img.shape[:2]
@@ -231,6 +228,7 @@ class Dataset(object):
                 x = x.transpose(2, 0, 1)
                 x = x[:, x.shape[1]//2:]
 
+                # Each face_window contains 5 images and each image has 3 channels, concatenate them through the channel channel yield a 15 channels image, the x shape is 15x96x192
                 x = torch.FloatTensor(x)
                 mel = torch.FloatTensor(mel.T).unsqueeze(0)
 

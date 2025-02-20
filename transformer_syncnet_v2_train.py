@@ -1,7 +1,7 @@
 from os.path import join
 from tqdm import tqdm
 
-from models import TransformerSyncnet as TransformerSyncnet
+from models import TransformerSyncnetV2 as TransformerSyncnetV2
 import audio
 
 import torch
@@ -18,9 +18,9 @@ import os, argparse
 from hparams import hparams
 from models.conv import Conv2d, Conv2dTranspose
 from syncnet_dataset import Dataset, samples
-from torch.cuda.amp import GradScaler, autocast
 
 import wandb
+from torch.cuda.amp import GradScaler, autocast
 
 
 def str2bool(v):
@@ -110,33 +110,37 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
   
     scaler = GradScaler()
     while global_epoch < nepochs:
+        lr = get_current_lr(optimizer)
         # for param_group in optimizer.param_groups:
         #   print("The learning rates are: ", param_group['lr'])
         
         avg_ce_loss = 0.
         
         prog_bar = tqdm(enumerate(train_data_loader))
-        print_current_lr(optimizer)
+        
         for step, (x, mel, y) in prog_bar:
-                        
+            
             model.train()
             optimizer.zero_grad()
 
             # Transform data to CUDA device
             x = x.to(device)
+
             mel = mel.to(device)
 
-            with autocast():
-              output, audio_embedding, face_embedding = model(x, mel)
-              y = y.to(device)                        
-              ce_loss = cross_entropy_loss(output, y)
+            output, audio_embedding, face_embedding = model(x, mel)
+            
+            y = y.to(device)                        
+            
+            ce_loss = cross_entropy_loss(output, y)
+            
 
             scaler.scale(ce_loss).backward()
-            scaler.unscale_(optimizer)
 
             # **Apply Gradient Clipping Here**
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
+            
             scaler.step(optimizer)
             scaler.update()
 
@@ -155,10 +159,11 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
             scheduler.step(current_training_loss)
             
-            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}'.format(global_step, global_epoch, current_training_loss))
+            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}, LR: {3}'.format(global_step, global_epoch, current_training_loss, lr))
             metrics = {"train/ce_loss": current_training_loss, 
                        "train/step": global_step, 
-                       "train/epoch": global_epoch}
+                       "train/epoch": global_epoch,
+                       "train/lr": lr}
             
             if use_wandb:
               wandb.log({**metrics})
@@ -177,7 +182,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             samples[first_true_index] = False
 
             print('Adding negative samples, the current samples are', samples)
-                
             
         global_epoch += 1
         
@@ -188,6 +192,10 @@ def print_current_lr(optimizer):
     for param_group in optimizer.param_groups:
         print("LR", param_group['lr'])
 
+def get_current_lr(optimizer):
+    # Assuming there is only one parameter group
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
 
 def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler):
     #eval_steps = 1400
@@ -200,6 +208,7 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, sch
     prog_bar = tqdm(enumerate(test_data_loader))
     losses = []
     while 1:
+        
         for step, (x, mel, y) in enumerate(test_data_loader):
 
             model.eval()
@@ -307,7 +316,7 @@ if __name__ == "__main__":
         config={
         "face_learning_rate": hparams.syncnet_face_lr,
         "audio_learning_rate": hparams.syncnet_audio_lr,
-        "architecture": "TransformerSyncnet",
+        "architecture": "TransformerSyncnetV2",
         "dataset": "MyOwn",
         "epochs": 200000,
         }
@@ -331,14 +340,11 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # Model
-    model = TransformerSyncnet(num_heads=8, num_encoder_layers=6).to(device)
+    model = TransformerSyncnetV2().to(device)
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
     
-    optimizer = optim.Adam([
-        {'params': model.face_encoder[:27].parameters(), 'lr': hparams.syncnet_face_lr},
-        {'params': model.audio_encoder[:22].parameters(), 'lr': hparams.syncnet_audio_lr},
-    ], lr=5e-5,betas=(0.8, 0.999), weight_decay=1e-5)  # Default learning rate for other layers
+    optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-5)
 
     if checkpoint_path is not None:
         load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=True)

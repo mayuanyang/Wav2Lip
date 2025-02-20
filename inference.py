@@ -6,12 +6,14 @@ import json, subprocess, random, string
 from tqdm import tqdm
 from glob import glob
 import torch, face_detection
-from models import ResUNet
+from models import ResUNet384V2
 from realesrgan import RealESRGANer
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from PIL import Image
+from scipy.ndimage import gaussian_filter
 
 import platform
+import mediapipe as mp
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -51,7 +53,7 @@ parser.add_argument('--pads', nargs='+', type=int, default=[0, 10, 0, 0],
 
 parser.add_argument('--face_det_batch_size', type=int, 
           help='Batch size for face detection', default=16)
-parser.add_argument('--wav2lip_batch_size', type=int, help='Batch size for Wav2Lip model(s)', default=128)
+parser.add_argument('--wav2lip_batch_size', type=int, help='Batch size for Wav2Lip model(s)', default=16)
 
 parser.add_argument('--resize_factor', default=1, type=int, 
       help='Reduce the resolution by this factor. Sometimes, best results are obtained at 480p or 720p')
@@ -79,7 +81,7 @@ parser.add_argument('--use_esrgan', default=False, type=str2bool)
 parser.add_argument('--iteration', type=int, help='Number of iteration to inference', default=2)
 
 args = parser.parse_args()
-args.img_size = 192
+args.img_size = 384
 
 if os.path.isfile(args.face) and args.face.split('.')[1] in ['jpg', 'png', 'jpeg']:
   args.static = True
@@ -132,6 +134,129 @@ def face_detect(images):
 
   del detector
   return results 
+
+def prepare_window(window):
+        """
+        3 x T x H x W
+        Normalization: The pixel values of the images are divided by 255 to normalize them from a range of [0, 255] to [0, 1]. 
+        This is a common preprocessing step for image data in machine learning to help the model converge faster during training.
+        """
+        x = np.asarray(window) / 255.
+
+        """
+        Transposition: The method transposes the dimensions of the array using np.transpose(x, (3, 0, 1, 2)).
+        The original shape of x is assumed to be (T, H, W, C) where:
+        T is the number of images (time steps if treating images as a sequence).
+        H is the height of the images.
+        W is the width of the images.
+        C is the number of color channels (typically 3 for RGB images).
+        The transposition changes the shape to (C, T, H, W) which means:
+        C (number of channels) comes first.
+        T (number of images) comes second.
+        H (height of images) comes third.
+        W (width of images) comes fourth.
+        """
+        x = np.transpose(x, (3, 0, 1, 2))
+
+        return x
+
+LIPS_LANDMARKS = [
+    61, 185, 40, 39, 37, 0, 267, 269, 270, 409,
+    291, 146, 91, 181, 84, 17, 314, 405, 320, 307,
+    375, 321, 311, 308, 324, 318, 402, 317, 14, 87
+]
+
+def apply_dynamic_blur(window, sigma=12):
+        mp_face_mesh = mp.solutions.face_mesh
+        face_mesh = mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
+        # This function assumes window has shape (C, T, H, W)
+        # It applies a gaussian blur to the mouth region and gradually diffuses it outward.
+        
+        
+        C, T, H, W = window.shape
+        frames = window.copy()  # now shape: (T, H, W, C)
+        blurred_frames = []
+        
+
+        for frame in frames:
+            frame_rgb = (frame).astype(np.uint8)
+
+            results = face_mesh.process(frame_rgb)
+
+            if results.multi_face_landmarks:
+                # Get the mouth landmarks (MediaPipe Face Mesh landmarks for mouth are from 61 to 80)
+                mouth_points = []
+                h, w, _ = frame.shape
+                split_row = h // 2
+                for idx in LIPS_LANDMARKS:
+                    lm = results.multi_face_landmarks[0].landmark[idx]
+                    x, y = int(lm.x * w), int(lm.y * h)
+                    mouth_points.append([x, y])
+
+                # Convert the list of mouth points to a NumPy array for easier manipulation.
+                mouth_points = np.array(mouth_points)
+
+                # Compute the bounding rectangle coordinates.
+                x_min = np.min(mouth_points[:, 0])
+                x_max = np.max(mouth_points[:, 0])
+                y_min = np.min(mouth_points[:, 1])
+                y_max = np.max(mouth_points[:, 1])
+
+                # Calculate the width and height of the mouth region.
+                width = x_max - x_min
+                height = y_max - y_min
+
+                # Define a padding factor (e.g., 50% larger in each direction).
+                pad_width_factor = 0.6  # Adjust this value as needed.
+                pad_height_factor = 0.6  # Adjust this value as needed.
+                pad_x = int(width * pad_width_factor)
+                pad_y = int(height * pad_height_factor)
+
+                # Expand the rectangle and ensure the coordinates stay within frame boundaries.
+                x_min_expanded = max(x_min - pad_x, 0)
+                y_min_expanded = max(y_min - pad_y, 0)
+                x_max_expanded = min(x_max + pad_x, w)
+                y_max_expanded = min(y_max + pad_y, h)
+
+                # Black out the expanded rectangular region.
+                frame[y_min_expanded:y_max_expanded, x_min_expanded:x_max_expanded] = [0, 0, 0]
+                blurred_frames.append(frame)
+            else:
+                
+                h, w, _ = frame.shape
+                split_row = h // 2
+
+                # Split the frame into the top and bottom halves.
+                top_half = frame[:split_row, :, :]
+                bottom_half = frame[split_row:, :, :]
+
+                # For clarity, compute the height of the bottom half.
+                bottom_height = h - split_row
+
+                # Define the rectangle size as a percentage of the bottom half's dimensions.
+                rectangle_height = int(bottom_height * 0.65)  # 30% of the bottom half height
+                rectangle_width = int(w * 0.8)              # 30% of the full frame width
+
+                # Calculate coordinates to center the rectangle in the bottom half.
+                start_x = (w - rectangle_width) // 2
+                end_x = start_x + rectangle_width
+                start_y = (bottom_height - rectangle_height) // 2
+                end_y = start_y + rectangle_height
+
+                print('Rectangle dimensions and coordinates:', rectangle_height, rectangle_width, start_x, end_x, start_y, end_y)
+
+                # Fill the specific rectangle in the bottom half with black.
+                bottom_half[start_y:end_y, start_x:end_x] = [0, 0, 0]
+
+                # Reassemble the full frame from the top and modified bottom halves.
+                frame_masked = np.vstack([top_half, bottom_half])
+                blurred_frames.append(frame_masked)     
+
+        # Reassemble the frames and convert back to (C, T, H, W)
+        result = np.stack(blurred_frames, axis=0)  # shape: (T, H, W, C)
+        #result = np.transpose(result, (0, 1, 2, 3))  # shape: (C, T, H, W)
+        return result
+
 
 def datagen(frames, mels, use_ref_img, ref_pool, iteration):
   img_batch, mel_batch, frame_batch, coords_batch, ref_batch, ref_batch2 = [], [], [], [], [], []
@@ -219,7 +344,10 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
       ref_batch2 = np.asarray(ref_batch2)
 
       img_masked = img_batch.copy()
-      img_masked[:, args.img_size//2:] = 0
+
+      # img_masked[:, args.img_size//2:] = 0
+      img_masked = apply_dynamic_blur(img_masked)
+      #print('The image shape 1', img_masked.shape, img_batch.shape)
 
       img_batch = np.concatenate((img_masked, img_batch, ref_batch, ref_batch2), axis=3) / 255.
       mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
@@ -232,7 +360,12 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
   if len(img_batch) > 0:
     img_batch, mel_batch = np.asarray(img_batch), np.asarray(mel_batch)
     img_masked = img_batch.copy()
-    img_masked[:, args.img_size//2:] = 0
+
+    
+    #img_masked[:, args.img_size//2:] = 0
+    img_masked = apply_dynamic_blur(img_masked)
+
+    print('The image shape 2', img_masked.shape)
 
     if use_ref_img:
       ref_batch = np.asarray(ref_batch)
@@ -257,7 +390,7 @@ def _load(checkpoint_path):
   return checkpoint
 
 def load_model(path, lora_path=None, model_layers=1):
-  model = ResUNet(model_layers)
+  model = ResUNet384V2(model_layers)
   print("Load checkpoint from: {}".format(path))
   checkpoint = _load(path)
   s = checkpoint["state_dict"]

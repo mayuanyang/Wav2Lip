@@ -2,7 +2,7 @@ from os.path import dirname, join, basename, isfile
 from tqdm import tqdm
 
 from models import TransformerSyncnet
-from models import ResUNet
+from models import ResUNet384, ResUNet384V2
 import torch
 
 import wandb
@@ -25,7 +25,7 @@ from models.conv import Conv2d, Conv2dTranspose
 from wav2lip_dataset import Dataset, syncnet_T
 import torch.nn.functional as F
 from pytorch_msssim import ms_ssim
-from torch.cuda.amp import autocast
+from torch.cuda.amp import autocast, GradScaler
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -48,8 +48,9 @@ parser.add_argument('--checkpoint_path', help='Resume from this checkpoint', def
 parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
 parser.add_argument('--wandb_run_id', help='The run ID for wandb', required=False, type=str)
 parser.add_argument('--use_augmentation', help='Whether to use data augmentation', default=True, type=str2bool)
-parser.add_argument('--train_root', help='The train.txt and val.txt directory', default='filelists', type=str)
-parser.add_argument('--num_of_unet_layers', help='The train.txt and val.txt directory', default=2, type=int)
+parser.add_argument('--train_root', help='the folder that contains train.txt and val.txt', default='filelists', type=str)
+parser.add_argument('--num_of_unet_layers', help='The num of layers for resunet', default=2, type=int)
+parser.add_argument('--version', help='The train.txt and val.txt directory', default='v1', type=str)
 args = parser.parse_args()
 
 
@@ -58,6 +59,7 @@ global_epoch = 0
 num_of_unet_layers = 2
 use_wandb=True
 use_augmentation= True
+version = 'v1'
 use_cuda = torch.cuda.is_available()
 
 
@@ -94,12 +96,69 @@ cross_entropy_loss = nn.CrossEntropyLoss()
 recon_loss = nn.L1Loss()
 
 def get_sync_loss(mel, g):
-    g = g[:, :, :, g.size(3)//2:]
-    g = torch.cat([g[:, :, i] for i in range(syncnet_T)], dim=1)
-    # B, 3 * T, H//2, W
-    output, audio_embedding, face_embedding = syncnet(g, mel)
+    
+    B, C, T, H, W = g.shape
 
-    y = torch.ones(g.size(0), dtype=torch.long).squeeze().to(device)
+    # Reshape to (B*T, C, H, W) for interpolation
+    g_reshaped = g.view(B * T, C, H, W)
+
+    # Resize H and W to half using bilinear interpolation
+    g_resized = F.interpolate(g_reshaped, scale_factor=0.5, mode='bilinear', align_corners=False)
+
+    # Reshape back to (B, T, C, H//2, W//2)
+    H_half, W_half = g_resized.shape[2], g_resized.shape[3]
+    
+    g_resized = g_resized.view(B, C, T, H_half, W_half)
+
+    # =========================
+    # Step 2: Persist Resized `g`
+    # =========================
+    # 
+    # import torchvision.transforms as transforms
+    # import datetime
+    # transform = transforms.ToPILImage()
+    # g_cpu = g.detach().cpu()
+
+    # # Iterate over batch and temporal dimensions
+    # for b in range(B):
+    #     for t in range(T):
+    #         img_tensor = g_cpu[b, t]  # Shape: (C, H, W)
+
+    #         # Handle different channel scenarios
+    #         if C == 1:
+    #             # Grayscale image
+    #             img_tensor = img_tensor.squeeze(0)  # Shape: (H, W)
+    #             mode = 'L'
+    #         elif C == 3:
+    #             # RGB image
+    #             mode = 'RGB'
+    #         else:
+    #             # Other channels: Handle accordingly or skip
+    #             print(f"Skipping image with {C} channels.")
+    #             continue
+
+    #         # Convert tensor to PIL Image
+    #         img = transform(img_tensor)
+
+    #         # Generate a unique filename
+    #         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    #         filename = f"b{b}_t{t}_{timestamp}.png"
+
+    #         file_path = os.path.join('temp/sync_imgs', filename)
+
+    #         # Save the image
+    #         img.save(file_path)
+    # g = g.view(B, C, T, H_half, W_half)
+
+    # Continue with existing processing
+    # Proceed with the rest of your code
+    # print('The resized shape', g_resized.shape)
+    g_resized = g_resized[:, :, :, g_resized.size(3)//2:]
+    g_resized = torch.cat([g_resized[:, :, i] for i in range(syncnet_T)], dim=1)
+    # B, 3 * T, H//2, W
+    output, audio_embedding, face_embedding = syncnet(g_resized, mel)
+
+    y = torch.ones(g_resized.size(0), dtype=torch.long).squeeze().to(device)
     
     return cross_entropy_loss(output, y)
 
@@ -142,6 +201,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     syncnet_wt = hparams.syncnet_wt
     sync_loss = 0.
 
+    scaler = GradScaler()
+
     while global_epoch < nepochs:
         current_lr = get_current_lr(optimizer)
                 
@@ -156,6 +217,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         running_ssim_loss = 0.0
 
         running_triplet_loss = 0.0
+        
         for step, (x, indiv_mels, mel, gt) in prog_bar:
             #print("The x shape", x.shape)
             if x.shape[0] == hparams.batch_size:
@@ -181,7 +243,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 num_of_frames = g.shape[2]
                 full_losses = []
                 bottom_losses = []
-                ssim_losses = []
+                
                 full_disc_loss = 0
                 bottom_disc_loss = 0
 
@@ -191,37 +253,25 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                     gen_frame = g[:, :, i, :, :]  # Shape: [batch_size, 3, 192, 192]
                     gt_frame = gt[:, :, i, :, :]    # Shape: [batch_size, 3, 192, 192]
 
-                    _, _, H, _ = gen_frame.shape
-                    g_bottom = gen_frame[:, :, H//2:, :]
-                    gt_bottom = gt_frame[:, :, H//2:, :]
-
-                    # Now you can process the individual frames, e.g., pass them through a model
-                    # For example:
                     full_frame_loss = lpips_loss(gen_frame.to(device), gt_frame.to(device))
-                    bottom_frame_loss = lpips_loss(g_bottom.to(device), gt_bottom.to(device))
-
-                    ms_ssim_value = 0.0
-
-                    if hparams.ssim_wt > 0:
-                      ms_ssim_value = 1 - ms_ssim(gen_frame, gt_frame, data_range=1.0, size_average=True)
-                      ssim_losses.append(ms_ssim_value)
-                    
                     full_losses.append(full_frame_loss)
-                    bottom_losses.append(bottom_frame_loss)
+
+                    if hparams.bottom_disc_wt > 0:
+                      _, _, H, _ = gen_frame.shape
+                      g_bottom = gen_frame[:, :, H//2:, :]
+                      gt_bottom = gt_frame[:, :, H//2:, :]
+                      bottom_frame_loss = lpips_loss(g_bottom.to(device), gt_bottom.to(device))
+                      bottom_losses.append(bottom_frame_loss)
                     
                   
                   # Average the loss over all frames
                   full_disc_loss = torch.mean(torch.stack(full_losses))
                   running_disc_loss += full_disc_loss.item()
-
-                  bottom_disc_loss = torch.mean(torch.stack(bottom_losses))
-                  running_bottom_disc_loss += bottom_disc_loss.item()
-
-                  ssim_loss = 0.0
-                  if len(ssim_losses) > 0:
-                    ssim_loss = torch.mean(torch.stack(ssim_losses))
-                    running_ssim_loss += ssim_loss.item()
                   
+                  if len(bottom_losses) > 0:
+                    bottom_disc_loss = torch.mean(torch.stack(bottom_losses))
+                    running_bottom_disc_loss += bottom_disc_loss.item()
+                
 
                 if hparams.syncnet_wt > 0.:
                     sync_loss = get_sync_loss(mel, g)
@@ -232,16 +282,21 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
                 running_l1_loss += l1loss.item()
 
-                _, _, _, H, _ = g.shape
+                bottom_l1loss = 0
+                if hparams.bottom_l1_wt > 0:
+                  _, _, _, H, _ = g.shape
 
-                bottom_l1loss = recon_loss(g[:, :, :, H//2:, :], gt[:, :, :, H//2:, :])
+                  bottom_l1loss = recon_loss(g[:, :, :, H//2:, :], gt[:, :, :, H//2:, :])
 
-                running_bottom_l1_loss += bottom_l1loss.item()
+                  running_bottom_l1_loss += bottom_l1loss.item()
                 
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss + hparams.ssim_wt * ssim_loss
-                
-              loss.backward()
-              optimizer.step()
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.bottom_l1_wt * bottom_l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_disc_wt * bottom_disc_loss
+              
+              scaler.scale(loss).backward()
+              scaler.step(optimizer)
+              scaler.update()
+              
+
 
               if global_step % checkpoint_interval == 0:
                   save_sample_images(x, g, gt, global_step, checkpoint_dir)
@@ -269,16 +324,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               avg_bottom_disc_loss = running_bottom_disc_loss / (step + 1)
 
-              avg_ssim_loss = running_ssim_loss / (step + 1)
-
               
               if global_step % hparams.eval_interval == 0:
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Bottom L1: {avg_bottom_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Bottom Disc: {avg_bottom_disc_loss:.5f}, SSIM: {avg_ssim_loss:.5f}, LR: {current_lr:.7f}")
+              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Bottom L1: {avg_bottom_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Bottom Disc: {avg_bottom_disc_loss:.5f}, LR: {current_lr:.7f}")
               
-              scheduler.step(avg_img_loss)
               
               metrics = {
                   "train/overall_loss": avg_img_loss, 
@@ -287,7 +339,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   "train/sync_loss": running_sync_loss / (step + 1), 
                   "train/disc_loss": avg_disc_loss,
                   "train/bottom_disc_loss": avg_bottom_disc_loss,
-                  "train/ssim_loss": avg_ssim_loss,
                   "params/step": global_step,
                   "params/learning_rate": current_lr,
                   "params/l1_wt": hparams.l1_wt,
@@ -389,7 +440,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
 
     if optimizer != None:
       for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.0005
+        param_group['lr'] = 0.0001
 
     # for name, param in model.named_parameters():
     #   if 'face_enhancer' not in name:
@@ -403,10 +454,11 @@ if __name__ == "__main__":
     checkpoint_dir = args.checkpoint_dir
     use_wandb = args.use_wandb
     use_augmentation = args.use_augmentation
+    version = args.version
 
     # Dataset and Dataloader setup
-    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation)
-    test_dataset = Dataset('val', args.data_root, args.train_root, False)
+    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation, img_size_factor=2)
+    test_dataset = Dataset('val', args.data_root, args.train_root, False, img_size_factor=2)
 
     train_data_loader = data_utils.DataLoader(
         train_dataset, batch_size=hparams.batch_size, shuffle=True,
@@ -419,7 +471,11 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # Model
-    model = ResUNet(args.num_of_unet_layers).to(device)
+    if version == 'v1':
+      model = ResUNet384(args.num_of_unet_layers).to(device)
+    else:
+      model = ResUNet384V2(args.num_of_unet_layers).to(device)
+
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],

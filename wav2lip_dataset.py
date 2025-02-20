@@ -10,6 +10,9 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from torch import nn
 import traceback
+import torch.nn.functional as F
+from scipy.ndimage import gaussian_filter
+import mediapipe as mp
 
 image_cache = multiprocessing.Manager().dict()
 orig_mel_cache = multiprocessing.Manager().dict()
@@ -21,10 +24,21 @@ syncnet_mel_step_size = 16
 cross_entropy_loss = nn.CrossEntropyLoss()
 recon_loss = nn.L1Loss()
 
+
+# 嘴唇关键点索引（MediaPipe定义的468点中的嘴唇区域）
+LIPS_LANDMARKS = [
+    61, 185, 40, 39, 37, 0, 267, 269, 270, 409,
+    291, 146, 91, 181, 84, 17, 314, 405, 320, 307,
+    375, 321, 311, 308, 324, 318, 402, 317, 14, 87
+]
+
 class Dataset(object):
-    def __init__(self, split, data_root, train_root, use_augmentation):
+    def __init__(self, split, data_root, train_root, use_augmentation, img_size_factor=1):
         self.all_videos = get_image_list(data_root, split, train_root)
         self.use_augmentation = use_augmentation
+        self.img_size_factor = img_size_factor
+        self.mp_face_mesh = mp.solutions.face_mesh
+        self.face_mesh = self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
 
     def get_frame_id(self, frame):
         return int(basename(frame).split('.')[0])
@@ -40,8 +54,11 @@ class Dataset(object):
                 return None
             window_fnames.append(frame)
         return window_fnames
+    
+    
 
-    def read_window(self, window_fnames):
+
+    def read_window(self, window_fnames, is_gt):
         if window_fnames is None: return None
         window = []
         for fname in window_fnames:
@@ -54,7 +71,7 @@ class Dataset(object):
                     if img is None:
                         break
                     try:
-                        img = cv2.resize(img, (hparams.img_size, hparams.img_size))                       
+                        img = cv2.resize(img, (hparams.img_size * self.img_size_factor, hparams.img_size * self.img_size_factor))                       
                         if len(image_cache) < hparams.image_cache_size:
                           image_cache[fname] = img  # Cache the resized image and prevent OOM
                     
@@ -69,8 +86,8 @@ class Dataset(object):
                     2 for brightness
                     3 for contrast
                     '''
-                    if self.use_augmentation:
-                      option = random.choices([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 4, 4])[0] 
+                    if self.use_augmentation and not is_gt:
+                      option = random.choices([0, 0, 0, 0, 0, 0, 0, 0, 4, 4])[0] 
                       
                       if option == 1:
                           img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -209,12 +226,12 @@ class Dataset(object):
                 should_load_diff_video = True
                 continue
 
-            window = self.read_window(window_fnames)
+            window = self.read_window(window_fnames, True)
             if window is None:
                 should_load_diff_video = True
                 continue
 
-            wrong_window = self.read_window(wrong_window_fnames)
+            wrong_window = self.read_window(wrong_window_fnames, False)
             if wrong_window is None:
                 should_load_diff_video = True
                 continue
@@ -228,12 +245,12 @@ class Dataset(object):
             forbidden_images = set(window_fnames).union(set(wrong_window_fnames)).union(set(ref1_window_fnames))
             ref2_window_fnames = self.get_ref_images(forbidden_images, img_names)
             
-            ref1_window = self.read_window(ref1_window_fnames)
+            ref1_window = self.read_window(ref1_window_fnames, False)
             if ref1_window is None:
                 should_load_diff_video = True
                 continue
 
-            ref2_window = self.read_window(ref2_window_fnames)
+            ref2_window = self.read_window(ref2_window_fnames, False)
             if ref2_window is None:
                 should_load_diff_video = True
                 continue
@@ -271,7 +288,8 @@ class Dataset(object):
                 y is the window that without the second half black out
                 '''
 
-                window[:, :, window.shape[2]//2:] = 0.
+                #window = self.apply_gaussian_blur_to_bottom_half_vectorized(window)
+                window = self.apply_dynamic_blur(window)
 
                 wrong_window = self.prepare_window(wrong_window)
 
@@ -279,6 +297,7 @@ class Dataset(object):
 
                 ref2_window = self.prepare_window(ref2_window)
 
+                # do not include the correct window so that no second half black
                 x = np.concatenate([window, wrong_window, ref1_window, ref2_window], axis=0) # Concat via the channel axis
                 
 
@@ -295,3 +314,93 @@ class Dataset(object):
                 #print('An error has occured', vidname, img_name, wrong_img_name)
                 traceback.print_exc()   
                 continue
+    
+
+    def apply_dynamic_blur(self, window, sigma=12):
+        # This function assumes window has shape (C, T, H, W)
+        # It applies a gaussian blur to the mouth region and gradually diffuses it outward.
+        
+        C, T, H, W = window.shape
+        frames = np.transpose(window, (1, 2, 3, 0)).copy()  # now shape: (T, H, W, C)
+        blurred_frames = []
+        
+
+        for frame in frames:
+            frame_rgb = (frame * 255).astype(np.uint8)
+
+            results = self.face_mesh.process(frame_rgb)
+
+            if results.multi_face_landmarks:
+                # Get the mouth landmarks (MediaPipe Face Mesh landmarks for mouth are from 61 to 80)
+                mouth_points = []
+                h, w, _ = frame.shape
+                split_row = h // 2
+                for idx in LIPS_LANDMARKS:
+                    lm = results.multi_face_landmarks[0].landmark[idx]
+                    x, y = int(lm.x * w), int(lm.y * h)
+                    mouth_points.append([x, y])
+
+                # Convert the list of mouth points to a NumPy array for easier manipulation.
+                mouth_points = np.array(mouth_points)
+
+                # Compute the bounding rectangle coordinates.
+                x_min = np.min(mouth_points[:, 0])
+                x_max = np.max(mouth_points[:, 0])
+                y_min = np.min(mouth_points[:, 1])
+                y_max = np.max(mouth_points[:, 1])
+
+                # Calculate the width and height of the mouth region.
+                width = x_max - x_min
+                height = y_max - y_min
+
+                # Define a padding factor (e.g., 50% larger in each direction).
+                pad_width_factor = 0.6  # Adjust this value as needed.
+                pad_height_factor = 0.6  # Adjust this value as needed.
+                pad_x = int(width * pad_width_factor)
+                pad_y = int(height * pad_height_factor)
+
+                # Expand the rectangle and ensure the coordinates stay within frame boundaries.
+                x_min_expanded = max(x_min - pad_x, 0)
+                y_min_expanded = max(y_min - pad_y, 0)
+                x_max_expanded = min(x_max + pad_x, w)
+                y_max_expanded = min(y_max + pad_y, h)
+
+                # Black out the expanded rectangular region.
+                frame[y_min_expanded:y_max_expanded, x_min_expanded:x_max_expanded] = [0, 0, 0]
+                blurred_frames.append(frame)
+            else:
+                # Assume this code is inside your processing loop for each frame.
+                h, w, _ = frame.shape
+                split_row = h // 2
+
+                # Split the frame into the top and bottom halves.
+                top_half = frame[:split_row, :, :]
+                bottom_half = frame[split_row:, :, :]
+
+                # For clarity, compute the height of the bottom half.
+                bottom_height = h - split_row
+
+                # Define the rectangle size as a percentage of the bottom half's dimensions.
+                rectangle_height = int(bottom_height * 0.65)  # 30% of the bottom half height
+                rectangle_width = int(w * 0.8)              # 30% of the full frame width
+
+                # Calculate coordinates to center the rectangle in the bottom half.
+                start_x = (w - rectangle_width) // 2
+                end_x = start_x + rectangle_width
+                start_y = (bottom_height - rectangle_height) // 2
+                end_y = start_y + rectangle_height
+
+                print('Rectangle dimensions and coordinates:', rectangle_height, rectangle_width, start_x, end_x, start_y, end_y)
+
+                # Fill the specific rectangle in the bottom half with black.
+                bottom_half[start_y:end_y, start_x:end_x] = [0, 0, 0]
+
+                # Reassemble the full frame from the top and modified bottom halves.
+                frame_masked = np.vstack([top_half, bottom_half])
+                blurred_frames.append(frame_masked)     
+
+        # Reassemble the frames and convert back to (C, T, H, W)
+        result = np.stack(blurred_frames, axis=0)  # shape: (T, H, W, C)
+        result = np.transpose(result, (3, 0, 1, 2))  # shape: (C, T, H, W)
+        return result
+    
