@@ -226,7 +226,11 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               # Move data to CUDA device
               x = x.to(device)
-              mel = mel.to(device)
+              
+              if hparams.syncnet_wt > 0.:
+                # This is only being used by the sync loss
+                mel = mel.to(device)
+                
               indiv_mels = indiv_mels.to(device)
 
               gt = gt.to(device)
