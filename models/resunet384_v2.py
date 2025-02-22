@@ -264,20 +264,8 @@ class ResUNet384V2(nn.Module):
         
         cat1 = torch.cat([deface1, face1], dim=1)
         cat1 = self.fd_conv1(cat1)
-        
-        gen_bottom_half = cat1[:, :, H//2:, :]
-        
-        decoder_attn = self.cross_modal_attention_dec(gen_bottom_half, audio_embedding1)
-        
-        # Take the top half from cat1
-        cat1_top = cat1[:, :, :H//2, :]
 
-        # Fuse by concatenating top half and the processed bottom half along the height dimension
-        fused = torch.cat([cat1_top, decoder_attn], dim=2)  # Resulting shape: [B, C, 384, 384]
-        
-        fused = cat1 + fused
-
-        x = self.output_block(fused)
+        x = self.output_block(cat1)
         
         if input_dim_size > 4:
             x = torch.split(x, B, dim=0)
