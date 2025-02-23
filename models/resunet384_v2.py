@@ -133,7 +133,7 @@ class ResUNet384V2(nn.Module):
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
-        self.face_gt_attn = AttentionBlock(64)  # 对应face_encoder1的输出
+        self.face_gt_attn = AttentionBlock(64, reduction=4) 
         
         self.face_encoder2 = nn.Sequential( #192x192
             Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
