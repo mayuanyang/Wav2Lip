@@ -56,10 +56,13 @@ class CrossModalAttention2d(nn.Module):
 
 
 class AttentionBlock(nn.Module):
-    def __init__(self, in_channels):
+    def __init__(self, in_channels, sparse_attention=False, sparsity_ratio=0.5, reduction=8):
         super(AttentionBlock, self).__init__()
-        self.query = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
-        self.key = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+        self.sparse_attention = sparse_attention
+        self.sparsity_ratio = sparsity_ratio
+        
+        self.query = nn.Conv2d(in_channels, in_channels // reduction, kernel_size=1)
+        self.key = nn.Conv2d(in_channels, in_channels // reduction, kernel_size=1)
         self.value = nn.Conv2d(in_channels, in_channels, kernel_size=1)
         self.gamma = nn.Parameter(torch.zeros(1))
 
@@ -69,9 +72,21 @@ class AttentionBlock(nn.Module):
         key = self.key(x).view(B, -1, H * W)
         
         energy = torch.bmm(query, key)
-        energy = energy.clamp(min=-50, max=50) # to avoid nan
+        energy = energy.clamp(min=-50, max=50)  # to avoid nan
         
-        attention = F.softmax(energy, dim=-1)
+        if self.sparse_attention:
+            # Apply sparsity to the attention scores
+            k = int(self.sparsity_ratio * H * W)
+            top_k_values, top_k_indices = torch.topk(energy, k, dim=-1)
+            
+            # Create a sparse attention matrix
+            sparse_attention = torch.zeros_like(energy)
+            sparse_attention.scatter_(-1, top_k_indices, top_k_values)
+            attention = F.softmax(sparse_attention, dim=-1)
+        else:
+            # Standard dense attention
+            attention = F.softmax(energy, dim=-1)
+        
         value = self.value(x).view(B, -1, H * W)
         out = torch.bmm(value, attention.permute(0, 2, 1))
         out = out.view(B, C, H, W)

@@ -389,8 +389,8 @@ def _load(checkpoint_path):
                 map_location=lambda storage, loc: storage)
   return checkpoint
 
-def load_model(path, lora_path=None, model_layers=1):
-  model = ResUNet384V2(model_layers)
+def load_model(path, lora_path=None):
+  model = ResUNet384V2()
   print("Load checkpoint from: {}".format(path))
   checkpoint = _load(path)
   s = checkpoint["state_dict"]
@@ -496,7 +496,7 @@ def main():
   batch_size = args.wav2lip_batch_size
   ref_pool = []
 
-  model = load_model(args.checkpoint_path, args.lora_checkpoint_path, args.model_layers)
+  model = load_model(args.checkpoint_path, args.lora_checkpoint_path)
   print ("Model loaded")
 
   for x in range(args.iteration):
