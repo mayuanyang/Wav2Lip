@@ -442,7 +442,7 @@ if __name__ == "__main__":
     if version == 'v1':
       model = ResUNet384(args.num_of_unet_layers).to(device)
     else:
-      model = ResUNet384V2(args.num_of_unet_layers).to(device)
+      model = ResUNet384V2().to(device)
 
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 

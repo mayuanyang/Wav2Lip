@@ -53,17 +53,41 @@ class CrossModalAttention2d(nn.Module):
         # Residual connection
         out = self.gamma * out + face_feat
         return out
-    
+
+
+class AttentionBlock(nn.Module):
+    def __init__(self, in_channels):
+        super(AttentionBlock, self).__init__()
+        self.query = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+        self.key = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+        self.value = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.gamma = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x):
+        B, C, H, W = x.size()
+        query = self.query(x).view(B, -1, H * W).permute(0, 2, 1)
+        key = self.key(x).view(B, -1, H * W)
+        
+        energy = torch.bmm(query, key)
+        energy = energy.clamp(min=-50, max=50) # to avoid nan
+        
+        attention = F.softmax(energy, dim=-1)
+        value = self.value(x).view(B, -1, H * W)
+        out = torch.bmm(value, attention.permute(0, 2, 1))
+        out = out.view(B, C, H, W)
+        out = self.gamma * out + x
+        return out
+
 def check_nan(tensor, name):
   if torch.isnan(tensor).any():
     print('NaN problem', f"NaN in {name}") 
     
 class ResUNet384V2(nn.Module):
-    def __init__(self, num_of_blocks=2):
+    def __init__(self):
         super(ResUNet384V2, self).__init__()
         
         self.face_gt_bottom_encoder = nn.Sequential( # H W 192x384
-            Conv2d(3, 32, kernel_size=7, stride=1, padding=3),
+            Conv2d(9, 32, kernel_size=7, stride=1, padding=3),
             Conv2d(32, 32, kernel_size=7, stride=1, padding=3, residual=True),
             Conv2d(32, 32, kernel_size=7, stride=1, padding=3, residual=True),
             
@@ -84,7 +108,7 @@ class ResUNet384V2(nn.Module):
             Conv2d(64, 256, kernel_size=3, stride=1, padding=1),
         )
         
-        self.face_encoder1 = nn.Sequential(
+        self.face_encoder1 = nn.Sequential( #384x384
             Conv2d(12, 64, kernel_size=7, stride=1, padding=3),
             Conv2d(64, 64, kernel_size=7, stride=1, padding=3, residual=True),
             Conv2d(64, 64, kernel_size=7, stride=1, padding=3, residual=True),
@@ -94,7 +118,9 @@ class ResUNet384V2(nn.Module):
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
-        self.face_encoder2 = nn.Sequential(
+        self.face_gt_attn = AttentionBlock(64)  # 对应face_encoder1的输出
+        
+        self.face_encoder2 = nn.Sequential( #192x192
             Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
@@ -103,7 +129,7 @@ class ResUNet384V2(nn.Module):
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
 
-        self.face_encoder3 = nn.Sequential(
+        self.face_encoder3 = nn.Sequential( #96x96
             Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
@@ -112,7 +138,7 @@ class ResUNet384V2(nn.Module):
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
 
-        self.face_encoder4 = nn.Sequential(
+        self.face_encoder4 = nn.Sequential( #48x48
             Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
@@ -153,10 +179,10 @@ class ResUNet384V2(nn.Module):
         self.cross_modal_attention = CrossModalAttention2d(1024, reduction=8)
         self.cross_modal_attention_gt = CrossModalAttention2d(64, reduction=8)
         # New cross-modal attention module in the decoder (using audio_embedding1, 64 channels)
-        self.cross_modal_attention_dec = CrossModalAttention2d(64, reduction=1)
+        #self.cross_modal_attention_dec = CrossModalAttention2d(64, reduction=1)
         
         # Decoder with cross-attention
-        self.face_decoder4 = nn.Sequential(
+        self.face_decoder4 = nn.Sequential( #48x48
             Conv2dTranspose(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
@@ -165,7 +191,7 @@ class ResUNet384V2(nn.Module):
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
 
-        self.face_decoder3 = nn.Sequential(
+        self.face_decoder3 = nn.Sequential( #96x96
             Conv2dTranspose(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
@@ -175,7 +201,7 @@ class ResUNet384V2(nn.Module):
         )
         
 
-        self.face_decoder2 = nn.Sequential(
+        self.face_decoder2 = nn.Sequential( #192x192
             Conv2dTranspose(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
@@ -185,7 +211,7 @@ class ResUNet384V2(nn.Module):
         )
         
 
-        self.face_decoder1 = nn.Sequential(
+        self.face_decoder1 = nn.Sequential( #384x384
             Conv2dTranspose(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
@@ -214,10 +240,11 @@ class ResUNet384V2(nn.Module):
         
         _, _, H, W = face_sequences.shape
         
-        gt_imgs = face_sequences[:, :3, : , :]
+        gt_imgs = face_sequences[:, :9, : , :]
         bottom_half_face = gt_imgs[:, :, H//2:, :]
         
         bottom_face_gt = self.face_gt_bottom_encoder(bottom_half_face)
+        bottom_face_gt = self.face_gt_attn(bottom_face_gt)
                
         # Obtain audio features
         audio_embedding1 = self.audio_encoder1(audio_sequences)
@@ -228,7 +255,6 @@ class ResUNet384V2(nn.Module):
         
         # Process face images through the encoder
         face1 = self.face_encoder1(face_sequences)
-        
         fed1 = self.fe_down1(face1)
 
         face2 = self.face_encoder2(fed1)
