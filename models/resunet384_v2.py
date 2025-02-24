@@ -56,42 +56,73 @@ class CrossModalAttention2d(nn.Module):
 
 
 class AttentionBlock(nn.Module):
-    def __init__(self, in_channels, sparse_attention=False, sparsity_ratio=0.5, reduction=8):
+    def __init__(self, in_channels, sparse_attention=False, reduction=8, window_size=9):
+        """
+        Args:
+            in_channels: Number of input channels.
+            sparse_attention: If True, use fixed window-based attention.
+            reduction: Factor to reduce channels for query and key.
+            window_size: Fixed number of neighboring pixels for attention. Must be a perfect square.
+        """
         super(AttentionBlock, self).__init__()
         self.sparse_attention = sparse_attention
-        self.sparsity_ratio = sparsity_ratio
+        
+        # Ensure window_size is a perfect square (e.g. 9, 16, 25, etc.)
+        sqrt_ws = math.sqrt(window_size)
+        if sqrt_ws != int(sqrt_ws):
+            raise ValueError("window_size must be a perfect square")
+        self.kernel_size = int(sqrt_ws)
+        self.padding = self.kernel_size // 2
         
         self.query = nn.Conv2d(in_channels, in_channels // reduction, kernel_size=1)
-        self.key = nn.Conv2d(in_channels, in_channels // reduction, kernel_size=1)
+        self.key   = nn.Conv2d(in_channels, in_channels // reduction, kernel_size=1)
         self.value = nn.Conv2d(in_channels, in_channels, kernel_size=1)
         self.gamma = nn.Parameter(torch.zeros(1))
 
     def forward(self, x):
         B, C, H, W = x.size()
-        query = self.query(x).view(B, -1, H * W).permute(0, 2, 1)
-        key = self.key(x).view(B, -1, H * W)
-        
-        energy = torch.bmm(query, key)
-        energy = energy.clamp(min=-50, max=50)  # to avoid nan
         
         if self.sparse_attention:
-            # Apply sparsity to the attention scores
-            k = int(self.sparsity_ratio * H * W)
-            top_k_values, top_k_indices = torch.topk(energy, k, dim=-1)
+            # Compute query, key, value feature maps
+            q = self.query(x)  # shape: [B, C_reduced, H, W]
+            k = self.key(x)    # shape: [B, C_reduced, H, W]
+            v = self.value(x)  # shape: [B, C, H, W]
             
-            # Create a sparse attention matrix
-            sparse_attention = torch.zeros_like(energy)
-            sparse_attention.scatter_(-1, top_k_indices, top_k_values)
-            attention = F.softmax(sparse_attention, dim=-1)
+            # Unfold key and value to extract fixed window neighborhoods
+            k_unfold = F.unfold(k, kernel_size=self.kernel_size, padding=self.padding)  
+            v_unfold = F.unfold(v, kernel_size=self.kernel_size, padding=self.padding)
+            # k_unfold: [B, C_reduced * (kernel_size^2), H*W]
+            # Reshape to [B, H*W, kernel_size^2, C_reduced]
+            K = self.kernel_size * self.kernel_size
+            k_unfold = k_unfold.view(B, -1, K, H * W).permute(0, 3, 2, 1)
+            # v_unfold: [B, C * (kernel_size^2), H*W] -> [B, H*W, kernel_size^2, C]
+            v_unfold = v_unfold.view(B, -1, K, H * W).permute(0, 3, 2, 1)
+            
+            # Reshape query to [B, H*W, C_reduced]
+            q_flat = q.view(B, q.size(1), H * W).permute(0, 2, 1)
+            
+            # Compute dot-product attention within each fixed window
+            energy = torch.einsum('bqc, bqkc -> bqk', q_flat, k_unfold)
+            attn = F.softmax(energy, dim=-1)
+            
+            # Aggregate values
+            out = torch.einsum('bqk, bqkc -> bqc', attn, v_unfold)
+            out = out.permute(0, 2, 1).view(B, C, H, W)
         else:
-            # Standard dense attention
-            attention = F.softmax(energy, dim=-1)
-        
-        value = self.value(x).view(B, -1, H * W)
-        out = torch.bmm(value, attention.permute(0, 2, 1))
-        out = out.view(B, C, H, W)
-        out = self.gamma * out + x
-        return out
+            # Full attention over all pixels
+            q = self.query(x).view(B, -1, H * W).permute(0, 2, 1)
+            k = self.key(x).view(B, -1, H * W).permute(0, 2, 1)
+            v = self.value(x).view(B, -1, H * W).permute(0, 2, 1)
+            
+            q = q.unsqueeze(1)
+            k = k.unsqueeze(1)
+            v = v.unsqueeze(1)
+            out = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=0.0)
+            out = out.squeeze(1)
+            out = out.permute(0, 2, 1).view(B, C, H, W)
+            
+        return self.gamma * out + x
+
 
 def check_nan(tensor, name):
   if torch.isnan(tensor).any():
@@ -133,7 +164,8 @@ class ResUNet384V2(nn.Module):
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
-        self.face_gt_attn = AttentionBlock(64, reduction=4) 
+        self.face_gt_attn = AttentionBlock(64, reduction=1)
+        self.face1_attn = AttentionBlock(64, reduction=8, sparse_attention=True)
         
         self.face_encoder2 = nn.Sequential( #192x192
             Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
@@ -161,6 +193,8 @@ class ResUNet384V2(nn.Module):
             Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
+        
+        self.deface4_attn = AttentionBlock(512)
 
         self.audio_encoder1 = nn.Sequential(
             Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
@@ -270,6 +304,7 @@ class ResUNet384V2(nn.Module):
         
         # Process face images through the encoder
         face1 = self.face_encoder1(face_sequences)
+        face1 = self.face1_attn(face1)
         fed1 = self.fe_down1(face1)
 
         face2 = self.face_encoder2(fed1)
@@ -290,6 +325,9 @@ class ResUNet384V2(nn.Module):
         bottlenet = self.cross_modal_attention(bottlenet, audio_embedding2)
 
         deface4 = self.face_decoder4(bottlenet)
+        
+        deface4 = self.deface4_attn(deface4)
+        
         cat4 = torch.cat([deface4, face4], dim=1)
         cat4 = self.fd_conv4(cat4)
 
