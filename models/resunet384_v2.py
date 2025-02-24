@@ -103,6 +103,7 @@ class AttentionBlock(nn.Module):
             
             # Compute dot-product attention within each fixed window
             energy = torch.einsum('bqc, bqkc -> bqk', q_flat, k_unfold)
+            energy = energy.clamp(min=-50, max=50)
             attn = F.softmax(energy, dim=-1)
             
             # Aggregate values
@@ -117,7 +118,7 @@ class AttentionBlock(nn.Module):
             q = q.unsqueeze(1)
             k = k.unsqueeze(1)
             v = v.unsqueeze(1)
-            out = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=0.0)
+            out = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=0.1)
             out = out.squeeze(1)
             out = out.permute(0, 2, 1).view(B, C, H, W)
             
@@ -165,7 +166,7 @@ class ResUNet384V2(nn.Module):
         )
         
         self.face_gt_attn = AttentionBlock(64, reduction=1)
-        self.face1_attn = AttentionBlock(64, reduction=8, sparse_attention=True)
+        self.face1_attn = AttentionBlock(64, reduction=2, sparse_attention=True)
         
         self.face_encoder2 = nn.Sequential( #192x192
             Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
@@ -193,8 +194,6 @@ class ResUNet384V2(nn.Module):
             Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
-        
-        self.deface4_attn = AttentionBlock(512)
 
         self.audio_encoder1 = nn.Sequential(
             Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
@@ -239,6 +238,8 @@ class ResUNet384V2(nn.Module):
             Conv2d(1024, 512, kernel_size=3, stride=1, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
+        
+        #self.deface4_attn = AttentionBlock(512)
 
         self.face_decoder3 = nn.Sequential( #96x96
             Conv2dTranspose(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
@@ -258,6 +259,7 @@ class ResUNet384V2(nn.Module):
             Conv2d(256, 128, kernel_size=3, stride=1, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
+        
         
 
         self.face_decoder1 = nn.Sequential( #384x384
@@ -304,7 +306,7 @@ class ResUNet384V2(nn.Module):
         
         # Process face images through the encoder
         face1 = self.face_encoder1(face_sequences)
-        face1 = self.face1_attn(face1)
+        face1 = self.face1_attn(face1) # 384x384
         fed1 = self.fe_down1(face1)
 
         face2 = self.face_encoder2(fed1)
@@ -325,8 +327,7 @@ class ResUNet384V2(nn.Module):
         bottlenet = self.cross_modal_attention(bottlenet, audio_embedding2)
 
         deface4 = self.face_decoder4(bottlenet)
-        
-        deface4 = self.deface4_attn(deface4)
+        #deface4 = self.deface4_attn(deface4)
         
         cat4 = torch.cat([deface4, face4], dim=1)
         cat4 = self.fd_conv4(cat4)
