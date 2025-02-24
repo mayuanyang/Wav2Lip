@@ -102,7 +102,15 @@ class AttentionBlock(nn.Module):
             q_flat = q.view(B, q.size(1), H * W).permute(0, 2, 1)
             
             # Compute dot-product attention within each fixed window
-            energy = torch.einsum('bqc, bqkc -> bqk', q_flat, k_unfold)
+            # Normalize query and key tensors
+            q_flat = F.normalize(q_flat, p=2, dim=-1)  # L2 normalize along the last dimension
+            k_unfold = F.normalize(k_unfold, p=2, dim=-1)  # L2 normalize along the last dimension
+
+            # Scale the dot product by the square root of the dimensionality
+            scale = torch.sqrt(torch.tensor(q_flat.size(-1), dtype=torch.float32))
+            energy = torch.einsum('bqc, bqkc -> bqk', q_flat, k_unfold) / scale
+            if torch.min(energy) < -50 or torch.max(energy) > 50:
+              print(f"Min and Max energy: {torch.min(energy)}. {torch.max(energy)}")
             energy = energy.clamp(min=-50, max=50)
             attn = F.softmax(energy, dim=-1)
             
@@ -114,6 +122,10 @@ class AttentionBlock(nn.Module):
             q = self.query(x).view(B, -1, H * W).permute(0, 2, 1)
             k = self.key(x).view(B, -1, H * W).permute(0, 2, 1)
             v = self.value(x).view(B, -1, H * W).permute(0, 2, 1)
+
+            # L2 normalize query and key
+            q = F.normalize(q, p=2, dim=-1)  # Normalize along the last dimension (C_reduced)
+            k = F.normalize(k, p=2, dim=-1)  # Normalize along the last dimension (C_reduced)
             
             q = q.unsqueeze(1)
             k = k.unsqueeze(1)
