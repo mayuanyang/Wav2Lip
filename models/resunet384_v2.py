@@ -17,7 +17,7 @@ class ResUNet384V2(nn.Module):
         super(ResUNet384V2, self).__init__()
         
         self.face_gt_bottom_encoder = nn.Sequential( # H W 192x384
-            Conv2d(9, 32, kernel_size=7, stride=1, padding=3),
+            Conv2d(12, 32, kernel_size=7, stride=1, padding=3),
             Conv2d(32, 32, kernel_size=7, stride=1, padding=3, residual=True),
             Conv2d(32, 32, kernel_size=7, stride=1, padding=3, residual=True),
             
@@ -156,17 +156,16 @@ class ResUNet384V2(nn.Module):
         
         _, _, H, W = face_sequences.shape
         
-        gt_imgs = face_sequences[:, :9, : , :]
-        bottom_half_face = gt_imgs[:, :, H//2:, :]
+        bottom_half_face = face_sequences[:, :, H//2:, :]
         
-        bottom_face_gt = self.face_gt_bottom_encoder(bottom_half_face)
-        bottom_face_gt = self.face_gt_attn(bottom_face_gt)
+        bottom_face = self.face_gt_bottom_encoder(bottom_half_face)
+        bottom_face = self.face_gt_attn(bottom_face)
                
         # Obtain audio features
         audio_embedding1 = self.audio_encoder1(audio_sequences)
         #audio_embedding2 = self.audio_encoder2(audio_embedding1)
         
-        gt_attn = self.cross_modal_attention_gt(bottom_face_gt, audio_embedding1)
+        gt_attn = self.cross_modal_attention_gt(bottom_face, audio_embedding1)
         gt_attn = self.face_gt_bottom_upconv(gt_attn)
         
         # Process face images through the encoder

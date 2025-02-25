@@ -110,6 +110,7 @@ class TransformerSyncnetV2(nn.Module):
         
         face3 = self.face_encoder3(face2)
         face4 = self.face_encoder4(face3)
+        
         face4 = self.face4xaudio(face4, audio_embedding2)
         
         flatten = self.flatten(face4)
