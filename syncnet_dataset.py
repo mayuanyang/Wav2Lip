@@ -23,10 +23,11 @@ samples = [True, True,True, True,True, False,False, False, False, False]
 
 class Dataset(object):
     
-    def __init__(self, split, data_root, train_root, use_augmentation):
+    def __init__(self, split, data_root, train_root, use_augmentation, img_size_factor=1):
         print('-----')
         self.all_videos = get_image_list(data_root, split, train_root)
         self.use_augmentation = use_augmentation
+        self.img_size_factor = img_size_factor
         
 
     def get_frame_id(self, frame):
@@ -149,7 +150,7 @@ class Dataset(object):
                             all_read = False
                             break
                         try:
-                            img = cv2.resize(img, (hparams.img_size, hparams.img_size))                            
+                            img = cv2.resize(img, (hparams.img_size * self.img_size_factor, hparams.img_size * self.img_size_factor))                            
                             
                             if len(face_image_cache) < hparams.syncnet_image_cache_size:
                               face_image_cache[fname] = img  # Cache the resized image
