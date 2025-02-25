@@ -17,11 +17,11 @@ class ResUNet384V2(nn.Module):
         super(ResUNet384V2, self).__init__()
         
         self.face_gt_bottom_encoder = nn.Sequential( # H W 192x384
-            Conv2d(12, 32, kernel_size=7, stride=1, padding=3),
-            Conv2d(32, 32, kernel_size=7, stride=1, padding=3, residual=True),
-            Conv2d(32, 32, kernel_size=7, stride=1, padding=3, residual=True),
+            Conv2d(12, 64, kernel_size=7, stride=1, padding=3),
+            Conv2d(64, 64, kernel_size=7, stride=1, padding=3, residual=True),
+            Conv2d(64, 64, kernel_size=7, stride=1, padding=3, residual=True),
             
-            Conv2d(32, 64, kernel_size=3, stride=2, padding=1), # H W 96x192
+            Conv2d(64, 64, kernel_size=3, stride=2, padding=1), # H W 96x192
             Conv2d(64, 64, kernel_size=7, stride=1, padding=3, residual=True),
             Conv2d(64, 64, kernel_size=7, stride=1, padding=3, residual=True),
             
@@ -163,14 +163,12 @@ class ResUNet384V2(nn.Module):
                
         # Obtain audio features
         audio_embedding1 = self.audio_encoder1(audio_sequences)
-        #audio_embedding2 = self.audio_encoder2(audio_embedding1)
         
         gt_attn = self.cross_modal_attention_gt(bottom_face, audio_embedding1)
         gt_attn = self.face_gt_bottom_upconv(gt_attn)
         
         # Process face images through the encoder
         face1 = self.face_encoder1(face_sequences)
-        #face1 = self.face1_attn(face1) # 384x384
         fed1 = self.fe_down1(face1)
 
         face2 = self.face_encoder2(fed1)
@@ -186,12 +184,8 @@ class ResUNet384V2(nn.Module):
         
         # Get face bottleneck features
         bottlenet = self.bottlenet(fed4)
-        # Instead of simply adding the audio_embedding, perform cross-modal attention.
-        # Here, we use the face bottleneck as queries and the audio_embedding as keys/values.
-        # bottlenet = self.cross_modal_attention(bottlenet, audio_embedding2)
 
         deface4 = self.face_decoder4(bottlenet)
-        #deface4 = self.deface4_attn(deface4)
         
         cat4 = torch.cat([deface4, face4], dim=1)
         cat4 = self.fd_conv4(cat4)
