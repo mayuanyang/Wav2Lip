@@ -31,12 +31,15 @@ class CrossModalAttention2d(nn.Module):
         # Compute key from audio features
         key = self.key_conv(audio_feat).view(AB, -1, AH * AW)                       # (B, C//reduction, HW)
         check_nan(key, 'key')
+
+        query = F.normalize(query, p=2, dim=-1)  # L2 normalize along the last dimension
+        key = F.normalize(key, p=2, dim=-1)  # L2 normalize along the last dimension
         
-        d_k = query.size(-1)
-        energy = torch.bmm(query, key) / math.sqrt(d_k)
+        energy = torch.bmm(query, key)
         energy = energy - energy.max(dim=-1, keepdim=True)[0]
+        #print(f"Min and Max energy: {torch.min(energy)}. {torch.max(energy)}")
         
-        energy = energy.clamp(min=-50, max=50)
+        #energy = energy.clamp(min=-50, max=50)
         attention = F.softmax(energy, dim=-1)
         
         check_nan(attention, 'attention')
@@ -106,12 +109,11 @@ class AttentionBlock(nn.Module):
             q_flat = F.normalize(q_flat, p=2, dim=-1)  # L2 normalize along the last dimension
             k_unfold = F.normalize(k_unfold, p=2, dim=-1)  # L2 normalize along the last dimension
 
-            # Scale the dot product by the square root of the dimensionality
-            scale = torch.sqrt(torch.tensor(q_flat.size(-1), dtype=torch.float32))
-            energy = torch.einsum('bqc, bqkc -> bqk', q_flat, k_unfold) / scale
+            energy = torch.einsum('bqc, bqkc -> bqk', q_flat, k_unfold)
+            energy = energy - energy.max(dim=-1, keepdim=True)[0]
             if torch.min(energy) < -50 or torch.max(energy) > 50:
               print(f"Min and Max energy: {torch.min(energy)}. {torch.max(energy)}")
-            energy = energy.clamp(min=-50, max=50)
+            
             attn = F.softmax(energy, dim=-1)
             
             # Aggregate values
@@ -178,7 +180,7 @@ class ResUNet384V2(nn.Module):
         )
         
         self.face_gt_attn = AttentionBlock(64, reduction=1)
-        self.face1_attn = AttentionBlock(64, reduction=2, sparse_attention=True)
+        #self.face1_attn = AttentionBlock(64, reduction=2, sparse_attention=True, window_size=25)
         
         self.face_encoder2 = nn.Sequential( #192x192
             Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
@@ -217,26 +219,26 @@ class ResUNet384V2(nn.Module):
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
 
-        self.audio_encoder2 = nn.Sequential(
-            Conv2d(64, 64, kernel_size=3, stride=(2, 1), padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+        # self.audio_encoder2 = nn.Sequential(
+        #     Conv2d(64, 64, kernel_size=3, stride=(2, 1), padding=1),
+        #     Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
 
-            Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+        #     Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+        #     Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
 
-            Conv2d(128, 256, kernel_size=3, stride=1, padding=(0, 1)),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+        #     Conv2d(128, 256, kernel_size=3, stride=1, padding=(0, 1)),
+        #     Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
 
-            Conv2dTranspose(256, 256, kernel_size=3, stride=3, padding=0),
-            Conv2d(256, 1024, kernel_size=1, stride=1, padding=0)
-        ) 
+        #     Conv2dTranspose(256, 256, kernel_size=3, stride=3, padding=0),
+        #     Conv2d(256, 1024, kernel_size=1, stride=1, padding=0)
+        # )
 
         self.bottlenet = nn.Sequential(
             Conv2d(512, 1024, kernel_size=3, stride=1, padding=1),
         )
         
         # Replace the simple fusion with cross-modal attention:
-        self.cross_modal_attention = CrossModalAttention2d(1024, reduction=8)
+        #self.cross_modal_attention = CrossModalAttention2d(1024, reduction=8)
         self.cross_modal_attention_gt = CrossModalAttention2d(64, reduction=8)
         # New cross-modal attention module in the decoder (using audio_embedding1, 64 channels)
         #self.cross_modal_attention_dec = CrossModalAttention2d(64, reduction=1)
@@ -311,14 +313,14 @@ class ResUNet384V2(nn.Module):
                
         # Obtain audio features
         audio_embedding1 = self.audio_encoder1(audio_sequences)
-        audio_embedding2 = self.audio_encoder2(audio_embedding1)
+        #audio_embedding2 = self.audio_encoder2(audio_embedding1)
         
         gt_attn = self.cross_modal_attention_gt(bottom_face_gt, audio_embedding1)
         gt_attn = self.face_gt_bottom_upconv(gt_attn)
         
         # Process face images through the encoder
         face1 = self.face_encoder1(face_sequences)
-        face1 = self.face1_attn(face1) # 384x384
+        #face1 = self.face1_attn(face1) # 384x384
         fed1 = self.fe_down1(face1)
 
         face2 = self.face_encoder2(fed1)
@@ -336,7 +338,7 @@ class ResUNet384V2(nn.Module):
         bottlenet = self.bottlenet(fed4)
         # Instead of simply adding the audio_embedding, perform cross-modal attention.
         # Here, we use the face bottleneck as queries and the audio_embedding as keys/values.
-        bottlenet = self.cross_modal_attention(bottlenet, audio_embedding2)
+        # bottlenet = self.cross_modal_attention(bottlenet, audio_embedding2)
 
         deface4 = self.face_decoder4(bottlenet)
         #deface4 = self.deface4_attn(deface4)
