@@ -267,6 +267,7 @@ class ResUNet384V2(nn.Module):
             nn.Conv2d(64, 3, kernel_size=1, stride=1, padding=0),
             nn.Sigmoid()
         )
+        
 
     def forward(self, audio_sequences, face_sequences):
 
@@ -344,3 +345,20 @@ class ResUNet384V2(nn.Module):
             outputs = x
             
         return outputs
+
+class Discriminator(nn.Module):
+    def __init__(self):
+        super(Discriminator, self).__init__()
+        self.model = nn.Sequential(
+            Conv2d(3, 64, kernel_size=4, stride=2, padding=1),  # Input channels are now 3
+            Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
+            Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
+            Conv2d(256, 512, kernel_size=4, stride=2, padding=1),
+            Conv2d(512, 1, kernel_size=4, stride=1, padding=1)  # Output a single score
+        )
+
+    def forward(self, x):
+        input_dim_size = len(x.size())
+        if input_dim_size > 4:
+            x = torch.cat([x[:, :, i] for i in range(x.size(2))], dim=0)
+        return self.model(x)
