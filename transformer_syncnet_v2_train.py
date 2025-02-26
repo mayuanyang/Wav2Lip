@@ -108,7 +108,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear, nn.TransformerEncoderLayer)):
             module.register_backward_hook(print_grad_norm)
   
-    scaler = GradScaler()
+    
     while global_epoch < nepochs:
         lr = get_current_lr(optimizer)
         # for param_group in optimizer.param_groups:
@@ -134,15 +134,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             
             ce_loss = cross_entropy_loss(output, y)
             
-
-            scaler.scale(ce_loss).backward()
+            ce_loss.backward()
 
             # **Apply Gradient Clipping Here**
-            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
+            scheduler.step(ce_loss)
 
             global_step += 1
             avg_ce_loss += ce_loss.item()
