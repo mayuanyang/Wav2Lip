@@ -108,7 +108,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear, nn.TransformerEncoderLayer)):
             module.register_backward_hook(print_grad_norm)
   
-    scaler = GradScaler()
     while global_epoch < nepochs:
         # for param_group in optimizer.param_groups:
         #   print("The learning rates are: ", param_group['lr'])
@@ -131,14 +130,12 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               y = y.to(device)                        
               ce_loss = cross_entropy_loss(output, y)
 
-            scaler.scale(ce_loss).backward()
-            scaler.unscale_(optimizer)
+            ce_loss.backward()
+            optimizer.step()
+            scheduler.step(ce_loss)
 
             # **Apply Gradient Clipping Here**
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
-            scaler.step(optimizer)
-            scaler.update()
 
             global_step += 1
             avg_ce_loss += ce_loss.item()
@@ -152,8 +149,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                     eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler)
                 
             current_training_loss = avg_ce_loss / (step + 1)
-
-            scheduler.step(current_training_loss)
             
             prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}'.format(global_step, global_epoch, current_training_loss))
             metrics = {"train/ce_loss": current_training_loss, 
@@ -256,6 +251,28 @@ def _load(checkpoint_path):
                                 map_location=lambda storage, loc: storage)
     return checkpoint
 
+
+
+# List of layers to keep trainable
+trainable_layers = [
+    "face_encoder.0.conv_block.0.weight",
+    "face_encoder.0.conv_block.0.bias",
+    "face_encoder.0.conv_block.1.weight",
+    "face_encoder.0.conv_block.1.bias",
+    "face_encoder.0.conv_block.1.running_mean",
+    "face_encoder.0.conv_block.1.running_var",
+    "face_encoder.0.conv_block.1.num_batches_tracked",
+    "face_encoder.1.conv_block.0.weight",
+    "face_encoder.1.conv_block.0.bias",
+    "face_encoder.1.conv_block.1.weight",
+    "face_encoder.1.conv_block.1.bias",
+    "face_encoder.1.conv_block.1.running_mean",
+    "face_encoder.1.conv_block.1.running_var",
+    "face_encoder.1.conv_block.1.num_batches_tracked",
+    # Add more layers as needed...
+]
+
+
 def load_checkpoint(path, model, optimizer, reset_optimizer=False):
     global global_step
     global global_epoch
@@ -268,8 +285,8 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
     # Filter out the layers with mismatched dimensions
     pretrained_dict = {}
     for k, v in checkpoint["state_dict"].items():
-        if k in model_dict and v.size() == model_dict[k].size():
-            pretrained_dict[k] = v
+        pretrained_dict[k] = v
+        
 
     #print('The pretrained', pretrained_dict)
     # Update the current model with the pre-trained weights
@@ -288,6 +305,15 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
     # Reset the new learning rate
     # for param_group in optimizer.param_groups:
     #     param_group['lr'] = 0.00002
+
+        # Freeze all parameters first
+    # for name, param in model.named_parameters():
+    #     param.requires_grad = False
+    
+    # # Unfreeze only the specified layers
+    # for name, param in model.named_parameters():
+    #     if any(layer_name in name for layer_name in trainable_layers):
+    #         param.requires_grad = True
 
     return model
 
@@ -332,8 +358,7 @@ if __name__ == "__main__":
 
     # Model
     model = TransformerSyncnet(num_heads=8, num_encoder_layers=6).to(device)
-    print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
-
+    
     
     optimizer = optim.Adam([
         {'params': model.face_encoder[:27].parameters(), 'lr': hparams.syncnet_face_lr},
@@ -342,6 +367,8 @@ if __name__ == "__main__":
 
     if checkpoint_path is not None:
         load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=True)
+
+    print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
     train(device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=checkpoint_dir,
