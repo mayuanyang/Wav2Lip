@@ -3,6 +3,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from .conv import Conv2d
+from .self_attention import AttentionBlock
 
 def check_nan(tensor, name):
   if torch.isnan(tensor).any():
@@ -19,7 +20,7 @@ class TransformerSyncnet(nn.Module):
         k is the kernel size.
         S is the stride.
         '''
-        self.face_encoder = nn.Sequential(
+        self.face_encoder1 = nn.Sequential(
             
             Conv2d(15, 128, kernel_size=3, stride=1, padding=1), #192x192, 1+(3−1)×1=3
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #192x192, 3+(3−1)×1=5
@@ -28,7 +29,9 @@ class TransformerSyncnet(nn.Module):
             Conv2d(128, 128, kernel_size=3, stride=2, padding=1), #96x96, 7
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), # 9
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), # 11
-
+        )
+        
+        self.face_encoder2 = nn.Sequential(
             Conv2d(128, 128, kernel_size=3, stride=(1, 2), padding=1), #94x47, 13
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #94x47, 15
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #94x47, 17
@@ -93,7 +96,8 @@ class TransformerSyncnet(nn.Module):
             Conv2d(256, 512, kernel_size=3, stride=1, padding=0), #3x3, 53+(3-1)x1=55
             Conv2d(512, 512, kernel_size=1, stride=1, padding=0, residual=True),) #55+(3-1)x1=57
 
-
+        self.face_attn = AttentionBlock(128, reduction=8)
+        
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=512, nhead=num_heads, dropout=0.1),
             num_layers=num_encoder_layers
@@ -107,24 +111,27 @@ class TransformerSyncnet(nn.Module):
 
     def forward(self, face_embedding, audio_embedding):
 
-        face_embedding = self.face_encoder(face_embedding)
+        face_embedding1 = self.face_encoder1(face_embedding)
+        face_embedding1 = self.face_attn(face_embedding1)
+        
+        face_embedding2 = self.face_encoder2(face_embedding1)
         audio_embedding = self.audio_encoder(audio_embedding)
 
-        check_nan(face_embedding, 'face_emb')
+        check_nan(face_embedding2, 'face_emb')
         check_nan(audio_embedding, 'audio')
 
         audio_embedding = audio_embedding.view(audio_embedding.size(0), -1)
-        face_embedding = face_embedding.view(face_embedding.size(0), -1)
+        face_embedding2 = face_embedding2.reshape(face_embedding2.size(0), -1)
 
-        face_embedding = self.fc1(face_embedding)
+        face_embedding2 = self.fc1(face_embedding2)
         audio_embedding = self.fc2(audio_embedding)
 
         # normalise them
         audio_embedding = F.normalize(audio_embedding, p=2, dim=1)
-        face_embedding = F.normalize(face_embedding, p=2, dim=1)
+        face_embedding2 = F.normalize(face_embedding2, p=2, dim=1)
 
         # Concatenate lip frames and audio features
-        combined = torch.cat((face_embedding, audio_embedding), dim=1)
+        combined = torch.cat((face_embedding2, audio_embedding), dim=1)
         
         # Make sure combined is 1-dimensional
         combined = combined.view(combined.size(0), -1)
@@ -134,4 +141,4 @@ class TransformerSyncnet(nn.Module):
         out = self.relu(transformer_output)
         out = self.fc3(out)
         
-        return out, audio_embedding, face_embedding
+        return out, audio_embedding, face_embedding2

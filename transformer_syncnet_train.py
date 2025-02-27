@@ -98,7 +98,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     
     global global_step, global_epoch, consecutive_threshold_count, current_training_loss
     
-    patience = 1000
+    patience = 3000
 
     # Added by eddy
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=patience, verbose=True)
@@ -360,10 +360,7 @@ if __name__ == "__main__":
     model = TransformerSyncnet(num_heads=8, num_encoder_layers=6).to(device)
     
     
-    optimizer = optim.Adam([
-        {'params': model.face_encoder[:27].parameters(), 'lr': hparams.syncnet_face_lr},
-        {'params': model.audio_encoder[:22].parameters(), 'lr': hparams.syncnet_audio_lr},
-    ], lr=5e-5,betas=(0.8, 0.999), weight_decay=1e-5)  # Default learning rate for other layers
+    optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad], lr=3e-5,betas=(0.8, 0.999), weight_decay=1e-5)  # Default learning rate for other layers
 
     if checkpoint_path is not None:
         load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=True)
