@@ -76,7 +76,7 @@ hparams = HParams(
 	img_size=192,
 	fps=25,
 	
-	batch_size=3,
+	batch_size=4,
 	initial_learning_rate=1e-4,
 	nepochs=200000000000000000,  ### ctrl + c, stop whenever eval loss is consistently greater than train loss for ~10 epochs
 	resunet_num_workers=0,
@@ -87,14 +87,14 @@ hparams = HParams(
 	audio_cache_size=0,
 
   
-	syncnet_num_workers=48,
-	syncnet_batch_size=430,
-	syncnet_face_lr=2e-6,
-	syncnet_audio_lr=2e-6,
+	syncnet_num_workers=8,
+	syncnet_batch_size=40,
+	syncnet_face_lr=1e-5,
+	syncnet_audio_lr=1e-5,
 	syncnet_eval_interval=100000,
-	syncnet_checkpoint_interval=200,
-	syncnet_image_cache_size=150000,
-	syncnet_audio_cache_size=35000,
+	syncnet_checkpoint_interval=1000,
+	syncnet_image_cache_size=0,
+	syncnet_audio_cache_size=0,
 
   syncnet_wt=0.,
   disc_wt=1,
