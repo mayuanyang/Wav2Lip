@@ -96,7 +96,7 @@ class TransformerSyncnet(nn.Module):
             Conv2d(256, 512, kernel_size=3, stride=1, padding=0), #3x3, 53+(3-1)x1=55
             Conv2d(512, 512, kernel_size=1, stride=1, padding=0, residual=True),) #55+(3-1)x1=57
 
-        self.face_attn = AttentionBlock(128, reduction=8)
+        self.face_attn = AttentionBlock(128, reduction=4)
         
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=512, nhead=num_heads, dropout=0.1),
