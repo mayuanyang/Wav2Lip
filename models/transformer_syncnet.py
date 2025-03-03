@@ -112,7 +112,7 @@ class TransformerSyncnet(nn.Module):
     def forward(self, face_embedding, audio_embedding):
 
         face_embedding1 = self.face_encoder1(face_embedding)
-        #face_embedding1 = self.face_attn(face_embedding1)
+        face_embedding1 = self.face_attn(face_embedding1)
         
         face_embedding2 = self.face_encoder2(face_embedding1)
         audio_embedding = self.audio_encoder(audio_embedding)
