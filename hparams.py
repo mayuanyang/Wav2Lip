@@ -88,7 +88,7 @@ hparams = HParams(
 
   
 	syncnet_num_workers=8,
-	syncnet_batch_size=40,
+	syncnet_batch_size=96,
 	syncnet_face_lr=1e-5,
 	syncnet_audio_lr=1e-5,
 	syncnet_eval_interval=100000,
