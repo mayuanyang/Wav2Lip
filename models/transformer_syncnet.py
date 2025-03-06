@@ -4,6 +4,7 @@ from torch import nn
 from torch.nn import functional as F
 from .conv import Conv2d
 from .self_attention import AttentionBlock
+from .cross_modal_attention import CrossModalAttention2d
 
 def check_nan(tensor, name):
   if torch.isnan(tensor).any():
@@ -67,71 +68,75 @@ class TransformerSyncnet(nn.Module):
             
             )
 
-        self.audio_encoder = nn.Sequential(
+        self.audio_encoder1 = nn.Sequential(
             Conv2d(1, 32, kernel_size=3, stride=1, padding=1), # 80x16, 1+(3−1)×1=3
             Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True), # 3+(3-1)x1=5
             Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True), # 5+(3-1)x1=7
-            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True), # 7+(3-1)x1=9
-            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True), # 7+(3-1)x1=11
+            
 
             Conv2d(32, 64, kernel_size=3, stride=(3, 1), padding=1), # 27x16, 11+(3-1)x3=17
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #15+(3-1)x1=19
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #17+(3-1)x1=21
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #19+(3-1)x1=23
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #19+(3-1)x1=25
+            
 
-            Conv2d(64, 64, kernel_size=3, stride=2, padding=1), # 14x8, 25+(3-1)x2=29
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #29+(3-1)x1=31
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #29+(3-1)x1=33
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #29+(3-1)x1=35
+            Conv2d(64, 128, kernel_size=3, stride=2, padding=1), # 14x8, 25+(3-1)x2=29
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #29+(3-1)x1=31
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #29+(3-1)x1=33
+        )
 
-            Conv2d(64, 128, kernel_size=3, stride=(2,1), padding=1), #7x8, 35+(3-1)x2=41
+        self.audio_encoder2 = nn.Sequential(
+            Conv2d(128, 128, kernel_size=3, stride=(2,1), padding=1), #7x8, 35+(3-1)x2=41
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #41+(3-1)x1=43
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #43+(3-1)x1=45
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #45+(3-1)x1=47
-
+            
             Conv2d(128, 256, kernel_size=3, stride=3, padding=1), #3x3, #47+(3-1)x3=51
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #51+(3-1)x1=53
 
             Conv2d(256, 512, kernel_size=3, stride=1, padding=0), #3x3, 53+(3-1)x1=55
             Conv2d(512, 512, kernel_size=1, stride=1, padding=0, residual=True),) #55+(3-1)x1=57
 
-        self.face_attn = AttentionBlock(128, reduction=2)
+        #self.face_attn = AttentionBlock(128, reduction=2)
+        self.cross_modal_attention = CrossModalAttention2d(128, reduction=2)
         
         self.transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=512, nhead=num_heads, dropout=0.1),
-            num_layers=num_encoder_layers
+            nn.TransformerEncoderLayer(d_model=1024, nhead=num_heads, dropout=0.2),
+            num_layers=4
         )
 
         self.relu = nn.LeakyReLU(0.01, inplace=True)
-        self.fc1 = nn.Linear(384, 256) 
-        self.fc2 = nn.Linear(512, 256) 
-        self.fc3 = nn.Linear(512, 2) 
+        
+        
+        self.fc2 = nn.Linear(1152, 512)
+        self.fc3 = nn.Linear(1024, 2) 
         
 
     def forward(self, face_embedding, audio_embedding):
 
-        face_embedding1 = self.face_encoder1(face_embedding)
-        face_embedding1 = self.face_attn(face_embedding1)
+        face_embedding1 = self.face_encoder1(face_embedding)        
+                
+        audio_embedding1 = self.audio_encoder1(audio_embedding)
+        audio_embedding2 = self.audio_encoder2(audio_embedding1)
+
+        fused = self.cross_modal_attention(face_embedding1, audio_embedding1)
+        face_embedding1 = fused
+        #print('The shapes', fused.shape, face_embedding1.shape, audio_embedding1.shape)
         
         face_embedding2 = self.face_encoder2(face_embedding1)
-        audio_embedding = self.audio_encoder(audio_embedding)
 
         check_nan(face_embedding2, 'face_emb')
-        check_nan(audio_embedding, 'audio')
+        check_nan(audio_embedding2, 'audio')
 
-        audio_embedding = audio_embedding.view(audio_embedding.size(0), -1)
-        face_embedding2 = face_embedding2.reshape(face_embedding2.size(0), -1)
-
-        face_embedding2 = self.fc1(face_embedding2)
-        audio_embedding = self.fc2(audio_embedding)
+        audio_embedding2 = audio_embedding2.view(audio_embedding2.size(0), -1)
+        face_embedding2 = face_embedding2.view(face_embedding2.size(0), -1)
+        
+        face_embedding2 = self.fc2(face_embedding2)
 
         # normalise them
-        audio_embedding = F.normalize(audio_embedding, p=2, dim=1)
+        audio_embedding2 = F.normalize(audio_embedding2, p=2, dim=1)
         face_embedding2 = F.normalize(face_embedding2, p=2, dim=1)
 
         # Concatenate lip frames and audio features
-        combined = torch.cat((face_embedding2, audio_embedding), dim=1)
+        combined = torch.cat((face_embedding2, audio_embedding2), dim=1)
         
         # Make sure combined is 1-dimensional
         combined = combined.view(combined.size(0), -1)
@@ -141,4 +146,4 @@ class TransformerSyncnet(nn.Module):
         out = self.relu(transformer_output)
         out = self.fc3(out)
         
-        return out, audio_embedding, face_embedding2
+        return out, audio_embedding2, face_embedding2
