@@ -1,4 +1,3 @@
-
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -7,143 +6,122 @@ from .self_attention import AttentionBlock
 from .cross_modal_attention import CrossModalAttention2d
 
 def check_nan(tensor, name):
-  if torch.isnan(tensor).any():
-    print('NaN problem', f"NaN in {name}") 
+    if torch.isnan(tensor).any():
+        print('NaN problem', f"NaN in {name}")
 
 class TransformerSyncnet(nn.Module):
     def __init__(self, num_heads, num_encoder_layers):
         super(TransformerSyncnet, self).__init__()
-        '''
-        Outpu = Input + (k-1) x S
-
-        Where:
-        Input is the receptive field size from the previous layer.
-        k is the kernel size.
-        S is the stride.
-        '''
-        self.face_encoder1 = nn.Sequential(
+        # --- Face encoder for individual frames ---
+        # This encoder processes a single 3-channel image and outputs a 512-d feature.
+        self.face_encoder_individual = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
             
-            Conv2d(15, 128, kernel_size=3, stride=1, padding=1), #192x192, 1+(3−1)×1=3
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #192x192, 3+(3−1)×1=5
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #192x192, 3+(3−1)×1=5
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
             
-            Conv2d(128, 128, kernel_size=3, stride=2, padding=1), #96x96, 7
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), # 9
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), # 11
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            
+            nn.AdaptiveAvgPool2d((1, 1)),  # Global average pooling
+            nn.Flatten(),                   # Shape becomes (B, 128)
+            nn.Linear(128, 512)             # Project to 512-dim feature
         )
         
-        self.face_encoder2 = nn.Sequential(
-            Conv2d(128, 128, kernel_size=3, stride=(1, 2), padding=1), #94x47, 13
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #94x47, 15
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #94x47, 17
-
-            Conv2d(128, 256, kernel_size=3, stride=2, padding=1), # 47x24, 19
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 47x24, 21
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 47x24, 23
-
-            Conv2d(256, 256, kernel_size=3, stride=2, padding=1), # 24x 12, 25
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 27
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 29
-
-            Conv2d(256, 512, kernel_size=3, stride=1, padding=1), # 24x 12, 31
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 33
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True), # 24x 12, 35
-
-            Conv2d(512, 256, kernel_size=3, stride=2, padding=1), #12x6, 37
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #12x6, 39
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #12x6, 41
-
-            Conv2d(256, 256, kernel_size=3, stride=(2,1), padding=1), #6x6, 43
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 45
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), # 47
-
-            Conv2d(256, 128, kernel_size=3, stride=1, padding=1), #6x6, 49
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #6x6, 51
-
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1), #6x6, 53
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #3x3, 55
-
-            Conv2d(128, 64, kernel_size=3, stride=2, padding=1), #3x3, 57
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #3x3, 59
-            
-            )
-
+        # --- Audio encoder (as in original implementation) ---
         self.audio_encoder1 = nn.Sequential(
-            Conv2d(1, 32, kernel_size=3, stride=1, padding=1), # 80x16, 1+(3−1)×1=3
-            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True), # 3+(3-1)x1=5
-            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True), # 5+(3-1)x1=7
+            Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
+            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
             
-
-            Conv2d(32, 64, kernel_size=3, stride=(3, 1), padding=1), # 27x16, 11+(3-1)x3=17
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #15+(3-1)x1=19
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), #17+(3-1)x1=21
+            Conv2d(32, 64, kernel_size=3, stride=(3, 1), padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             
-
-            Conv2d(64, 128, kernel_size=3, stride=2, padding=1), # 14x8, 25+(3-1)x2=29
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #29+(3-1)x1=31
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #29+(3-1)x1=33
+            Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
-
-        self.audio_encoder2 = nn.Sequential(
-            Conv2d(128, 128, kernel_size=3, stride=(2,1), padding=1), #7x8, 35+(3-1)x2=41
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #41+(3-1)x1=43
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), #43+(3-1)x1=45
-            
-            Conv2d(128, 256, kernel_size=3, stride=3, padding=1), #3x3, #47+(3-1)x3=51
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True), #51+(3-1)x1=53
-
-            Conv2d(256, 512, kernel_size=3, stride=1, padding=0), #3x3, 53+(3-1)x1=55
-            Conv2d(512, 512, kernel_size=1, stride=1, padding=0, residual=True),) #55+(3-1)x1=57
-
-        #self.face_attn = AttentionBlock(128, reduction=2)
-        self.cross_modal_attention = CrossModalAttention2d(128, reduction=2)
         
+        self.audio_encoder2 = nn.Sequential(
+            Conv2d(128, 128, kernel_size=3, stride=(2, 1), padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            
+            Conv2d(128, 256, kernel_size=3, stride=3, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            
+            Conv2d(256, 512, kernel_size=3, stride=1, padding=0),
+            Conv2d(512, 512, kernel_size=1, stride=1, padding=0, residual=True),
+        )
+        
+        # --- Token projection ---
+        # Both face tokens (from individual frames) and the aggregated audio feature will be 512-d,
+        # so we project them to the transformer’s model dimension (d_model=1024).
+        self.token_proj = nn.Linear(512, 1024)
+        
+        # --- Learnable CLS token ---
+        # This token will be used for the final classification.
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, 1024))
+        
+        # --- Transformer Encoder ---
+        # Note: the transformer expects input shape [seq_len, batch, d_model]
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=1024, nhead=num_heads, dropout=0.2),
-            num_layers=4
+            num_layers=num_encoder_layers
         )
-
+        
         self.relu = nn.LeakyReLU(0.01, inplace=True)
+        # Final classification layer; output dimension (e.g., 2 classes)
+        self.fc3 = nn.Linear(1024, 2)
         
-        
-        self.fc2 = nn.Linear(1152, 512)
-        self.fc3 = nn.Linear(1024, 2) 
-        
-
     def forward(self, face_embedding, audio_embedding):
-
-        face_embedding1 = self.face_encoder1(face_embedding)        
-                
+        B, C, H, W = face_embedding.shape  # Expected: C == 15 (i.e. 5 images x 3 channels)
+        num_frames = 5
+        channels_per_frame = 3
+        
+        # --- Process Face Modality as Individual Tokens ---
+        # Reshape to separate the 5 images: (B, 5, 3, H, W)
+        face_frames = face_embedding.view(B, num_frames, channels_per_frame, H, W)
+        # Merge batch and frame dimensions to process all frames in parallel: (B*5, 3, H, W)
+        face_frames = face_frames.view(B * num_frames, channels_per_frame, H, W)
+        # Process each frame individually
+        face_features = self.face_encoder_individual(face_frames)  # Shape: (B*5, 512)
+        # Reshape back to (B, 5, 512)
+        face_features = face_features.view(B, num_frames, 512)
+        # Normalize each token along the feature dimension
+        face_features = F.normalize(face_features, p=2, dim=2)
+        # Project each face token to the transformer's model dimension (1024)
+        face_tokens = self.token_proj(face_features)  # Shape: (B, 5, 1024)
+        
+        # --- Process Audio Modality ---
         audio_embedding1 = self.audio_encoder1(audio_embedding)
         audio_embedding2 = self.audio_encoder2(audio_embedding1)
-
-        fused = self.cross_modal_attention(face_embedding1, audio_embedding1)
-        face_embedding1 = fused
-        #print('The shapes', fused.shape, face_embedding1.shape, audio_embedding1.shape)
-        
-        face_embedding2 = self.face_encoder2(face_embedding1)
-
-        check_nan(face_embedding2, 'face_emb')
-        check_nan(audio_embedding2, 'audio')
-
-        audio_embedding2 = audio_embedding2.view(audio_embedding2.size(0), -1)
-        face_embedding2 = face_embedding2.view(face_embedding2.size(0), -1)
-        
-        face_embedding2 = self.fc2(face_embedding2)
-
-        # normalise them
+        # Flatten the audio feature map to get a vector per sample.
+        audio_embedding2 = audio_embedding2.view(B, -1)
         audio_embedding2 = F.normalize(audio_embedding2, p=2, dim=1)
-        face_embedding2 = F.normalize(face_embedding2, p=2, dim=1)
-
-        # Concatenate lip frames and audio features
-        combined = torch.cat((face_embedding2, audio_embedding2), dim=1)
+        # Project the aggregated audio feature to 1024.
+        audio_token = self.token_proj(audio_embedding2)  # Shape: (B, 1024)
+        # Add a time dimension (token dimension): (B, 1, 1024)
+        audio_token = audio_token.unsqueeze(1)
         
-        # Make sure combined is 1-dimensional
-        combined = combined.view(combined.size(0), -1)
-
-        # Pass through the Transformer encoder, the input size is 1024
-        transformer_output = self.transformer_encoder(combined)
-        out = self.relu(transformer_output)
+        # --- Form the Combined Token Sequence ---
+        # Prepend a learnable classification token.
+        cls_tokens = self.cls_token.expand(B, 1, 1024)  # (B, 1, 1024)
+        # Concatenate tokens: [CLS] + (5 face tokens) + (1 audio token) => (B, 7, 1024)
+        combined_tokens = torch.cat([cls_tokens, face_tokens, audio_token], dim=1)
+        # Rearrange to match the transformer’s expected input shape: (seq_len, B, d_model)
+        combined_tokens = combined_tokens.transpose(0, 1)  # (7, B, 1024)
+        
+        # --- Transformer Encoding ---
+        transformer_output = self.transformer_encoder(combined_tokens)  # (7, B, 1024)
+        # Use the output corresponding to the CLS token for classification.
+        cls_output = transformer_output[0]  # (B, 1024)
+        out = self.relu(cls_output)
         out = self.fc3(out)
         
-        return out, audio_embedding2, face_embedding2
+        return out, None, None
