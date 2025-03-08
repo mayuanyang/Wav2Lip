@@ -161,27 +161,16 @@ class TransformerSyncnet(nn.Module):
         face_tokens = self.token_proj(face_features)  # Shape: (B, 5, 1024)
         
         # --- Process Audio Modality ---
-        # --- Process Audio Modality ---
-        audio_segments = torch.chunk(audio_embedding, 5, dim=3)  # Each segment: (B, 1, H_audio, W_audio/5)
-        audio_tokens_list = []
-        for seg in audio_segments:
-            # Process each audio segment independently through the same encoder.
-            a2 = self.audio_encoder(seg)
-            # Use adaptive average pooling to obtain a fixed-size vector for each segment.
-            #a2 = F.adaptive_avg_pool2d(a2, (1, 1))
-            a2 = a2.view(B, -1)  # (B, 512)
-            #a2 = F.normalize(a2, p=2, dim=1)
-            token = self.audio_proj(a2)  # Project to (B, 1024)
-            audio_tokens_list.append(token.unsqueeze(1))  # (B, 1, 1024)
-        
-        # Concatenate all audio tokens: resulting shape (B, 5, 1024)
-        audio_tokens = torch.cat(audio_tokens_list, dim=1)
-        
+        a2 = self.audio_encoder(audio_embedding)
+        a2 = a2.view(B, -1)  # (B, 512)
+        audio_token = self.audio_proj(a2)  # Project to (B, 1024)
+        audio_token = audio_token.unsqueeze(1)  # (B, 1, hidden_dim)
+                
         # --- Form the Combined Token Sequence ---
         # Prepend a learnable classification token.
         cls_tokens = self.cls_token.expand(B, 1, 512)  # (B, 1, 1024)
         # Concatenate tokens: [CLS] + (5 face tokens) + (1 audio token) => (B, 7, 1024)
-        combined_tokens = torch.cat([cls_tokens, face_tokens, audio_tokens], dim=1)
+        combined_tokens = torch.cat([cls_tokens, face_tokens, audio_token], dim=1)
         # Rearrange to match the transformer’s expected input shape: (seq_len, B, d_model)
         combined_tokens = combined_tokens.transpose(0, 1)  # (7, B, 1024)
         
