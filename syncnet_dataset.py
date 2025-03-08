@@ -18,7 +18,7 @@ The FPS is set to 25 for video, 5/25 is 0.2, we need to have 0.2 seconds for the
 because the audio mel spectrogram ususlly has 80 frame per seconds, so 16/80 is 0.2 seconds
 """
 syncnet_T = 5
-syncnet_mel_step_size = 16
+syncnet_mel_step_size = 20
 samples = [True, True,True, True,True, False,False, False, False, False]
 
 class Dataset(object):
@@ -218,7 +218,7 @@ class Dataset(object):
 
                 if (mel.shape[0] != syncnet_mel_step_size):
                     should_load_diff_video = True
-                    print("This specific audio is invalid {0}".format(join(vidname, "audio.wav")))
+                    #print("This specific audio is invalid {0}".format(join(vidname, "audio.wav")))
                     continue
 
                 if idx % 1000 == 0:
