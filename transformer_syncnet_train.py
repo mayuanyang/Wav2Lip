@@ -67,7 +67,7 @@ consecutive_threshold_count = 0
 print('use_cuda: {}'.format(use_cuda))
 
 
-cross_entropy_loss = nn.CrossEntropyLoss()
+cross_entropy_loss = nn.BCEWithLogitsLoss()
 
 logloss = nn.BCELoss()
 def cosine_loss(a, v, y):
@@ -127,6 +127,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
             with autocast():
               output, audio_embedding, face_embedding = model(x, mel)
+              y = y.unsqueeze(1).float()
               y = y.to(device)                        
               ce_loss = cross_entropy_loss(output, y)
 
