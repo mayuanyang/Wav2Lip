@@ -291,6 +291,12 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
     # for param_group in optimizer.param_groups:
     #     param_group['lr'] = 0.00002
 
+    # for name, param in model.named_parameters():
+    #   if 'audio_encoder' not in name:
+    #     param.requires_grad = False
+    #   else:
+    #      print('Not freeze', name)
+
     return model
 
 if __name__ == "__main__":
@@ -334,13 +340,20 @@ if __name__ == "__main__":
 
     # Model
     model = TransformerResSyncnet().to(device)
-    print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
+    print('Total trainable params initially {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
+    for name, param in model.named_parameters():
+      if 'audio_model' in name:
+        param.requires_grad = False
+      else:
+         print('Not freeze', name)
     
     optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-5)
 
     if checkpoint_path is not None:
         load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=True)
+
+    print('Total trainable actual params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
     train(device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=checkpoint_dir,

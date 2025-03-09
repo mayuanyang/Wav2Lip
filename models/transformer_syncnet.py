@@ -55,26 +55,30 @@ class TransformerSyncnet(nn.Module):
             Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
             Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True), 
             
-            Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.MaxPool2d(2, 2),
+            Conv2d(32, 64, kernel_size=3, stride=1, padding=1), 
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), 
             
-            Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.MaxPool2d(2, 2),
+            Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             
-            Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
+            nn.MaxPool2d(2, 2),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             
-            Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
+            nn.MaxPool2d(2, 2),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(3),
+            
             
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(3),
+            
             
             Conv2d(256, 256, kernel_size=3, stride=(1,2), padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(3),
+            
             
             Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
@@ -92,18 +96,17 @@ class TransformerSyncnet(nn.Module):
         # --- Audio encoder (as in original implementation) ---
         self.audio_encoder = nn.Sequential(
             Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
-            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool2d(2, 2),
+                        
+            Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool2d(2, 2),
             
-            Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
             
-            Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            nn.MaxPool2d(2, 2),
             
-            Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            
-            Conv2d(256, 256, kernel_size=3, stride=(2,1), padding=1),
+            Conv2d(128, 256, kernel_size=3, stride=(2,1), padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             
             Conv2d(256, 256, kernel_size=3, stride=(2,1), padding=1),
@@ -151,8 +154,7 @@ class TransformerSyncnet(nn.Module):
         # Merge batch and frame dimensions to process all frames in parallel: (B*5, 3, H, W)
         face_frames = face_frames.view(B * num_frames, channels_per_frame, H, W)
         # Process each frame individually
-        face_features = self.face_encoder_individual(face_frames)  # Shape: (B*5, 512)
-        
+        face_features = self.face_encoder_individual(face_frames)  # Shape: (B*5, 512)       
         
         # Reshape back to (B, 5, 512)
         face_features = face_features.view(B, num_frames, 256)
@@ -176,9 +178,9 @@ class TransformerSyncnet(nn.Module):
         
         # --- Transformer Encoding ---
         transformer_output = self.transformer_encoder(combined_tokens)  # (7, B, 1024)
-        # Use the output corresponding to the CLS token for classification.
-        cls_output = transformer_output[0]  # (B, 1024)
-        out = self.relu(cls_output)
+        aggregated_output = transformer_output.mean(dim=0)  # (B, 512)
+        
+        out = self.relu(aggregated_output)
         out = self.fc3(out)
         
         return out, None, None
