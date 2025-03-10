@@ -205,8 +205,9 @@ class TransformerSyncnet(nn.Module):
         
         # --- Transformer Encoding ---
         transformer_output = self.transformer_encoder(combined_tokens)  # (7, B, 512)
-        aggregated_output = transformer_output.mean(dim=0)  # (B, 512)
         
+        aggregated_output = transformer_output[0]
+                        
         out = self.relu(aggregated_output)
         out = self.fc3(out)
         
