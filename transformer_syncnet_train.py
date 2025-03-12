@@ -130,7 +130,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             mel = mel.to(device)
 
             with autocast():
-              output, audio_embedding, face_embedding = model(x, mel)
+              output, audio_embedding, face_embedding = model(x, mel, global_step)
               regression_y = regression_y.unsqueeze(1).float()
               regression_y = regression_y.to(device)
               
