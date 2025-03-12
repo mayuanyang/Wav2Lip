@@ -105,163 +105,163 @@ class Dataset(object):
         """
         should_load_diff_video = False
         while 1:
-                if should_load_diff_video:
-                    idx = random.randint(0, len(self.all_videos) - 1)
-                    should_load_diff_video = False
+            if should_load_diff_video:
+                idx = random.randint(0, len(self.all_videos) - 1)
+                should_load_diff_video = False
 
-                vidname = self.all_videos[idx]
-                img_names = list(glob(join(vidname, '*.jpg')))
-                
-                if len(img_names) <= 3 * syncnet_T:
-                    should_load_diff_video = True
-                    print('The video has not enough frames, {0}'.format(vidname))
-                    continue
-                
-                img_name = random.choice(img_names)
-                correct_window_images = self.get_window(img_name)
-                while correct_window_images is None:
-                  img_name = random.choice(img_names)
-                  correct_window_images = self.get_window(img_name)
+            vidname = self.all_videos[idx]
+            img_names = list(glob(join(vidname, '*.jpg')))
+            
+            if len(img_names) <= 3 * syncnet_T:
+                should_load_diff_video = True
+                print('The video has not enough frames, {0}'.format(vidname))
+                continue
+            
+            img_name = random.choice(img_names)
+            correct_window_images = self.get_window(img_name)
+            while correct_window_images is None:
+              img_name = random.choice(img_names)
+              correct_window_images = self.get_window(img_name)
 
-                chosen_id = self.get_frame_id(img_name)
+            chosen_id = self.get_frame_id(img_name)
 
-                wrong_img_name = random.choice(img_names)          
-                wrong_img_id = self.get_frame_id(wrong_img_name)
-                wrong_window_images = self.get_window(wrong_img_name)
-                
-                """
-                Changed by eddy, the following are the original codes, it uses random to get the wrong_img_name, 
-                this might get an image that very close to the correct image(the next frame) which is a bit hard to learn.
-                Eddy introduced a new algorithm that to get a image a bit futher from the img_name to have enough difference,
-                this might help the model to converge.
-                """
-                attempt = 0
-                while wrong_img_name == img_name or abs(wrong_img_id - chosen_id) < 5 or wrong_window_images is None:
-                      wrong_img_name = random.choice(img_names)
-                      wrong_img_id = self.get_frame_id(wrong_img_name)
-                      wrong_window_images = self.get_window(wrong_img_name)
-                      attempt += 1
-                      if attempt > 5:
-                          should_load_diff_video = True
-                          break
-                
-                if should_load_diff_video:
-                    continue
+            wrong_img_name = random.choice(img_names)          
+            wrong_img_id = self.get_frame_id(wrong_img_name)
+            wrong_window_images = self.get_window(wrong_img_name)
+            
+            """
+            Changed by eddy, the following are the original codes, it uses random to get the wrong_img_name, 
+            this might get an image that very close to the correct image(the next frame) which is a bit hard to learn.
+            Eddy introduced a new algorithm that to get a image a bit futher from the img_name to have enough difference,
+            this might help the model to converge.
+            """
+            attempt = 0
+            while wrong_img_name == img_name or abs(wrong_img_id - chosen_id) < 15 or wrong_window_images is None:
+                  wrong_img_name = random.choice(img_names)
+                  wrong_img_id = self.get_frame_id(wrong_img_name)
+                  wrong_window_images = self.get_window(wrong_img_name)
+                  attempt += 1
+                  if attempt > 5:
+                      should_load_diff_video = True
+                      break
+            
+            if should_load_diff_video:
+                continue
 
-                
-                # We firstly to learn all the positive, once it reach the loss of less than 0.2, we incrementally add some negative samples 10% per step
-                good_or_bad = True
-                good_or_bad = random.choice(samples)
-                
-                alignment_score = self.compute_alignment_score(chosen_id, wrong_img_id, 50)
-                #print('The chosen, wrong and alignment score', chosen_id, wrong_img_id, alignment_score)
+            
+            # We firstly to learn all the positive, once it reach the loss of less than 0.2, we incrementally add some negative samples 10% per step
+            good_or_bad = True
+            good_or_bad = random.choice(samples)
+            
+            alignment_score = self.compute_alignment_score(chosen_id, wrong_img_id, 50)
+            #print('The chosen, wrong and alignment score', chosen_id, wrong_img_id, alignment_score)
 
-                if good_or_bad:
-                    regression_y = 1.0
-                    classification_y = 1
-                    window_fnames = correct_window_images
+            if good_or_bad:
+                regression_y = 1.0
+                classification_y = 1
+                window_fnames = correct_window_images
+            else:
+                regression_y = alignment_score
+                classification_y = 0
+                window_fnames = wrong_window_images
+            
+
+            face_window = []
+
+            all_read = True
+            for fname in window_fnames:
+                if fname in face_image_cache:
+                    img = face_image_cache[fname]
                 else:
-                    regression_y = alignment_score
-                    classification_y = 0
-                    window_fnames = wrong_window_images
+                    img = cv2.imread(fname)
+                    if img is None:
+                        all_read = False
+                        break
+                    try:
+                        img = cv2.resize(img, (hparams.img_size * self.img_size_factor, hparams.img_size * self.img_size_factor))                            
+                        
+                        if len(face_image_cache) < hparams.syncnet_image_cache_size:
+                          face_image_cache[fname] = img  # Cache the resized image
+                        
+                    except Exception as e:
+                        all_read = False
+                        break
                 
+                '''
+                Data augmentation
+                0 means unchange
+                1 for grayscale
+                2 for brightness
+                3 for contrast
+                '''
+                if self.use_augmentation:
+                  option = random.choices([0, 0, 0, 0, 0, 0, 0, 0, 4, 4])[0] 
+                  
+                  if option == 1:
+                      img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                      img = cv2.merge([img_gray, img_gray, img_gray])
+                  elif option == 2:
+                      brightness_factor = np.random.uniform(0.7, 1.3)
+                      img = cv2.convertScaleAbs(img, alpha=brightness_factor, beta=0)
+                  elif option == 3:
+                      contrast_factor = np.random.uniform(0.7, 1.3)
+                      img = cv2.convertScaleAbs(img, alpha=contrast_factor, beta=0)
+                  elif option == 4:
+                      angle = np.random.uniform(-15, 15)  # Random angle between -15 and 15 degrees
 
-                face_window = []
+                      # Get the image dimensions
+                      (h, w) = img.shape[:2]
 
-                all_read = True
-                for fname in window_fnames:
-                    if fname in face_image_cache:
-                        img = face_image_cache[fname]
-                    else:
-                        img = cv2.imread(fname)
-                        if img is None:
-                            all_read = False
-                            break
-                        try:
-                            img = cv2.resize(img, (hparams.img_size * self.img_size_factor, hparams.img_size * self.img_size_factor))                            
-                            
-                            if len(face_image_cache) < hparams.syncnet_image_cache_size:
-                              face_image_cache[fname] = img  # Cache the resized image
-                            
-                        except Exception as e:
-                            all_read = False
-                            break
-                    
-                    '''
-                    Data augmentation
-                    0 means unchange
-                    1 for grayscale
-                    2 for brightness
-                    3 for contrast
-                    '''
-                    if self.use_augmentation:
-                      option = random.choices([0, 0, 0, 0, 0, 0, 0, 0, 4, 4])[0] 
-                      
-                      if option == 1:
-                          img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                          img = cv2.merge([img_gray, img_gray, img_gray])
-                      elif option == 2:
-                          brightness_factor = np.random.uniform(0.7, 1.3)
-                          img = cv2.convertScaleAbs(img, alpha=brightness_factor, beta=0)
-                      elif option == 3:
-                          contrast_factor = np.random.uniform(0.7, 1.3)
-                          img = cv2.convertScaleAbs(img, alpha=contrast_factor, beta=0)
-                      elif option == 4:
-                          angle = np.random.uniform(-15, 15)  # Random angle between -15 and 15 degrees
+                      # Calculate the center of the image
+                      center = (w // 2, h // 2)
 
-                          # Get the image dimensions
-                          (h, w) = img.shape[:2]
+                      # Get the rotation matrix
+                      rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
 
-                          # Calculate the center of the image
-                          center = (w // 2, h // 2)
+                      # Perform the rotation
+                      img = cv2.warpAffine(img, rotation_matrix, (w, h))
 
-                          # Get the rotation matrix
-                          rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+                face_window.append(img)
 
-                          # Perform the rotation
-                          img = cv2.warpAffine(img, rotation_matrix, (w, h))
+            if not all_read: continue
 
-                    face_window.append(img)
+            try:
+                wavpath = join(vidname, "audio.wav")
 
-                if not all_read: continue
-
-                try:
-                    wavpath = join(vidname, "audio.wav")
-
-                    if wavpath in orig_mel_cache:
-                        orig_mel = orig_mel_cache[wavpath]
-                        #print('The audio cache hit ', wavpath)
-                    else:
-                        wav = audio.load_wav(wavpath, hparams.sample_rate)
-                        orig_mel = audio.melspectrogram(wav).T
-                        if len(orig_mel_cache) < hparams.syncnet_audio_cache_size:
-                          orig_mel_cache[wavpath] = orig_mel
-                    
-                except Exception as e:
-                    should_load_diff_video = True
-                    print('The audio is invalid, file name {0}, will retry with a differnt video'.format(join(vidname, "audio.wav")))
-                    continue
+                if wavpath in orig_mel_cache:
+                    orig_mel = orig_mel_cache[wavpath]
+                    #print('The audio cache hit ', wavpath)
+                else:
+                    wav = audio.load_wav(wavpath, hparams.sample_rate)
+                    orig_mel = audio.melspectrogram(wav).T
+                    if len(orig_mel_cache) < hparams.syncnet_audio_cache_size:
+                      orig_mel_cache[wavpath] = orig_mel
                 
-                mel = self.crop_audio_window(orig_mel.copy(), img_name)
+            except Exception as e:
+                should_load_diff_video = True
+                print('The audio is invalid, file name {0}, will retry with a differnt video'.format(join(vidname, "audio.wav")))
+                continue
+            
+            mel = self.crop_audio_window(orig_mel.copy(), img_name)
 
-                if (mel.shape[0] != syncnet_mel_step_size):
-                    should_load_diff_video = True
-                    #print("This specific audio is invalid {0}".format(join(vidname, "audio.wav")))
-                    continue
+            if (mel.shape[0] != syncnet_mel_step_size):
+                should_load_diff_video = True
+                #print("This specific audio is invalid {0}".format(join(vidname, "audio.wav")))
+                continue
 
-                if idx % 1000 == 0:
-                  save_sample_images(np.concatenate(face_window, axis=2), idx, mel)
+            if idx % 1000 == 0:
+              save_sample_images(np.concatenate(face_window, axis=2), idx, mel)
 
-                # H x W x 3 * T
-                x = np.concatenate(face_window, axis=2) / 255.
-                x = x.transpose(2, 0, 1)
-                x = x[:, x.shape[1]//2:]
+            # H x W x 3 * T
+            x = np.concatenate(face_window, axis=2) / 255.
+            x = x.transpose(2, 0, 1)
+            x = x[:, x.shape[1]//2:]
 
-                # Each face_window contains 5 images and each image has 3 channels, concatenate them through the channel channel yield a 15 channels image, the x shape is 15x96x192
-                x = torch.FloatTensor(x)
-                mel = torch.FloatTensor(mel.T).unsqueeze(0)
+            # Each face_window contains 5 images and each image has 3 channels, concatenate them through the channel channel yield a 15 channels image, the x shape is 15x96x192
+            x = torch.FloatTensor(x)
+            mel = torch.FloatTensor(mel.T).unsqueeze(0)
 
-                return x, mel, regression_y, classification_y
+            return x, mel, regression_y, classification_y
 
 def save_sample_images(x, idx, orig_mel):
     
