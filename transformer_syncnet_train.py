@@ -89,7 +89,7 @@ def cosine_loss(a, v, y):
 # Register hooks to print gradient norms
 def print_grad_norm(module, grad_input, grad_output):
     for i, grad in enumerate(grad_output):
-        if grad is not None and global_step % 500 == 0:
+        if grad is not None and global_step % 100 == 0:
             print(f'{module.__class__.__name__} - grad_output[{i}] norm: {grad.norm().item()}')
 
 # end added by eddy
@@ -108,7 +108,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     
     if should_print_grad_norm:
       for name, module in model.named_modules():
-        if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear, nn.TransformerEncoderLayer)):
+        if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear, nn.Conv2d, nn.TransformerEncoderLayer)):
             module.register_backward_hook(print_grad_norm)
   
     while global_epoch < nepochs:
@@ -116,6 +116,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         #   print("The learning rates are: ", param_group['lr'])
         
         avg_regression_loss = 0.
+        avg_classification_loss = 0.
         
         prog_bar = tqdm(enumerate(train_data_loader))
         print_current_lr(optimizer)
@@ -142,7 +143,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               pred = torch.sigmoid(output)
               loss = regression_loss(pred, regression_y)
 
-            loss.backward()
+            ce_loss.backward()
             optimizer.step()
             scheduler.step(loss)
 

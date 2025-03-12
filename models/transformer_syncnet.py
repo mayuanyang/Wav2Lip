@@ -73,18 +73,18 @@ class TransformerSyncnet(nn.Module):
         self.face_encoder1 = nn.Sequential(
             # Input: (B, 15, H, W)  where 15 = 5 images x 3 channels
             Conv2d(15, 64, kernel_size=3, stride=2, padding=1, leaking=0.1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, leaking=0.1), 
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True), 
             Conv2d(64, 128, kernel_size=3, stride=1, padding=1, leaking=0.1), 
         )
         
         self.face_encoder2 = nn.Sequential(
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1),  # Downsample
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.face_encoder3 = nn.Sequential(
             Conv2d(256, 512, kernel_size=3, stride=(1,2), padding=1),  # Downsample width
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.face_encoder4 = nn.Sequential(
@@ -108,31 +108,31 @@ class TransformerSyncnet(nn.Module):
         self.audio_encoder1 = nn.Sequential(
             # Example input shape: (B, 1, H_audio, W_audio)
             Conv2d(1, 32, kernel_size=3, stride=1, padding=1, leaking=0.05),
-            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, leaking=0.05),
-            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, leaking=0.05),
+            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, leaking=0.05, residual=True),
+            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, leaking=0.05, residual=True),
         )
 
         self.audio_encoder2 = nn.Sequential(
             Conv2d(32, 64, kernel_size=3, stride=(2,1), padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.audio_encoder3 = nn.Sequential(
             Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.audio_encoder4 = nn.Sequential(
             Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.audio_encoder5 = nn.Sequential(   
             Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.audio_skip1 = nn.Sequential(    
@@ -142,7 +142,7 @@ class TransformerSyncnet(nn.Module):
         
         self.audio_skip2 = nn.Sequential(    
             Conv2d(128, 256, kernel_size=3, stride=1, padding=1, leaking=0.05),  # Downsample
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, leaking=0.05),  # Downsample
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, leaking=0.05, residual=True),  # Downsample
         )
         
         self.pos_encoder = PositionalEncoding(embed_dim)
@@ -159,6 +159,8 @@ class TransformerSyncnet(nn.Module):
         # We will first flatten the spatial dimensions into a token sequence.
         encoder_layer = nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads)
         self.cross_modal_transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
+        
+        self.relu = nn.LeakyReLU(0.01, inplace=False)
         
         # Final classification head.
         # We pool tokens for each modality separately, then concatenate their global features.
@@ -229,6 +231,7 @@ class TransformerSyncnet(nn.Module):
         audio_tokens = self.audio_layer_norm(audio_tokens)
         
         # --- Apply positional encoding separately to each modality ---
+        print('The shape', face_tokens.shape, audio_tokens.shape)
         face_tokens = self.pos_encoder(face_tokens)
         audio_tokens = self.pos_encoder(audio_tokens)
         
@@ -238,7 +241,7 @@ class TransformerSyncnet(nn.Module):
         
         # --- Apply cross-modal Transformer encoder ---
         combined_tokens = self.cross_modal_transformer(combined_tokens)
-
+        combined_tokens = self.relu(combined_tokens)
         
         # --- Separate tokens back by modality ---
         num_tokens = H * W
