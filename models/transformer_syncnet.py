@@ -5,6 +5,7 @@ from .conv import Conv2d
 from .self_attention import AttentionBlock
 from .cross_modal_attention import CrossModalAttention2d
 import torch.nn.init as init
+import numpy as np
 
 def check_nan(tensor, name):
     if torch.isnan(tensor).any():
@@ -49,6 +50,19 @@ class SpatialAttention(nn.Module):
         out = x + self.alpha * attn
         return out
 
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=5000):
+        super().__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        return x + self.pe[:x.size(0), :].unsqueeze(1)
+      
 
 class TransformerSyncnet(nn.Module):
     def __init__(self, num_heads=8, num_encoder_layers=4, embed_dim=512):
@@ -58,59 +72,80 @@ class TransformerSyncnet(nn.Module):
         # --- Face encoder for individual frames ---
         self.face_encoder1 = nn.Sequential(
             # Input: (B, 15, H, W)  where 15 = 5 images x 3 channels
-            Conv2d(15, 64, kernel_size=3, stride=1, padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True), 
-            
-            Conv2d(64, 128, kernel_size=3, stride=2, padding=1),  # Downsample
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True), 
+            Conv2d(15, 64, kernel_size=3, stride=2, padding=1, leaking=0.1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, leaking=0.1), 
+            Conv2d(64, 128, kernel_size=3, stride=1, padding=1, leaking=0.1), 
         )
         
-        self.face_encoder2 = nn.Sequential(    
+        self.face_encoder2 = nn.Sequential(
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1),  # Downsample
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            
-            Conv2d(256, 512, kernel_size=3, stride=(1,2), padding=1),  # Downsample width
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
         )
         
         self.face_encoder3 = nn.Sequential(
+            Conv2d(256, 512, kernel_size=3, stride=(1,2), padding=1),  # Downsample width
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+        )
+        
+        self.face_encoder4 = nn.Sequential(
             Conv2d(512, 512, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.face_skip1 = nn.Sequential(    
-            Conv2d(15, 128, kernel_size=3, stride=2, padding=1),  # Downsample
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=2, padding=1, leaking=0.05),  # Downsample
+            Conv2d(128, 256, kernel_size=3, stride=1, padding=1, leaking=0.05),
         )
         
         self.face_skip2 = nn.Sequential(    
-            Conv2d(15, 512, kernel_size=3, stride=2, padding=1),  # Downsample
-            Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=(1,2), padding=1),
-        )
-        
-        # --- Audio encoder ---
-        self.audio_encoder = nn.Sequential(
-            # Example input shape: (B, 1, H_audio, W_audio)
-            Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
-            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
-            
-            Conv2d(32, 64, kernel_size=3, stride=(2,1), padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-            
-            Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            
-            Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=(1,2), padding=1),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            
             Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
+        
+        # --- Audio encoder ---
+        self.audio_encoder1 = nn.Sequential(
+            # Example input shape: (B, 1, H_audio, W_audio)
+            Conv2d(1, 32, kernel_size=3, stride=1, padding=1, leaking=0.05),
+            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, leaking=0.05),
+            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, leaking=0.05),
+        )
+
+        self.audio_encoder2 = nn.Sequential(
+            Conv2d(32, 64, kernel_size=3, stride=(2,1), padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+        )
+        
+        self.audio_encoder3 = nn.Sequential(
+            Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+        )
+        
+        self.audio_encoder4 = nn.Sequential(
+            Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+        )
+        
+        self.audio_encoder5 = nn.Sequential(   
+            Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+        )
+        
+        self.audio_skip1 = nn.Sequential(    
+            Conv2d(1, 32, kernel_size=3, stride=1, padding=1, leaking=0.05),  # Downsample
+            Conv2d(32, 128, kernel_size=3, stride=(2,1), padding=1, leaking=0.05),
+        )
+        
+        self.audio_skip2 = nn.Sequential(    
+            Conv2d(128, 256, kernel_size=3, stride=1, padding=1, leaking=0.05),  # Downsample
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, leaking=0.05),  # Downsample
+        )
+        
+        self.pos_encoder = PositionalEncoding(embed_dim)
         
         # Projection layers: ensure both modalities have the same embedding dimension.
         # Here, both face and audio encoders output 512 channels.
@@ -142,19 +177,41 @@ class TransformerSyncnet(nn.Module):
         # --- Process face modality ---
         
         face1 = self.face_encoder1(face_embedding)
-        face_skip1 = self.face_skip1(face_embedding)
-        face1 = face1 + face_skip1
+        face_skip1 = self.face_skip1(face1)
+        
+        face_skip2 = self.face_skip2(face_skip1)
         
         face2 = self.face_encoder2(face1)
-        face_skip2 = self.face_skip2(face_embedding)
-        face2 = face2 + face_skip2
-        
+        face2 = face2 + face_skip1
+                        
         face3 = self.face_encoder3(face2)
+
+        face3 = face3 + face_skip2
         
-        face_features = face3  # (B, 512, H_f, W_f)
+        face4 = self.face_encoder4(face3)
+        
+        face_features = face4  # (B, 512, H_f, W_f)
         
         # --- Process audio modality ---
-        audio_features = self.audio_encoder(audio_embedding)  # (B, 512, H_a, W_a)
+        audio_features1 = self.audio_encoder1(audio_embedding)  # (B, 512, H_a, W_a)
+        
+        audio_skip1 = self.audio_skip1(audio_embedding)
+        audio_skip2 = self.audio_skip2(audio_skip1)
+        
+        audio_features2 = self.audio_encoder2(audio_features1)
+        
+        audio_features3 = self.audio_encoder3(audio_features2)
+
+        audio_features3 = audio_skip1 + audio_features3
+        
+        audio_features4 = self.audio_encoder4(audio_features3)
+        audio_features4 = audio_skip2 + audio_features4
+        
+        audio_features5 = self.audio_encoder5(audio_features4)
+        
+        audio_features = audio_features5
+
+        
         # Interpolate audio features to match face feature spatial dimensions:
         B, _, H, W = face_features.shape
         audio_features = F.interpolate(audio_features, size=(H, W), mode='bilinear', align_corners=False)
@@ -170,6 +227,10 @@ class TransformerSyncnet(nn.Module):
 
         face_tokens = self.face_layer_norm(face_tokens)
         audio_tokens = self.audio_layer_norm(audio_tokens)
+        
+        # --- Apply positional encoding separately to each modality ---
+        face_tokens = self.pos_encoder(face_tokens)
+        audio_tokens = self.pos_encoder(audio_tokens)
         
         # --- Concatenate the token sequences along the token dimension ---
         # Combined tokens shape: (2 * num_tokens, B, embed_dim)
