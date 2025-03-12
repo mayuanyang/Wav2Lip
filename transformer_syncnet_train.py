@@ -99,7 +99,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=None, checkpoint_interval=None, nepochs=None, should_print_grad_norm=False):
 
     
-    global global_step, global_epoch, consecutive_threshold_count, current_training_loss
+    global global_step, global_epoch, consecutive_threshold_count, current_training_regression_loss, current_training_classification_loss
     
     patience = 10000
 
@@ -115,11 +115,11 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         # for param_group in optimizer.param_groups:
         #   print("The learning rates are: ", param_group['lr'])
         
-        avg_ce_loss = 0.
+        avg_regression_loss = 0.
         
         prog_bar = tqdm(enumerate(train_data_loader))
         print_current_lr(optimizer)
-        for step, (x, mel, y) in prog_bar:
+        for step, (x, mel, regression_y, classification_y) in prog_bar:
                         
             model.train()
             optimizer.zero_grad()
@@ -130,12 +130,17 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
             with autocast():
               output, audio_embedding, face_embedding = model(x, mel)
-              y = y.unsqueeze(1).float()
-              y = y.to(device)                        
-              #ce_loss = cross_entropy_loss(output, y)
+              regression_y = regression_y.unsqueeze(1).float()
+              regression_y = regression_y.to(device)
+              
+              classification_y = classification_y.unsqueeze(1).float()
+              classification_y = classification_y.to(device)
+              
+              ce_loss = cross_entropy_loss(output, classification_y)
+              
               # For regression, we want predictions in the [0,1] range.
               pred = torch.sigmoid(output)
-              loss = regression_loss(pred, y)
+              loss = regression_loss(pred, regression_y)
 
             loss.backward()
             optimizer.step()
@@ -145,7 +150,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
             global_step += 1
-            avg_ce_loss += loss.item()
+            avg_regression_loss += loss.item()
+            avg_classification_loss += ce_loss.item()
 
             if global_step == 1 or global_step % checkpoint_interval == 0:
                 save_checkpoint(
@@ -155,10 +161,12 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 with torch.no_grad():
                     eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler)
                 
-            current_training_loss = avg_ce_loss / (step + 1)
+            current_training_regression_loss = avg_regression_loss / (step + 1)
+            current_training_classification_loss = avg_classification_loss / (step + 1)
             
-            prog_bar.set_description('Global Step: {0}, Epoch: {1}, CE Loss: {2}'.format(global_step, global_epoch, current_training_loss))
-            metrics = {"train/ce_loss": current_training_loss, 
+            prog_bar.set_description('Global Step: {0}, Epoch: {1}, Regression Loss: {2}, Classification Loss: {3}'.format(global_step, global_epoch, current_training_regression_loss, current_training_classification_loss))
+            metrics = {"train/regression_loss": current_training_regression_loss, 
+                       "train/classification_loss": current_training_classification_loss, 
                        "train/step": global_step, 
                        "train/epoch": global_epoch}
             

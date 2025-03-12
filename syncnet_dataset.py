@@ -157,10 +157,12 @@ class Dataset(object):
                 #print('The chosen, wrong and alignment score', chosen_id, wrong_img_id, alignment_score)
 
                 if good_or_bad:
-                    y = 1.0
+                    regression_y = 1.0
+                    classification_y = 1
                     window_fnames = correct_window_images
                 else:
-                    y = alignment_score
+                    regression_y = alignment_score
+                    classification_y = 0
                     window_fnames = wrong_window_images
                 
 
@@ -259,7 +261,7 @@ class Dataset(object):
                 x = torch.FloatTensor(x)
                 mel = torch.FloatTensor(mel.T).unsqueeze(0)
 
-                return x, mel, y
+                return x, mel, regression_y, classification_y
 
 def save_sample_images(x, idx, orig_mel):
     
