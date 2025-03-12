@@ -71,6 +71,30 @@ class Dataset(object):
     def __len__(self):
         return len(self.all_videos)
 
+    def compute_alignment_score(self, chosen_id, wrong_img_id, max_difference):
+        """
+        Compute an alignment score based on the difference between two frame IDs.
+        A perfect alignment (difference = 0) yields a score of 1.
+        If the difference equals or exceeds max_difference, the score is 0.
+        
+        Args:
+            chosen_id (int or float): Frame ID of the correct image.
+            wrong_img_id (int or float): Frame ID of the misaligned image.
+            max_difference (int or float): The maximum expected difference between IDs.
+            
+        Returns:
+            score (float): A value between 0 and 1, where 1 means perfectly aligned.
+        """
+        # Compute the absolute difference.
+        d = abs(chosen_id - wrong_img_id)
+        
+        # Normalize so that a difference of 0 yields 1 and a difference of max_difference yields 0.
+        normalized = 1 - (d / max_difference)
+        
+        # Clamp the normalized score to be within [0, 1]
+        score = max(0.0, min(1.0, normalized))
+        return score
+
     def __getitem__(self, idx):
         """
         Randomly select a video and corresponding images.
@@ -113,7 +137,6 @@ class Dataset(object):
                 """
                 attempt = 0
                 while wrong_img_name == img_name or abs(wrong_img_id - chosen_id) < 5 or wrong_window_images is None:
-                      #print('The selected wrong image {0} is not far engough from {1}, diff {2}, window is None {3}'.format(wrong_img_id, chosen_id, abs(wrong_img_id - chosen_id), wrong_window_images is None))
                       wrong_img_name = random.choice(img_names)
                       wrong_img_id = self.get_frame_id(wrong_img_name)
                       wrong_window_images = self.get_window(wrong_img_name)
@@ -129,15 +152,18 @@ class Dataset(object):
                 # We firstly to learn all the positive, once it reach the loss of less than 0.2, we incrementally add some negative samples 10% per step
                 good_or_bad = True
                 good_or_bad = random.choice(samples)
+                
+                alignment_score = self.compute_alignment_score(chosen_id, wrong_img_id, 50)
+                #print('The chosen, wrong and alignment score', chosen_id, wrong_img_id, alignment_score)
 
                 if good_or_bad:
-                    y = 1
+                    y = 1.0
                     window_fnames = correct_window_images
                 else:
-                    y = 0
+                    y = alignment_score
                     window_fnames = wrong_window_images
                 
-                
+
                 face_window = []
 
                 all_read = True

@@ -69,6 +69,9 @@ print('use_cuda: {}'.format(use_cuda))
 
 cross_entropy_loss = nn.BCEWithLogitsLoss()
 
+# Use MSELoss for regression. Alternatively, you could try SmoothL1Loss.
+regression_loss = nn.MSELoss()
+
 logloss = nn.BCELoss()
 def cosine_loss(a, v, y):
     d = nn.functional.cosine_similarity(a, v)
@@ -129,17 +132,20 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               output, audio_embedding, face_embedding = model(x, mel)
               y = y.unsqueeze(1).float()
               y = y.to(device)                        
-              ce_loss = cross_entropy_loss(output, y)
+              #ce_loss = cross_entropy_loss(output, y)
+              # For regression, we want predictions in the [0,1] range.
+              pred = torch.sigmoid(output)
+              loss = regression_loss(pred, y)
 
-            ce_loss.backward()
+            loss.backward()
             optimizer.step()
-            scheduler.step(ce_loss)
+            scheduler.step(loss)
 
             # **Apply Gradient Clipping Here**
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
             global_step += 1
-            avg_ce_loss += ce_loss.item()
+            avg_ce_loss += loss.item()
 
             if global_step == 1 or global_step % checkpoint_interval == 0:
                 save_checkpoint(
