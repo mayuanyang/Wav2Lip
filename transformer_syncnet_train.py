@@ -18,7 +18,8 @@ import os, argparse
 from hparams import hparams
 from models.conv import Conv2d, Conv2dTranspose
 from syncnet_dataset import Dataset, samples
-from torch.cuda.amp import GradScaler, autocast
+from torch.cuda.amp import GradScaler
+from torch.amp import autocast
 
 import wandb
 
@@ -129,7 +130,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             x = x.to(device)
             mel = mel.to(device)
 
-            with autocast():
+            with autocast('cuda'):
               output, audio_embedding, face_embedding = model(x, mel, global_step)
               regression_y = regression_y.unsqueeze(1).float()
               regression_y = regression_y.to(device)

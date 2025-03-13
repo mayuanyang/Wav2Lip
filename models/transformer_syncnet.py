@@ -110,6 +110,11 @@ class TransformerSyncnet(nn.Module):
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
+        self.face_skip3 = nn.Sequential(    
+            Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+        
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
             # Example input shape: (B, 1, H_audio, W_audio)
@@ -151,6 +156,7 @@ class TransformerSyncnet(nn.Module):
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1, leaking=0.05),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, leaking=0.05, residual=True),  # Downsample
         )
+        
         
         self.pos_encoder = PositionalEncoding(embed_dim)
         
@@ -214,38 +220,40 @@ class TransformerSyncnet(nn.Module):
         
         face1 = self.face_encoder1(face_embedding)
         if step % 1000 == 0:
-          self.save_sample_images(face1, 'face1')
+          self.save_sample_images(face1, 'face1', step)
         
         face_skip1 = self.face_skip1(face1)
         
         face_skip2 = self.face_skip2(face_skip1)
         
+        face_skip3 = self.face_skip3(face_skip2)
+        
         face2 = self.face_encoder2(face1)
         if step % 1000 == 0:
-          self.save_sample_images(face2, 'face2')
+          self.save_sample_images(face2, 'face2', step)
                 
         
         face2 = face2 + face_skip1
                         
         face3 = self.face_encoder3(face2)
         if step % 1000 == 0:
-          self.save_sample_images(face3, 'face3')
+          self.save_sample_images(face3, 'face3', step)
 
         face3 = face3 + face_skip2
         
         face4 = self.face_encoder4(face3)
         
         if step % 1000 == 0:
-          self.save_sample_images(face4, 'face4')
+          self.save_sample_images(face4, 'face4', step)
         
-        face_features = face4  # (B, 512, H_f, W_f)
+        face_features = face4 + face_skip3  # (B, 512, H_f, W_f)
         
         
         
         # --- Process audio modality ---
         audio_features1 = self.audio_encoder1(audio_embedding)  # (B, 512, H_a, W_a)
         if step % 1000 == 0:
-          self.save_sample_images(audio_features1, 'audio1')
+          self.save_sample_images(audio_features1, 'audio1', step)
         
         audio_skip1 = self.audio_skip1(audio_embedding)
         audio_skip2 = self.audio_skip2(audio_skip1)
@@ -272,8 +280,8 @@ class TransformerSyncnet(nn.Module):
         audio_features = self.pad_to_shape(audio_features, target_shape)
         
         if step % 1000 == 0:
-          self.save_sample_images(face_features, 'face_final')
-          self.save_sample_images(audio_features, 'audio_final')
+          self.save_sample_images(face_features, 'face_final', step)
+          self.save_sample_images(audio_features, 'audio_final', step)
         
         B, _, H, W = face_features.shape
                 
@@ -319,10 +327,14 @@ class TransformerSyncnet(nn.Module):
         
         return logits, None, None
 
-    def save_sample_images(self, x, layer):
+    def save_sample_images(self, x, layer, step):
         
         B, C, H, W = x.shape
         for b in range(B):
+          if b > 10:
+            break
+
+
           # Extract the b-th sample: shape (256, H, W)
           sample = x[b]
           # Convert to numpy and rearrange to shape (H, W, 256)
@@ -347,13 +359,16 @@ class TransformerSyncnet(nn.Module):
           image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
           
           # Save the image
-          filename = os.path.join("", f"{layer}_sample_{b}_combined.png")
+          filename = os.path.join("", f"{layer}_{step}_sample_{b}_combined.png")
           cv2.imwrite(filename, image_bgr)
         
         
         grid_rows, grid_cols = 16, 16  # 16x16 = 256 channels
 
         for b in range(B):
+            if b > 10:
+              break
+
             # Create an empty grid image (grayscale)
             grid_img = np.zeros((grid_rows * H, grid_cols * W), dtype=np.uint8)
             for c in range(C):
