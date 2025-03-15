@@ -141,92 +141,61 @@ class TransformerSyncnet(nn.Module):
         self.face_encoder1 = nn.Sequential(
             # Input: (B, 15, H, W)  where 15 = 5 images x 3 channels
             Conv2d(15, 64, kernel_size=3, stride=2, padding=1, leaking=0.1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True), 
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True), 
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True, residual_weight=0.5), 
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True, residual_weight=0.5), 
             #MouthAttention(128),
             #SpatialAttention()
         )
         
         self.face_encoder2 = nn.Sequential(
             Conv2d(64, 128, kernel_size=3, stride=2, padding=1),  # Downsample
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True, residual_weight=0.5),
             #MouthAttention(256),
             #SpatialAttention()
         )
         
         self.face_encoder3 = nn.Sequential(
             Conv2d(128, 128, kernel_size=3, stride=2, padding=1),  # Downsample width
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True, residual_weight=0.5),
             #SpatialAttention()
         )
         
         self.face_encoder4 = nn.Sequential(
             Conv2d(128, 128, kernel_size=3, stride=2, padding=1),  # Downsample
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True, residual_weight=0.5),
         )
-        
-        self.face_skip1 = nn.Sequential(    
-            Conv2d(128, 256, kernel_size=3, stride=2, padding=1, leaking=0.05),  # Downsample
-        )
-        
-        self.face_skip2 = nn.Sequential(    
-            Conv2d(256, 512, kernel_size=3, stride=2, padding=1),  # Downsample
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-        )
-        
-        self.face_skip3 = nn.Sequential(    
-            Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-        )
-        
+                
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
             # Example input shape: (B, 1, H_audio, W_audio)
             Conv2d(1, 32, kernel_size=3, stride=1, padding=1, leaking=0.05),
-            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, leaking=0.05, residual=True),
+            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, leaking=0.05, residual=True, residual_weight=0.5),
             
         )
 
         self.audio_encoder2 = nn.Sequential(
-            Conv2d(32, 64, kernel_size=3, stride=(2,1), padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(32, 64, kernel_size=3, stride=(2,1), padding=1, leaking=0.05),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05, residual_weight=0.5),
         )
         
         self.audio_encoder3 = nn.Sequential(
-            Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(64, 128, kernel_size=3, stride=2, padding=1, leaking=0.05),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05, residual_weight=0.5),
         )
-        
         
         self.pos_encoder = PositionalEncoding2D(128, 20, 24)
-        
-        # Projection layers: ensure both modalities have the same embedding dimension.
-        # Here, both face and audio encoders output 512 channels.
-        self.face_proj = nn.Conv2d(128, embed_dim, kernel_size=1)
-        self.audio_proj = nn.Conv2d(128, embed_dim, kernel_size=1)
-
-        self.face_layer_norm = nn.LayerNorm(embed_dim)
-        self.audio_layer_norm = nn.LayerNorm(embed_dim)
-        
-        self.cross_attn = CrossModalAttention2d(128)
-        self.fuse = nn.Sequential(
-            Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
-        )
                 
+        self.cross_attn = CrossModalAttention2d(128, reduction=16)
+        self.fuse = nn.Conv2d(128, 128, kernel_size=7, stride=4, padding=2)
         
-        # Cross-modal Transformer encoder.
-        # We will first flatten the spatial dimensions into a token sequence.
-        encoder_layer = nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads)
-        self.cross_modal_transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
-        
+                
         self.relu = nn.LeakyReLU(0.01, inplace=False)
         
         # Final classification head.
         # We pool tokens for each modality separately, then concatenate their global features.
         self.classifier = nn.Sequential(
-            nn.Linear(1152, 64),
+            nn.Linear(3840, 1024),
+            nn.Linear(1024, 64),
             nn.LeakyReLU(0.01, inplace=False),
             nn.Linear(64, 1)  # binary classification output
         )
@@ -270,12 +239,6 @@ class TransformerSyncnet(nn.Module):
         if step % 5000 == 0:
           self.save_sample_images(face1, 'face1', step)
         
-        # face_skip1 = self.face_skip1(face1)
-        
-        # face_skip2 = self.face_skip2(face_skip1)
-        
-        # face_skip3 = self.face_skip3(face_skip2)
-        
         face2 = self.face_encoder2(face1)
         if step % 5000 == 0:
           self.save_sample_images(face2, 'face2', step)
@@ -308,16 +271,11 @@ class TransformerSyncnet(nn.Module):
 
         audio_features = audio_features3
 
-               
 
         # torch.Size([2, 512, 12, 24]) torch.Size([2, 512, 20, 8])
         target_shape = (20, 24)  # (20, 24) in this case
         face_features = self.pad_to_shape(face_features, target_shape)
         audio_features = self.pad_to_shape(audio_features, target_shape)
-        
-        
-        
-        #print('The face and audio shape', face_features.shape, audio_features.shape)
         
         # --- Apply positional encoding separately to each modality ---
         
@@ -338,55 +296,9 @@ class TransformerSyncnet(nn.Module):
         result = self.classifier(out_proj)
         
         
-        if step % 1000 == 0:
+        if step % 5000 == 0:
           self.save_sample_images(face_features, 'face_final', step)
           self.save_sample_images(audio_features, 'audio_final', step)
-        
-        
-        
-        
-                
-        # # --- Project both modalities to the common embedding dimension ---
-        # face_proj = self.face_proj(face_features)   # (B, embed_dim, H, W)
-        # audio_proj = self.audio_proj(audio_features)  # (B, embed_dim, H, W)
-        
-        # # --- Flatten spatial dimensions into tokens ---
-        # # Resulting shape: (num_tokens, B, embed_dim) where num_tokens = H * W.
-        # face_tokens = face_proj.view(B, -1, H * W).permute(2, 0, 1)
-        # audio_tokens = audio_proj.view(B, -1, H * W).permute(2, 0, 1)
-
-        # face_tokens = self.face_layer_norm(face_tokens)
-        # audio_tokens = self.audio_layer_norm(audio_tokens)
-        
-        
-        # # --- Concatenate the token sequences along the token dimension ---
-        # # Combined tokens shape: (2 * num_tokens, B, embed_dim)
-        # combined_tokens = torch.cat([face_tokens, audio_tokens], dim=0)
-        
-        
-        
-        # # --- Apply cross-modal Transformer encoder ---
-        # combined_tokens = self.cross_modal_transformer(combined_tokens)
-        # combined_tokens = self.relu(combined_tokens)
-        
-        # # --- Separate tokens back by modality ---
-        # num_tokens = H * W
-        # face_tokens_out = combined_tokens[:num_tokens, :, :]  # (num_tokens, B, embed_dim)
-        # audio_tokens_out = combined_tokens[num_tokens:, :, :]   # (num_tokens, B, embed_dim)
-        
-        # # --- Global average pooling for each modality ---
-        # #face_global = face_tokens_out.max(dim=0)[0]   # (B, embed_dim)
-        # #audio_global = audio_tokens_out.max(dim=0)[0] # (B, embed_dim)
-        
-        # face_global = torch.cat([face_tokens_out.mean(dim=0), face_tokens_out.max(dim=0)[0]], dim=1)
-        # audio_global = torch.cat([audio_tokens_out.mean(dim=0), audio_tokens_out.max(dim=0)[0]], dim=1)
-
-        
-        # # --- Fuse modalities ---
-        # fused_features = torch.cat([face_global, audio_global], dim=1)  # (B, 2*embed_dim)
-        
-        # # --- Classification head ---
-        # logits = self.classifier(fused_features)  # (B, 1)
         
         return result, None, None
 
