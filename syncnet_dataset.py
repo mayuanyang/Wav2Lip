@@ -20,6 +20,7 @@ because the audio mel spectrogram ususlly has 80 frame per seconds, so 16/80 is 
 syncnet_T = 5
 syncnet_mel_step_size = 16
 samples = [True, True,True, True,True, False,False, False, False, False]
+negative_data_mode = "SIMPLE" # SIMPLE, MEDIUM, HARD
 
 class Dataset(object):
     
@@ -148,12 +149,13 @@ class Dataset(object):
             if should_load_diff_video:
                 continue
 
+            alignment_score = self.compute_alignment_score(chosen_id, wrong_img_id, 50)
             
             # We firstly to learn all the positive, once it reach the loss of less than 0.2, we incrementally add some negative samples 10% per step
             good_or_bad = True
             good_or_bad = random.choice(samples)
             
-            alignment_score = self.compute_alignment_score(chosen_id, wrong_img_id, 50)
+            
             #print('The chosen, wrong and alignment score', chosen_id, wrong_img_id, alignment_score)
 
             if good_or_bad:
@@ -163,8 +165,19 @@ class Dataset(object):
             else:
                 regression_y = alignment_score
                 classification_y = 0
-                window_fnames = wrong_window_images
-            
+                
+                if negative_data_mode == "SIMPLE":
+                  window_fnames = correct_window_images[::-1] # reverse it
+                elif negative_data_mode == "MEDIUM":
+                  shuffled_list = correct_window_images.copy()[:]
+                  while True:
+                      random.shuffle(shuffled_list)
+                      if shuffled_list != correct_window_images:
+                          break
+                  window_fnames = shuffled_list
+                else:
+                  window_fnames = wrong_window_images
+                                
 
             face_window = []
 
@@ -243,14 +256,15 @@ class Dataset(object):
                 continue
             
             mel = self.crop_audio_window(orig_mel.copy(), img_name)
+            
 
             if (mel.shape[0] != syncnet_mel_step_size):
                 should_load_diff_video = True
                 #print("This specific audio is invalid {0}".format(join(vidname, "audio.wav")))
                 continue
 
-            if idx % 1000 == 0:
-              save_sample_images(np.concatenate(face_window, axis=2), idx, mel)
+            # if idx % 1000 == 0:
+            #   save_sample_images(np.concatenate(face_window, axis=2), idx, mel)
 
             # H x W x 3 * T
             x = np.concatenate(face_window, axis=2) / 255.

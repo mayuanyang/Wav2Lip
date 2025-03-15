@@ -195,6 +195,7 @@ class TransformerSyncnet(nn.Module):
         # We pool tokens for each modality separately, then concatenate their global features.
         self.classifier = nn.Sequential(
             nn.Linear(3840, 1024),
+            nn.LeakyReLU(0.01, inplace=False),
             nn.Linear(1024, 64),
             nn.LeakyReLU(0.01, inplace=False),
             nn.Linear(64, 1)  # binary classification output
