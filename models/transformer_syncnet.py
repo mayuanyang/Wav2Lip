@@ -18,7 +18,7 @@ def initialize_weights(module):
         nn.init.kaiming_normal_(module.weight)
         if module.bias is not None:
             nn.init.constant_(module.bias, 0)
-            print('Init')
+            #print('Init')
 
 class MouthAttention(nn.Module):
     def __init__(self, in_channels, ellipse_ratio=0.5):
@@ -88,7 +88,7 @@ class SpatialAttention(nn.Module):
         for layer in self.conv:
           if isinstance(layer, nn.Conv2d):
               nn.init.kaiming_uniform_(layer.weight, a=0.2, nonlinearity='leaky_relu')
-              print('HE initialization')
+              #print('HE initialization')
     
     
     def forward(self, x):
@@ -175,7 +175,34 @@ class PositionalEncoding2D(nn.Module):
         return self.dropout(x + self.pe[:, :, :H, :W])
 
 
-      
+class MultiScaleFusion(nn.Module):
+    def __init__(self, in_channels_list, out_channels, target_shape):
+        """
+        Args:
+            in_channels_list (list[int]): List of channel numbers for each feature map to fuse.
+            out_channels (int): The desired number of channels for the fused feature.
+            target_shape (tuple): (H, W) target spatial resolution for each feature.
+        """
+        super(MultiScaleFusion, self).__init__()
+        self.target_shape = target_shape
+        # Project each input feature map to the common out_channels via 1x1 convolutions.
+        self.proj_convs = nn.ModuleList([
+            nn.Conv2d(in_ch, out_channels, kernel_size=1)
+            for in_ch in in_channels_list
+        ])
+        # Fuse the concatenated features with a 3x3 convolution.
+        self.fusion_conv = nn.Conv2d(out_channels * len(in_channels_list), out_channels, kernel_size=3, padding=1)
+        
+    def forward(self, features):
+        # Adaptive pool each feature to the target shape.
+        pooled_feats = [F.adaptive_max_pool2d(f, self.target_shape) for f in features]
+        # Project each pooled feature.
+        projected_feats = [conv(feat) for conv, feat in zip(self.proj_convs, pooled_feats)]
+        # Concatenate along the channel dimension.
+        concatenated = torch.cat(projected_feats, dim=1)
+        # Fuse via a convolution.
+        fused = self.fusion_conv(concatenated)
+        return fused
 
 class TransformerSyncnet(nn.Module):
     def __init__(self, num_heads=8, num_encoder_layers=4, embed_dim=512):
@@ -254,11 +281,20 @@ class TransformerSyncnet(nn.Module):
         self.adaptive_pool_face = nn.AdaptiveMaxPool2d(target_shape)
         self.adaptive_pool_audio = nn.AdaptiveMaxPool2d(target_shape)
         
+        # --- Multi-Scale Fusion for face features ---
+        # Here we fuse features from face_encoder2 (256 channels), face_encoder3 (512 channels), and face_encoder4 (1024 channels)
+        self.multi_scale_fusion = MultiScaleFusion(in_channels_list=[256, 512, 1024], out_channels=1024, target_shape=target_shape)
+        
+        
         self.pos_encoder = PositionalEncoding2D(1024, 24, 48)
         
         self.cross_attention = ConcatAttentionFusion(1024)
                 
-        self.reduce = Conv2d(1024, 128, kernel_size=7, stride=4, padding=2)
+        self.reduce = nn.Sequential(
+          Conv2d(1024, 512, kernel_size=3, stride=2, padding=1),
+          Conv2d(512, 256, kernel_size=3, stride=2, padding=1),
+          Conv2d(256, 128, kernel_size=3, stride=2, padding=1)
+        )
         
         # Final classification head.
         # We pool tokens for each modality separately, then concatenate their global features.
@@ -283,32 +319,6 @@ class TransformerSyncnet(nn.Module):
         self.audio_skip.apply(initialize_weights)
         
         self.classifier.apply(initialize_weights)
-        
-    def pad_to_shape(self, tensor, target_shape):
-        """
-        Pads a tensor to target_shape with center alignment.
-        
-        Args:
-            tensor (torch.Tensor): input tensor of shape (B, C, H, W)
-            target_shape (tuple): target shape (target_H, target_W)
-        
-        Returns:
-            padded_tensor (torch.Tensor): tensor padded to shape (B, C, target_H, target_W)
-        """
-        B, C, H, W = tensor.shape
-        target_H, target_W = target_shape
-
-        # Calculate padding for height (top, bottom)
-        pad_top = (target_H - H) // 2 if target_H > H else 0
-        pad_bottom = target_H - H - pad_top if target_H > H else 0
-
-        # Calculate padding for width (left, right)
-        pad_left = (target_W - W) // 2 if target_W > W else 0
-        pad_right = target_W - W - pad_left if target_W > W else 0
-
-        # F.pad expects padding as (pad_left, pad_right, pad_top, pad_bottom)
-        padded_tensor = F.pad(tensor, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=0)
-        return padded_tensor
       
     def forward(self, face_embedding, audio_embedding, step):
         """
@@ -355,8 +365,9 @@ class TransformerSyncnet(nn.Module):
         if step % save_every_s_steps == 0:
           self.save_sample_images(face4, 'face4', step)
         
-        #face_features = face4 + face_skip3  # (B, 512, H_f, W_f)
-        face_features = face4  # (B, 512, H_f, W_f)
+        # Fuse multi-scale face features.
+        fused_face_features = self.multi_scale_fusion([face2, face3, face4])
+        face_features = fused_face_features
         
         # --- Process audio modality ---
         audio_features1 = self.audio_encoder1(audio_embedding)  # (B, 512, H_a, W_a)
@@ -375,11 +386,6 @@ class TransformerSyncnet(nn.Module):
         
         
         audio_features = audio_features4
-
-        # torch.Size([2, 512, 12, 24]) torch.Size([2, 512, 20, 8])
-        # target_shape = (20, 24)  # (20, 24) in this case
-        # face_features = self.pad_to_shape(face_features, target_shape)
-        # audio_features = self.pad_to_shape(audio_features, target_shape)
         
         #print('The shapes', face_features.shape, audio_features.shape)
         face_features = self.adaptive_pool_face(face_features)

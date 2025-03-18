@@ -186,9 +186,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               loss = regression_loss(pred, regression_y)
               
               #print('The shapes', face_embedding.shape, audio_embedding.shape, classification_y.shape)
-              contra_loss = contrastive_loss(face_embedding, audio_embedding, classification_y)
+              #contra_loss = contrastive_loss(face_embedding, audio_embedding, classification_y)
             
-            total_loss = ce_loss + 0.1 * contra_loss
+            
             ce_loss.backward()
             optimizer.step()
             scheduler.step(ce_loss)
@@ -211,10 +211,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             current_training_regression_loss = avg_regression_loss / (step + 1)
             current_training_classification_loss = avg_classification_loss / (step + 1)
             
-            prog_bar.set_description('Global Step: {0}, Epoch: {1}, Regression Loss: {2}, Classification Loss: {3}, Contra Loss: {4}'.format(global_step, global_epoch, current_training_regression_loss, current_training_classification_loss, contra_loss.item()))
+            true_labels = (classification_y == 1.).sum()
+            false_labels = (classification_y == 0.).sum()
+            #print('The shape', classification_y, true_labels, false_labels, true_labels, true_labels)
+            
+            prog_bar.set_description('Global Step: {0}, Epoch: {1}, Regression Loss: {2}, Classification Loss: {3}, Positive/Negative: {4}/{5}'.format(global_step, global_epoch, current_training_regression_loss, current_training_classification_loss, true_labels, false_labels))
             metrics = {"train/regression_loss": current_training_regression_loss, 
                        "train/classification_loss": current_training_classification_loss, 
-                       "train/contra_loss": contra_loss.item(),
                        "train/step": global_step, 
                        "train/epoch": global_epoch}
             
