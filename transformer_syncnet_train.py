@@ -3,6 +3,7 @@ from tqdm import tqdm
 
 from models import TransformerSyncnet as TransformerSyncnet
 import audio
+import torch.nn.functional as F
 
 import torch
 from torch import nn
@@ -85,16 +86,52 @@ def cosine_loss(a, v, y):
     
     return loss
 
+def contrastive_loss(face_features, audio_features, labels, margin=1.0):
+        # Flatten the features
+        face_features_flat = face_features.view(face_features.size(0), -1)  # Shape: [batch_size, feature_dim]
+        audio_features_flat = audio_features.view(audio_features.size(0), -1) # Shape: [batch_size, feature_dim]
 
-# added by eddy
+        # Compute pairwise distances
+        euclidean_distance = F.pairwise_distance(face_features_flat, audio_features_flat)
+
+        # Create positive mask
+        positive_mask = labels.expand(-1, labels.size(0)).eq(labels.t()).float()  # Shape: [N,N]
+        
+        # Calculate loss for positive pairs
+        pos_loss = positive_mask * torch.pow(euclidean_distance.unsqueeze(1), 2)
+
+        # Calculate loss for negative pairs
+        neg_loss = (1 - positive_mask) * torch.pow(F.relu(margin - euclidean_distance.unsqueeze(1)), 2)
+
+        # Combine losses
+        loss = (pos_loss.sum() + neg_loss.sum()) / (2 * face_features.size(0))  # Average over batch
+        
+        return loss
+
 # Register hooks to print gradient norms
 def print_grad_norm(module, grad_input, grad_output):
-    for i, grad in enumerate(grad_output):
-        if grad is not None and global_step % 100 == 0:
-            print(f'{module.__class__.__name__} - grad_output[{i}] norm: {grad.norm().item()}')
+    should_print = global_step % 100 == 0
+    if should_print:
+      print('The module', module)
+      # Check if the module is an instance of Conv2d
+      if isinstance(module, torch.nn.Conv2d):
+          # Print input and output channels
+          in_channels = module.in_channels
+          out_channels = module.out_channels
+          print(f'---{module.__class__.__name__} - Input Channels: {in_channels}, Output Channels: {out_channels}---')
+        
+      for i, grad in enumerate(grad_output):
+          if grad is not None:
+              print(f'----- grad_output[{i}] norm: {grad.norm().item()}-----')
 
-# end added by eddy
+      for i, grad in enumerate(grad_input):
+          if grad is not None:
+              print(f'----- grad_input[{i}] norm: {grad.norm().item()}-----')
 
+def set_audio_grad(model, requires_grad: bool):
+    for name, param in model.named_parameters():
+        if "audio_encoder" in name:
+            param.requires_grad = requires_grad
 
 def train(device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=None, checkpoint_interval=None, nepochs=None, should_print_grad_norm=False):
@@ -112,6 +149,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear, nn.Conv2d, nn.TransformerEncoderLayer)):
             module.register_backward_hook(print_grad_norm)
   
+    #set_audio_grad(model, False)
     while global_epoch < nepochs:
         # for param_group in optimizer.param_groups:
         #   print("The learning rates are: ", param_group['lr'])
@@ -131,7 +169,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             mel = mel.to(device)
 
             with autocast('cuda'):
-              output, audio_embedding, face_embedding = model(x, mel, global_step)
+              output, face_embedding, audio_embedding = model(x, mel, global_step)
               regression_y = regression_y.unsqueeze(1).float()
               regression_y = regression_y.to(device)
               
@@ -143,10 +181,14 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               # For regression, we want predictions in the [0,1] range.
               pred = torch.sigmoid(output)
               loss = regression_loss(pred, regression_y)
-
+              
+              #print('The shapes', face_embedding.shape, audio_embedding.shape, classification_y.shape)
+              contra_loss = contrastive_loss(face_embedding, audio_embedding, classification_y)
+            
+            total_loss = ce_loss + 0.1 * contra_loss
             ce_loss.backward()
             optimizer.step()
-            scheduler.step(loss)
+            scheduler.step(ce_loss)
 
             # **Apply Gradient Clipping Here**
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -166,9 +208,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             current_training_regression_loss = avg_regression_loss / (step + 1)
             current_training_classification_loss = avg_classification_loss / (step + 1)
             
-            prog_bar.set_description('Global Step: {0}, Epoch: {1}, Regression Loss: {2}, Classification Loss: {3}'.format(global_step, global_epoch, current_training_regression_loss, current_training_classification_loss))
+            prog_bar.set_description('Global Step: {0}, Epoch: {1}, Regression Loss: {2}, Classification Loss: {3}, Contra Loss: {4}'.format(global_step, global_epoch, current_training_regression_loss, current_training_classification_loss, contra_loss.item()))
             metrics = {"train/regression_loss": current_training_regression_loss, 
                        "train/classification_loss": current_training_classification_loss, 
+                       "train/contra_loss": contra_loss.item(),
                        "train/step": global_step, 
                        "train/epoch": global_epoch}
             
@@ -192,6 +235,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 
             
         global_epoch += 1
+
         
 
 # Added by eddy
@@ -374,10 +418,10 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # Model
-    model = TransformerSyncnet(num_heads=8, num_encoder_layers=6).to(device)
+    model = TransformerSyncnet(num_heads=8, num_encoder_layers=4).to(device)
     
     
-    optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad], lr=3e-5,betas=(0.8, 0.999), weight_decay=1e-5)  # Default learning rate for other layers
+    optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad], lr=1e-4,betas=(0.8, 0.999), weight_decay=1e-5)  # Default learning rate for other layers
 
     if checkpoint_path is not None:
         load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=True)

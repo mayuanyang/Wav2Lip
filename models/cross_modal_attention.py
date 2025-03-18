@@ -14,7 +14,8 @@ class CrossModalAttention2d(nn.Module):
         # Project audio features into value space (we keep full channel dimension)
         self.value_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
         # Learnable scaling factor, init to 0, but will learn as it goes
-        self.gamma = nn.Parameter(torch.zeros(1))
+        self.gamma = nn.Parameter(torch.tensor(0.1))
+
     
     def forward(self, face_feat, audio_feat):
         """

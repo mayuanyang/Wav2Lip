@@ -3,7 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 
 class Conv2d(nn.Module):
-    def __init__(self, cin, cout, kernel_size, stride, padding, residual=False, dilation=1, leaking=0.01, residual_weight=1, *args, **kwargs):
+    def __init__(self, cin, cout, kernel_size, stride, padding, residual=False, dilation=1, leaking=0.01, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.conv_block = nn.Sequential(
                             nn.Conv2d(cin, cout, kernel_size, stride, padding, dilation=dilation),
@@ -11,12 +11,11 @@ class Conv2d(nn.Module):
                             )
         self.act = nn.LeakyReLU(leaking, inplace=False)
         self.residual = residual
-        self.residual_weight = residual_weight
 
     def forward(self, x):
         out = self.conv_block(x)
         if self.residual:
-            out = out + x * self.residual_weight
+            out = out + x
         return self.act(out)
 
 class nonorm_Conv2d(nn.Module):

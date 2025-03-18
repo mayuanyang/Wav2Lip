@@ -20,7 +20,7 @@ def initialize_weights(module):
             nn.init.constant_(module.bias, 0)
 
 class MouthAttention(nn.Module):
-    def __init__(self, in_channels, ellipse_ratio=0.4):
+    def __init__(self, in_channels, ellipse_ratio=0.5):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, 1, kernel_size=1)
         self.sigmoid = nn.Sigmoid()
@@ -74,7 +74,7 @@ class SpatialAttention(nn.Module):
         # Add intermediate layers
         for _ in range(num_layers - 1):
             layers.append(nn.Conv2d(in_channels, hidden_channels, kernel_size=kernel_size, padding=padding, bias=False))
-            layers.append(nn.ReLU(inplace=True))
+            layers.append(nn.LeakyReLU(0.01, inplace=False),)
             in_channels = hidden_channels
         
         # Final convolution to get a single-channel attention map
@@ -82,7 +82,7 @@ class SpatialAttention(nn.Module):
         self.conv = nn.Sequential(*layers)
         self.sigmoid = nn.Sigmoid()
         # Learnable scaling factor to adjust the contribution of the attention
-        self.alpha = nn.Parameter(torch.zeros(1))  # Initialized to zero (or a small value)
+        self.alpha = nn.Parameter(torch.tensor(0.1))  # Initialized to zero (or a small value)
     
     
     def forward(self, x):
@@ -95,6 +95,45 @@ class SpatialAttention(nn.Module):
         out = x + self.alpha * attn
         return out
 
+class ConcatAttentionFusion(nn.Module):
+    def __init__(self, in_channels, reduction=8):
+        """
+        Args:
+            in_channels (int): Number of channels for each modality (face and audio)
+            reduction (int): Reduction factor for the attention module
+        """
+        super(ConcatAttentionFusion, self).__init__()
+        # After concatenation, channel dimension is doubled.
+        # First, use a 1x1 convolution to fuse the concatenated features.
+        self.conv_fuse = nn.Conv2d(in_channels * 2, in_channels, kernel_size=1, bias=False)
+        
+        # Create a squeeze-and-excitation channel attention module.
+        self.attn = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),  # Global average pooling (squeeze spatially)
+            nn.Conv2d(in_channels, in_channels // reduction, kernel_size=1, bias=False),
+            nn.LeakyReLU(0.01, inplace=False),
+            nn.Conv2d(in_channels // reduction, in_channels, kernel_size=1, bias=False),
+            nn.Sigmoid()
+        )
+        
+        self.attn_weight = nn.Parameter(torch.tensor(0.1))  # 可学习的mask权重
+        
+    def forward(self, face_features, audio_features):
+        # Concatenate the face and audio features along the channel dimension.
+        x = torch.cat([face_features, audio_features], dim=1)
+        
+        # Fuse the concatenated features to obtain a combined representation.
+        fused = self.conv_fuse(x)
+                
+        # Compute channel attention weights from the fused features.
+        attn_weights = self.attn(fused)
+        
+        #print('The shapes', face_features.shape, attn_weights.shape)
+        
+        # Apply the attention weights to recalibrate the fused features.
+        out = fused + fused * attn_weights * self.attn_weight
+        
+        return out
 
 class PositionalEncoding2D(nn.Module):
     def __init__(self, d_model: int, max_h: int, max_w: int, dropout: float = 0.1):
@@ -140,64 +179,84 @@ class TransformerSyncnet(nn.Module):
         # --- Face encoder for individual frames ---
         self.face_encoder1 = nn.Sequential(
             # Input: (B, 15, H, W)  where 15 = 5 images x 3 channels
-            Conv2d(15, 64, kernel_size=3, stride=2, padding=1, leaking=0.1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True, residual_weight=0.5), 
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True, residual_weight=0.5), 
-            #MouthAttention(128),
-            #SpatialAttention()
+            Conv2d(15, 128, kernel_size=3, stride=2, padding=1, leaking=0.1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True), 
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True), 
+            SpatialAttention()
         )
         
         self.face_encoder2 = nn.Sequential(
-            Conv2d(64, 128, kernel_size=3, stride=2, padding=1),  # Downsample
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True, residual_weight=0.5),
-            #MouthAttention(256),
-            #SpatialAttention()
+            Conv2d(128, 256, kernel_size=3, stride=2, padding=1),  # Downsample
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
         )
         
         self.face_encoder3 = nn.Sequential(
-            Conv2d(128, 128, kernel_size=3, stride=2, padding=1),  # Downsample width
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True, residual_weight=0.5),
-            #SpatialAttention()
+            Conv2d(256, 512, kernel_size=3, stride=2, padding=1),  # Downsample width
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
         )
         
         self.face_encoder4 = nn.Sequential(
-            Conv2d(128, 128, kernel_size=3, stride=2, padding=1),  # Downsample
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True, residual_weight=0.5),
+            Conv2d(512, 1024, kernel_size=3, stride=1, padding=1),  # Downsample
+            Conv2d(1024, 1024, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
+        )
+        
+        self.face1_to_face3_skip = nn.Sequential(
+            # Input: (B, 15, H, W)  where 15 = 5 images x 3 channels
+            Conv2d(128, 512, kernel_size=3, stride=2, padding=1, leaking=0.1),
+            Conv2d(512, 512, kernel_size=3, stride=2, padding=1, leaking=0.1), 
         )
                 
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
             # Example input shape: (B, 1, H_audio, W_audio)
-            Conv2d(1, 32, kernel_size=3, stride=1, padding=1, leaking=0.05),
-            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, leaking=0.05, residual=True, residual_weight=0.5),
-            
+            Conv2d(1, 64, kernel_size=3, stride=1, padding=1, leaking=0.05),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05),
+            SpatialAttention()
         )
 
         self.audio_encoder2 = nn.Sequential(
-            Conv2d(32, 64, kernel_size=3, stride=(2,1), padding=1, leaking=0.05),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05, residual_weight=0.5),
+            Conv2d(64, 128, kernel_size=3, stride=(1, 2), padding=1, leaking=0.05),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05),
+            SpatialAttention()
         )
         
         self.audio_encoder3 = nn.Sequential(
-            Conv2d(64, 128, kernel_size=3, stride=2, padding=1, leaking=0.05),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05, residual_weight=0.5),
+            Conv2d(128, 256, kernel_size=3, stride=1, padding=1, leaking=0.05),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05),
+            SpatialAttention()
         )
         
-        self.pos_encoder = PositionalEncoding2D(128, 20, 24)
-                
-        self.cross_attn = CrossModalAttention2d(128, reduction=16)
-        self.fuse = nn.Conv2d(128, 128, kernel_size=7, stride=4, padding=2)
+        self.audio_encoder4 = nn.Sequential(
+            Conv2d(256, 512, kernel_size=3, stride=1, padding=1, leaking=0.05),
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05),
+            Conv2d(512, 1024, kernel_size=3, stride=1, padding=1, leaking=0.05),
+            SpatialAttention()
+        )
         
                 
-        self.relu = nn.LeakyReLU(0.01, inplace=False)
+        # Additional layer for matching dimensions if necessary
+        self.audio_skip = Conv2d(64, 256, kernel_size=3, stride=(1, 2), padding=1)
+        
+        
+        target_shape = (24, 48)  # (20, 24) in this case
+        self.adaptive_pool_face = nn.AdaptiveMaxPool2d(target_shape)
+        self.adaptive_pool_audio = nn.AdaptiveMaxPool2d(target_shape)
+        
+        self.pos_encoder = PositionalEncoding2D(1024, 24, 48)
+        
+        self.cross_attention = ConcatAttentionFusion(1024)
+                
+        self.reduce = Conv2d(1024, 128, kernel_size=7, stride=4, padding=2)
         
         # Final classification head.
         # We pool tokens for each modality separately, then concatenate their global features.
         self.classifier = nn.Sequential(
-            nn.Linear(3840, 1024),
+            nn.Linear(128, 64),
             nn.LeakyReLU(0.01, inplace=False),
-            nn.Linear(1024, 64),
-            nn.LeakyReLU(0.01, inplace=False),
+            nn.Dropout(p=0.1),
             nn.Linear(64, 1)  # binary classification output
         )
         
@@ -233,28 +292,43 @@ class TransformerSyncnet(nn.Module):
         audio_embedding: tensor of shape (B, 1, H_audio, W_audio)
         """
         
-        #audio_embedding = F.interpolate(audio_embedding, size=(320, 64), mode='bicubic', align_corners=False)
-        # --- Process face modality ---
+        audio_embedding = audio_embedding.permute(0,1,3,2)
+                
+        # Calculate min and max values
+        min_value = torch.min(audio_embedding)
+        max_value = torch.max(audio_embedding)
+
+        epsilon = 1e-6
+
+        # Normalize the tensor to range (0, 1)
+        audio_embedding = (audio_embedding - min_value) / (max_value - min_value + epsilon)
+
+        # Scale to ensure it does not reach exactly 0 or 1
+        audio_embedding = audio_embedding * (1 - epsilon) + epsilon
+        
+        save_every_s_steps = 1000
         
         face1 = self.face_encoder1(face_embedding)
-        if step % 5000 == 0:
+        face1_to_face3 = self.face1_to_face3_skip(face1)
+        
+        if step % save_every_s_steps == 0:
           self.save_sample_images(face1, 'face1', step)
         
         face2 = self.face_encoder2(face1)
-        if step % 5000 == 0:
+        if step % save_every_s_steps == 0:
           self.save_sample_images(face2, 'face2', step)
         
         #face2 = face2 + face_skip1
                         
         face3 = self.face_encoder3(face2)
-        if step % 5000 == 0:
+        if step % save_every_s_steps == 0:
           self.save_sample_images(face3, 'face3', step)
 
-        #face3 = face3 + face_skip2
+        face3 = face3 + face1_to_face3
         
         face4 = self.face_encoder4(face3)
         
-        if step % 5000 == 0:
+        if step % save_every_s_steps == 0:
           self.save_sample_images(face4, 'face4', step)
         
         #face_features = face4 + face_skip3  # (B, 512, H_f, W_f)
@@ -262,52 +336,56 @@ class TransformerSyncnet(nn.Module):
         
         # --- Process audio modality ---
         audio_features1 = self.audio_encoder1(audio_embedding)  # (B, 512, H_a, W_a)
-        if step % 5000 == 0:
-          self.save_sample_images(audio_features1, 'audio1', step)
         
+        audio1_to_4_skip = self.audio_skip(audio_features1)
+        
+        
+        if step % save_every_s_steps == 0:
+          self.save_sample_images(audio_features1, 'audio1', step)
         
         audio_features2 = self.audio_encoder2(audio_features1)
         
         audio_features3 = self.audio_encoder3(audio_features2)
-
-        audio_features = audio_features3
-
+        
+        audio_features4 = self.audio_encoder4(audio_features3 + audio1_to_4_skip)
+        
+        
+        audio_features = audio_features4
 
         # torch.Size([2, 512, 12, 24]) torch.Size([2, 512, 20, 8])
-        target_shape = (20, 24)  # (20, 24) in this case
-        face_features = self.pad_to_shape(face_features, target_shape)
-        audio_features = self.pad_to_shape(audio_features, target_shape)
+        # target_shape = (20, 24)  # (20, 24) in this case
+        # face_features = self.pad_to_shape(face_features, target_shape)
+        # audio_features = self.pad_to_shape(audio_features, target_shape)
+        
+        #print('The shapes', face_features.shape, audio_features.shape)
+        face_features = self.adaptive_pool_face(face_features)
+        audio_features = self.adaptive_pool_audio(audio_features)
         
         # --- Apply positional encoding separately to each modality ---
-        
         face_features = self.pos_encoder(face_features)
         audio_features = self.pos_encoder(audio_features)
         
-                
-        B, _, H, W = face_features.shape
+        fused = self.cross_attention(face_features, audio_features)
         
-        out = self.cross_attn(face_features, audio_features)
+        fused = self.reduce(fused)
         
-        fused = self.fuse(out)
+        pooled = nn.AdaptiveAvgPool2d((1, 1))(fused)
+        flattened = pooled.view(pooled.size(0), -1)
         
-        out_proj = fused.view(B, -1)
-        #out_proj = out_proj.permute(B, -1)
-        #print('The out shape 2', out_proj.shape)
+        result = self.classifier(flattened)
         
-        result = self.classifier(out_proj)
-        
-        
-        if step % 5000 == 0:
+        if step % save_every_s_steps == 0:
           self.save_sample_images(face_features, 'face_final', step)
           self.save_sample_images(audio_features, 'audio_final', step)
+          self.save_sample_images(fused, 'final_fused', step)
         
-        return result, None, None
+        return result, face_features, audio_features
 
     def save_sample_images(self, x, layer, step):
-        
+        base_dir = 'temp'
         B, C, H, W = x.shape
         for b in range(B):
-          if b > 10:
+          if b > 2:
             break
 
 
@@ -335,14 +413,14 @@ class TransformerSyncnet(nn.Module):
           image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
           
           # Save the image
-          filename = os.path.join("", f"{layer}_{step}_sample_{b}_combined.png")
+          filename = os.path.join(base_dir, f"{layer}_{step}_sample_{b}_combined.png")
           cv2.imwrite(filename, image_bgr)
         
         
         grid_rows, grid_cols = 16, 16  # 16x16 = 256 channels
 
         for b in range(B):
-            if b > 3:
+            if b > 2:
               break
 
             # Create an empty grid image (grayscale)
@@ -357,6 +435,6 @@ class TransformerSyncnet(nn.Module):
                   row = c // grid_cols
                   col = c % grid_cols
                   grid_img[row*H:(row+1)*H, col*W:(col+1)*W] = img
-            grid_filename = os.path.join("", f"{layer}_sample_{b}_grid.png")
+            grid_filename = os.path.join(base_dir, f"{layer}_{step}_sample_{b}_grid.png")
             cv2.imwrite(grid_filename, grid_img)
         
