@@ -15,3 +15,4 @@ evaluation/test_filelists/lr*.txt
 *.mp3
 training
 input
+temp
