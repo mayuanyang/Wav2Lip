@@ -188,17 +188,20 @@ class TransformerSyncnet(nn.Module):
         self.face_encoder2 = nn.Sequential(
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             SpatialAttention()
         )
         
         self.face_encoder3 = nn.Sequential(
             Conv2d(256, 512, kernel_size=3, stride=2, padding=1),  # Downsample width
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
             SpatialAttention()
         )
         
         self.face_encoder4 = nn.Sequential(
             Conv2d(512, 1024, kernel_size=3, stride=1, padding=1),  # Downsample
+            Conv2d(1024, 1024, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(1024, 1024, kernel_size=3, stride=1, padding=1, residual=True),
             SpatialAttention()
         )
