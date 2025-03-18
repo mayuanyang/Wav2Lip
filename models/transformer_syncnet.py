@@ -18,6 +18,7 @@ def initialize_weights(module):
         nn.init.kaiming_normal_(module.weight)
         if module.bias is not None:
             nn.init.constant_(module.bias, 0)
+            print('Init')
 
 class MouthAttention(nn.Module):
     def __init__(self, in_channels, ellipse_ratio=0.5):
@@ -69,20 +70,25 @@ class SpatialAttention(nn.Module):
         padding = (kernel_size - 1) // 2
         # Start with 2-channel input (from avg and max pooling)
         in_channels = 2
-        hidden_channels = 4  # Arbitrary choice; adjust as needed
+        hidden_channels = 8  # Arbitrary choice; adjust as needed
         
         # Add intermediate layers
         for _ in range(num_layers - 1):
             layers.append(nn.Conv2d(in_channels, hidden_channels, kernel_size=kernel_size, padding=padding, bias=False))
-            layers.append(nn.LeakyReLU(0.01, inplace=False),)
+            layers.append(nn.LeakyReLU(0.25, inplace=False),)
             in_channels = hidden_channels
         
         # Final convolution to get a single-channel attention map
         layers.append(nn.Conv2d(in_channels, 1, kernel_size=kernel_size, padding=padding, bias=False))
         self.conv = nn.Sequential(*layers)
-        self.sigmoid = nn.Sigmoid()
+        self.act = nn.Tanh()
         # Learnable scaling factor to adjust the contribution of the attention
-        self.alpha = nn.Parameter(torch.tensor(0.1))  # Initialized to zero (or a small value)
+        self.alpha = nn.Parameter(torch.tensor(1.0))  # Initialized to zero (or a small value)
+        
+        for layer in self.conv:
+          if isinstance(layer, nn.Conv2d):
+              nn.init.kaiming_uniform_(layer.weight, a=0.2, nonlinearity='leaky_relu')
+              print('HE initialization')
     
     
     def forward(self, x):
@@ -91,7 +97,7 @@ class SpatialAttention(nn.Module):
         max_pool, _ = torch.max(x, dim=1, keepdim=True)  # (B, 1, H, W)
         x_cat = torch.cat([avg_pool, max_pool], dim=1)     # (B, 2, H, W)
         attn = self.conv(x_cat)
-        attn = self.sigmoid(attn)
+        attn = self.act(attn)
         out = x + self.alpha * attn
         return out
 
@@ -262,6 +268,21 @@ class TransformerSyncnet(nn.Module):
             nn.Dropout(p=0.1),
             nn.Linear(64, 1)  # binary classification output
         )
+      
+        self.face_encoder1.apply(initialize_weights)
+        self.face_encoder2.apply(initialize_weights)
+        self.face_encoder3.apply(initialize_weights)
+        self.face_encoder4.apply(initialize_weights)
+        self.face1_to_face3_skip.apply(initialize_weights)
+        
+        
+        self.audio_encoder1.apply(initialize_weights)
+        self.audio_encoder2.apply(initialize_weights)
+        self.audio_encoder3.apply(initialize_weights)
+        self.audio_encoder4.apply(initialize_weights)
+        self.audio_skip.apply(initialize_weights)
+        
+        self.classifier.apply(initialize_weights)
         
     def pad_to_shape(self, tensor, target_shape):
         """

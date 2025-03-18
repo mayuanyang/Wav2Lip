@@ -114,6 +114,7 @@ import torch
 def print_grad_norm(module, grad_input, grad_output):
     should_print = global_step % 100 == 0
     if should_print:
+        print()
         print(f"Module: {module.__class__.__name__}")
         if isinstance(module, torch.nn.Conv2d):
             print(f"Input Channels: {module.in_channels}, Output Channels: {module.out_channels}")
@@ -127,8 +128,8 @@ def print_grad_norm(module, grad_input, grad_output):
         
         # 验证梯度是否合理
         if grad_input_norm < 1e-6 and grad_output_norm > 1e-6:
-            print("⚠️ Potential vanishing gradient detected!")
-
+            print("!!!!---Potential vanishing gradient detected---!!!!")
+        print()
 
 def set_audio_grad(model, requires_grad: bool):
     for name, param in model.named_parameters():
