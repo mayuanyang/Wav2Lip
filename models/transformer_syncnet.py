@@ -179,14 +179,14 @@ class TransformerSyncnet(nn.Module):
         # --- Face encoder for individual frames ---
         self.face_encoder1 = nn.Sequential(
             # Input: (B, 15, H, W)  where 15 = 5 images x 3 channels
-            Conv2d(15, 128, kernel_size=3, stride=2, padding=1, leaking=0.1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True), 
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True), 
+            Conv2d(15, 256, kernel_size=3, stride=2, padding=1, leaking=0.1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True), 
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True), 
             SpatialAttention()
         )
         
         self.face_encoder2 = nn.Sequential(
-            Conv2d(128, 256, kernel_size=3, stride=2, padding=1),  # Downsample
+            Conv2d(256, 256, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             SpatialAttention()
@@ -208,7 +208,7 @@ class TransformerSyncnet(nn.Module):
         
         self.face1_to_face3_skip = nn.Sequential(
             # Input: (B, 15, H, W)  where 15 = 5 images x 3 channels
-            Conv2d(128, 512, kernel_size=3, stride=2, padding=1, leaking=0.1),
+            Conv2d(256, 512, kernel_size=3, stride=2, padding=1, leaking=0.1),
             Conv2d(512, 512, kernel_size=3, stride=2, padding=1, leaking=0.1), 
         )
                 

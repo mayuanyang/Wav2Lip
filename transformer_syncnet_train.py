@@ -109,24 +109,26 @@ def contrastive_loss(face_features, audio_features, labels, margin=1.0):
         return loss
 
 # Register hooks to print gradient norms
+import torch
+
 def print_grad_norm(module, grad_input, grad_output):
     should_print = global_step % 100 == 0
     if should_print:
-      print('The module', module)
-      # Check if the module is an instance of Conv2d
-      if isinstance(module, torch.nn.Conv2d):
-          # Print input and output channels
-          in_channels = module.in_channels
-          out_channels = module.out_channels
-          print(f'---{module.__class__.__name__} - Input Channels: {in_channels}, Output Channels: {out_channels}---')
+        print(f"Module: {module.__class__.__name__}")
+        if isinstance(module, torch.nn.Conv2d):
+            print(f"Input Channels: {module.in_channels}, Output Channels: {module.out_channels}")
         
-      for i, grad in enumerate(grad_output):
-          if grad is not None:
-              print(f'----- grad_output[{i}] norm: {grad.norm().item()}-----')
+        # 检查梯度是否为 None
+        grad_input_norm = grad_input[0].norm().item() if grad_input[0] is not None else 0
+        grad_output_norm = grad_output[0].norm().item() if grad_output[0] is not None else 0
+        
+        print(f"Grad Input Norm: {grad_input_norm:.5f}")
+        print(f"Grad Output Norm: {grad_output_norm:.5f}")
+        
+        # 验证梯度是否合理
+        if grad_input_norm < 1e-6 and grad_output_norm > 1e-6:
+            print("⚠️ Potential vanishing gradient detected!")
 
-      for i, grad in enumerate(grad_input):
-          if grad is not None:
-              print(f'----- grad_input[{i}] norm: {grad.norm().item()}-----')
 
 def set_audio_grad(model, requires_grad: bool):
     for name, param in model.named_parameters():
@@ -191,7 +193,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             scheduler.step(ce_loss)
 
             # **Apply Gradient Clipping Here**
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
 
             global_step += 1
             avg_regression_loss += loss.item()
