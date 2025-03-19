@@ -123,8 +123,8 @@ def print_grad_norm(module, grad_input, grad_output):
         grad_input_norm = grad_input[0].norm().item() if grad_input[0] is not None else 0
         grad_output_norm = grad_output[0].norm().item() if grad_output[0] is not None else 0
         
-        print(f"Grad Input Norm: {grad_input_norm:.5f}")
-        print(f"Grad Output Norm: {grad_output_norm:.5f}")
+        print(f"Grad Input Norm: {grad_input_norm:.6f}")
+        print(f"Grad Output Norm: {grad_output_norm:.6f}")
         
         # 验证梯度是否合理
         if grad_input_norm < 1e-6 and grad_output_norm > 1e-6:
