@@ -241,6 +241,7 @@ class TransformerSyncnet(nn.Module):
         self.face1_to_face3_skip = nn.Sequential(
             # Input: (B, 15, H, W)  where 15 = 5 images x 3 channels
             Conv2d(128, 512, kernel_size=3, stride=2, padding=1, leaking=0.1),
+            MouthAttention(512),
             Conv2d(512, 512, kernel_size=3, stride=2, padding=1, leaking=0.1), 
         )
                 
