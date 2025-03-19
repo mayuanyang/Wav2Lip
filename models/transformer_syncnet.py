@@ -254,7 +254,7 @@ class TransformerSyncnet(nn.Module):
         )
 
         self.audio_encoder2 = nn.Sequential(
-            Conv2d(64, 128, kernel_size=3, stride=(1, 2), padding=1, leaking=0.05),
+            Conv2d(64, 128, kernel_size=3, stride=2, padding=1, leaking=0.05),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05),
             
         )
@@ -274,7 +274,7 @@ class TransformerSyncnet(nn.Module):
         
                 
         # Additional layer for matching dimensions if necessary
-        self.audio_skip = Conv2d(64, 256, kernel_size=3, stride=(1, 2), padding=1)
+        self.audio_skip = Conv2d(64, 256, kernel_size=3, stride=2, padding=1)
         
         
         target_shape = (24, 48)  # (20, 24) in this case
@@ -283,7 +283,8 @@ class TransformerSyncnet(nn.Module):
         
         # --- Multi-Scale Fusion for face features ---
         # Here we fuse features from face_encoder2 (256 channels), face_encoder3 (512 channels), and face_encoder4 (1024 channels)
-        self.multi_scale_fusion = MultiScaleFusion(in_channels_list=[256, 512, 1024], out_channels=1024, target_shape=target_shape)
+        self.face_multi_scale_fusion = MultiScaleFusion(in_channels_list=[256, 512, 1024], out_channels=1024, target_shape=target_shape)
+        self.audio_multi_scale_fusion = MultiScaleFusion(in_channels_list=[128, 256, 1024], out_channels=1024, target_shape=target_shape)
         
         
         self.pos_encoder = PositionalEncoding2D(1024, 24, 48)
@@ -370,7 +371,7 @@ class TransformerSyncnet(nn.Module):
           self.save_sample_images(face4, 'face4', step)
         
         # Fuse multi-scale face features.
-        fused_face_features = self.multi_scale_fusion([face2, face3, face4])
+        fused_face_features = self.face_multi_scale_fusion([face2, face3, face4])
         face_features = fused_face_features
         
         # --- Process audio modality ---
@@ -388,8 +389,9 @@ class TransformerSyncnet(nn.Module):
         
         audio_features4 = self.audio_encoder4(audio_features3 + audio1_to_4_skip)
         
+        fused_audio_features = self.audio_multi_scale_fusion([audio_features2, audio_features3, audio_features4])
         
-        audio_features = audio_features4
+        audio_features = fused_audio_features
         
         #print('The shapes', face_features.shape, audio_features.shape)
         face_features = self.adaptive_pool_face(face_features)
