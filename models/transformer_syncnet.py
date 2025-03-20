@@ -213,7 +213,8 @@ class TransformerSyncnet(nn.Module):
         self.face_encoder1 = nn.Sequential(
             # Input: (B, 15, H, W)  where 15 = 5 images x 3 channels
             Conv2d(15, 128, kernel_size=3, stride=2, padding=1, leaking=0.1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True), 
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True),
             MouthAttention(128),
             
         )
@@ -221,21 +222,21 @@ class TransformerSyncnet(nn.Module):
         self.face_encoder2 = nn.Sequential(
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             MouthAttention(256),
         )
         
         self.face_encoder3 = nn.Sequential(
             Conv2d(256, 512, kernel_size=3, stride=2, padding=1),  # Downsample width
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
             MouthAttention(512),
-            #SpatialAttention()
+            
         )
         
         self.face_encoder4 = nn.Sequential(
             Conv2d(512, 1024, kernel_size=3, stride=1, padding=1),  # Downsample
             Conv2d(1024, 1024, kernel_size=3, stride=1, padding=1, residual=True),
-            
-            #SpatialAttention()
         )
         
         self.face1_to_face3_skip = nn.Sequential(
@@ -278,8 +279,8 @@ class TransformerSyncnet(nn.Module):
         
         
         target_shape = (24, 48)  # (20, 24) in this case
-        self.adaptive_pool_face = nn.AdaptiveMaxPool2d(target_shape)
-        self.adaptive_pool_audio = nn.AdaptiveMaxPool2d(target_shape)
+        self.adaptive_pool_face = nn.AdaptiveAvgPool2d(target_shape)
+        self.adaptive_pool_audio = nn.AdaptiveAvgPool2d(target_shape)
         
         # --- Multi-Scale Fusion for face features ---
         # Here we fuse features from face_encoder2 (256 channels), face_encoder3 (512 channels), and face_encoder4 (1024 channels)
@@ -288,17 +289,12 @@ class TransformerSyncnet(nn.Module):
         
         
         self.pos_encoder = PositionalEncoding2D(1024, 24, 48)
-        
-        #self.cross_attention = ConcatAttentionFusion(1024)
+
+        self.ln1 = nn.LayerNorm(1024)
+        self.ln2 = nn.LayerNorm(1024)
         
         self.multihead_attn = nn.MultiheadAttention(1024, 8, dropout=0.1)
 
-                
-        self.reduce = nn.Sequential(
-          Conv2d(1024, 512, kernel_size=3, stride=2, padding=1),
-          Conv2d(512, 256, kernel_size=3, stride=2, padding=1),
-          Conv2d(256, 128, kernel_size=3, stride=2, padding=1)
-        )
         
         # Final classification head.
         # We pool tokens for each modality separately, then concatenate their global features.
@@ -322,7 +318,7 @@ class TransformerSyncnet(nn.Module):
         self.audio_encoder4.apply(initialize_weights)
         self.audio_skip.apply(initialize_weights)
         
-        self.reduce.apply(initialize_weights)
+        #self.reduce.apply(initialize_weights)
         self.classifier.apply(initialize_weights)
       
     def forward(self, face_embedding, audio_embedding, step):
@@ -330,9 +326,7 @@ class TransformerSyncnet(nn.Module):
         face_embedding: tensor of shape (B, 15, H, W) -> 5 images concatenated (each 3 channels)
         audio_embedding: tensor of shape (B, 1, H_audio, W_audio)
         """
-        
-        audio_embedding = audio_embedding.permute(0,1,3,2)
-                
+
         # Calculate min and max values
         min_value = torch.min(audio_embedding)
         max_value = torch.max(audio_embedding)
@@ -345,7 +339,7 @@ class TransformerSyncnet(nn.Module):
         # Scale to ensure it does not reach exactly 0 or 1
         audio_embedding = audio_embedding * (1 - epsilon) + epsilon
         
-        save_every_s_steps = 1000
+        save_every_s_steps = 5000
         
         face1 = self.face_encoder1(face_embedding)
         face1_to_face3 = self.face1_to_face3_skip(face1)
@@ -413,9 +407,13 @@ class TransformerSyncnet(nn.Module):
         face_seq = face_flat.permute(2, 0, 1)   # (S, B, C)
         audio_seq = audio_flat.permute(2, 0, 1)   # (S, B, C)
         
+        face_seq = self.ln1(face_seq)
+
         # Let face features (lips) attend to audio features:
         # face_seq acts as the query, and audio_seq provides key and value.
         attn_output, attn_weights = self.multihead_attn(query=face_seq, key=audio_seq, value=audio_seq)
+
+        attn_output = self.ln2(attn_output)
         
         # Reshape back to (B, C, H, W)
         attn_output = attn_output.permute(1, 2, 0).view(B, C, H, W)

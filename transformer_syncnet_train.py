@@ -427,7 +427,7 @@ if __name__ == "__main__":
     model = TransformerSyncnet(num_heads=8, num_encoder_layers=4).to(device)
     
     
-    optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad], lr=1e-4,betas=(0.8, 0.999), weight_decay=1e-5)  # Default learning rate for other layers
+    optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad], lr=1e-6)  # Default learning rate for other layers
 
     if checkpoint_path is not None:
         load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=True)
