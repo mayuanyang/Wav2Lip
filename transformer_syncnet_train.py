@@ -436,7 +436,7 @@ if __name__ == "__main__":
     optimizer = optim.AdamW(
         model.parameters(),
         lr=1e-4,          
-        momentum=0.9,     # 推荐添加动量
+        #momentum=0.9,     # 推荐添加动量
         weight_decay=1e-5 # 可选正则化
     )
 
