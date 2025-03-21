@@ -216,7 +216,7 @@ class TransformerSyncnet(nn.Module):
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, leaking=0.1, residual=True),
             MouthAttention(128),
-            
+            SpatialAttention()
         )
         
         self.face_encoder2 = nn.Sequential(
@@ -224,6 +224,7 @@ class TransformerSyncnet(nn.Module):
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             MouthAttention(256),
+            SpatialAttention()
         )
         
         self.face_encoder3 = nn.Sequential(
@@ -231,7 +232,7 @@ class TransformerSyncnet(nn.Module):
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
             MouthAttention(512),
-            
+            SpatialAttention()
         )
         
         self.face_encoder4 = nn.Sequential(
@@ -251,26 +252,28 @@ class TransformerSyncnet(nn.Module):
             # Example input shape: (B, 1, H_audio, W_audio)
             Conv2d(1, 64, kernel_size=3, stride=1, padding=1, leaking=0.05),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05),
-            
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05),
+            SpatialAttention()
         )
 
         self.audio_encoder2 = nn.Sequential(
             Conv2d(64, 128, kernel_size=3, stride=2, padding=1, leaking=0.05),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05),
-            
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05),
+            SpatialAttention()
         )
         
         self.audio_encoder3 = nn.Sequential(
             Conv2d(128, 256, kernel_size=3, stride=1, padding=1, leaking=0.05),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05),
-            
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05),
         )
         
         self.audio_encoder4 = nn.Sequential(
             Conv2d(256, 512, kernel_size=3, stride=1, padding=1, leaking=0.05),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True, leaking=0.05),
             Conv2d(512, 1024, kernel_size=3, stride=1, padding=1, leaking=0.05),
-            
+            SpatialAttention()
         )
         
                 
