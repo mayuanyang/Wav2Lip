@@ -76,14 +76,12 @@ regression_loss = nn.MSELoss()
 
 logloss = nn.BCELoss()
 def cosine_loss(a, v, y):
-    d = nn.functional.cosine_similarity(a, v)
-    
+    d = F.cosine_similarity(a, v)
+    # Apply sigmoid to map cosine similarity to [0, 1] range
+    # d = torch.sigmoid(d)
     # Scale cosine similarity to range [0, 1]
-    cos_sim_scaled = (1 + d) / 2.0
-    
-    # Calculate the loss: the target is 1 for similar pairs and 0 for dissimilar pairs
-    loss = nn.functional.mse_loss(cos_sim_scaled, y.float())
-    
+    d = (1 + d) / 2.0
+    loss = logloss(d.unsqueeze(1), y)
     return loss
 
 def contrastive_loss(face_features, audio_features, labels, margin=1.0):
@@ -181,23 +179,31 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               
               ce_loss = cross_entropy_loss(output, classification_y)
               
+              
+              # Flatten the tensors to [2, 1024 * 24 * 48]
+              face_embedding = face_embedding.reshape(face_embedding.size(0), -1)
+              audio_embedding = audio_embedding.reshape(audio_embedding.size(0), -1)
+              
+              #print('The shapes', face_embedding.shape, audio_embedding.shape, cosine_y.shape, classification_y.shape)
+              cos_loss = cosine_loss(face_embedding, audio_embedding, classification_y)
+              
               # For regression, we want predictions in the [0,1] range.
-              pred = torch.sigmoid(output)
-              loss = regression_loss(pred, regression_y)
+              #pred = torch.sigmoid(output)
+              #loss = regression_loss(pred, regression_y)
               
               #print('The shapes', face_embedding.shape, audio_embedding.shape, classification_y.shape)
               #contra_loss = contrastive_loss(face_embedding, audio_embedding, classification_y)
             
             
-            ce_loss.backward()
+            cos_loss.backward()
             optimizer.step()
-            scheduler.step(ce_loss)
+            scheduler.step(cos_loss)
 
             # **Apply Gradient Clipping Here**
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
 
             global_step += 1
-            avg_regression_loss += loss.item()
+            avg_regression_loss += cos_loss.item()
             avg_classification_loss += ce_loss.item()
 
             if global_step == 1 or global_step % checkpoint_interval == 0:
@@ -409,8 +415,8 @@ if __name__ == "__main__":
     if not os.path.exists(checkpoint_dir): os.mkdir(checkpoint_dir)
 
     # Dataset and Dataloader setup
-    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation, img_size_factor=2)
-    test_dataset = Dataset('val', args.data_root, args.train_root, False, img_size_factor=2)
+    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation, img_size_factor=1)
+    test_dataset = Dataset('val', args.data_root, args.train_root, False, img_size_factor=1)
     #print(train_dataset.all_videos)
 
     train_data_loader = data_utils.DataLoader(
@@ -427,7 +433,12 @@ if __name__ == "__main__":
     model = TransformerSyncnet(num_heads=8, num_encoder_layers=4).to(device)
     
     
-    optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad], lr=1e-6)  # Default learning rate for other layers
+    optimizer = optim.AdamW(
+        model.parameters(),
+        lr=1e-4,          
+        momentum=0.9,     # 推荐添加动量
+        weight_decay=1e-5 # 可选正则化
+    )
 
     if checkpoint_path is not None:
         load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=True)

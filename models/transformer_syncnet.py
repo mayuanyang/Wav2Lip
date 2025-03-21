@@ -397,9 +397,7 @@ class TransformerSyncnet(nn.Module):
         # --- Apply positional encoding separately to each modality ---
         face_features = self.pos_encoder(face_features)
         audio_features = self.pos_encoder(audio_features)
-        
-        #fused = self.cross_attention(face_features, audio_features)
-        
+                
         
         B, C, H, W = face_features.shape
         # Flatten spatial dimensions: (B, C, H, W) -> (B, C, H*W)
@@ -435,7 +433,7 @@ class TransformerSyncnet(nn.Module):
           self.save_sample_images(audio_features, 'audio_final', step)
           self.save_sample_images(attn_output, 'final_fused', step)
         
-        return result, face_features, audio_features
+        return result, attn_output, audio_features
 
     def save_sample_images(self, x, layer, step):
         base_dir = 'temp'
