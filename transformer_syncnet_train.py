@@ -195,9 +195,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               #contra_loss = contrastive_loss(face_embedding, audio_embedding, classification_y)
             
             
-            cos_loss.backward()
+            ce_loss.backward()
             optimizer.step()
-            scheduler.step(cos_loss)
+            scheduler.step(ce_loss)
 
             # **Apply Gradient Clipping Here**
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
@@ -435,7 +435,7 @@ if __name__ == "__main__":
     
     optimizer = optim.AdamW(
         model.parameters(),
-        lr=1e-4,          
+        lr=1e-5,          
         #momentum=0.9,     # 推荐添加动量
         weight_decay=1e-5 # 可选正则化
     )

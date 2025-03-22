@@ -3,7 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 
 class Conv2d(nn.Module):
-    def __init__(self, cin, cout, kernel_size, stride, padding, residual=False, dilation=1, leaking=0.01, *args, **kwargs):
+    def __init__(self, cin, cout, kernel_size, stride, padding, residual=False, dilation=1, leaking=0.2, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.conv_block = nn.Sequential(
                             nn.Conv2d(cin, cout, kernel_size, stride, padding, dilation=dilation),
