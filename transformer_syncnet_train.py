@@ -1,7 +1,7 @@
 from os.path import join
 from tqdm import tqdm
 
-from models import TransformerSyncnet as TransformerSyncnet
+from models import TransformerSyncnetV2 as TransformerSyncnet
 import audio
 import torch.nn.functional as F
 
@@ -185,7 +185,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               audio_embedding = audio_embedding.reshape(audio_embedding.size(0), -1)
               
               #print('The shapes', face_embedding.shape, audio_embedding.shape, cosine_y.shape, classification_y.shape)
-              cos_loss = cosine_loss(face_embedding, audio_embedding, classification_y)
+              #cos_loss = cosine_loss(face_embedding, audio_embedding, classification_y)
               
               # For regression, we want predictions in the [0,1] range.
               #pred = torch.sigmoid(output)
@@ -203,7 +203,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
 
             global_step += 1
-            avg_regression_loss += cos_loss.item()
+            avg_regression_loss += 0 #cos_loss.item()
             avg_classification_loss += ce_loss.item()
 
             if global_step == 1 or global_step % checkpoint_interval == 0:
