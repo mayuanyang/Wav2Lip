@@ -90,12 +90,12 @@ class TransformerSyncnetV2(nn.Module):
                 
         
         self.attn_layers = nn.ModuleList([
-            nn.MultiheadAttention(152, num_heads, dropout=0.1) 
+            nn.MultiheadAttention(368, num_heads, dropout=0.1) 
             for _ in range(num_encoder_layers)
         ])
         
         self.layer_norms = nn.ModuleList([
-            nn.LayerNorm(152) for _ in range(num_encoder_layers)
+            nn.LayerNorm(368) for _ in range(num_encoder_layers)
         ])
         
         self.final_reduce = nn.Sequential(
@@ -108,7 +108,8 @@ class TransformerSyncnetV2(nn.Module):
         # Final classification head.
         # We pool tokens for each modality separately, then concatenate their global features.
         self.classifier = nn.Sequential(
-            nn.Linear(1536, 512),
+            # nn.Linear(1536, 512), for 192
+            nn.Linear(3072, 512), 
             nn.LeakyReLU(0.2, inplace=False),
             nn.Dropout(p=0.3),
             nn.Linear(512, 1)  # binary classification output
@@ -213,18 +214,11 @@ class TransformerSyncnetV2(nn.Module):
             # Apply LayerNorm after attention
             attn_output = layer_norm(attn_output)
 
+        attn_output = attn_output.permute(1, 0, 2).view(B, C, 16, 23)
         
-        
-        #attn_output = attn_output.permute(1, 0, 2)  # torch.Size([512, 2, embed_dim * 2])
-        attn_output = attn_output.permute(1, 0, 2).view(B, C, 8, 19)
         attn_output = self.final_reduce(attn_output)
-        #print('The shapes', face_flat.shape, audio_flat.shape, combined.shape, attn_output.shape)
-        
+                
         attn_output = attn_output.reshape(attn_output.size(0), -1)
-        
-        
-        # Reshape back to (B, C, H, W)
-        
         
         result = self.classifier(attn_output)
         
