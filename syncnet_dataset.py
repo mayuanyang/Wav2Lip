@@ -8,6 +8,7 @@ import audio
 import torch
 import matplotlib.pyplot as plt
 from PIL import Image
+import mediapipe as mp
 
 face_image_cache = multiprocessing.Manager().dict()
 file_exist_cache = multiprocessing.Manager().dict()
@@ -20,7 +21,15 @@ because the audio mel spectrogram ususlly has 80 frame per seconds, so 16/80 is 
 syncnet_T = 5
 syncnet_mel_step_size = 16
 samples = [True, True,True, True,True, False,False, False, False, False]
-negative_data_mode = "SIMPLE" # SIMPLE, MEDIUM, HARD
+negative_data_mode = "HARD" # SIMPLE, MEDIUM, HARD
+
+# 嘴唇关键点索引（MediaPipe定义的468点中的嘴唇区域）
+LIPS_LANDMARKS = [
+    61, 185, 40, 39, 37, 0, 267, 269, 270, 409,
+    291, 146, 91, 181, 84, 17, 314, 405, 320, 307,
+    375, 321, 311, 308, 324, 318, 402, 317, 14, 87
+]
+
 
 class Dataset(object):
     
@@ -29,6 +38,8 @@ class Dataset(object):
         self.all_videos = get_image_list(data_root, split, train_root)
         self.use_augmentation = use_augmentation
         self.img_size_factor = img_size_factor
+        self.mp_face_mesh = mp.solutions.face_mesh
+        self.face_mesh = self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
         
 
     def get_frame_id(self, frame):
@@ -193,9 +204,6 @@ class Dataset(object):
                     try:
                         img = cv2.resize(img, (hparams.img_size * self.img_size_factor, hparams.img_size * self.img_size_factor))                            
                         
-                        if len(face_image_cache) < hparams.syncnet_image_cache_size:
-                          face_image_cache[fname] = img  # Cache the resized image
-                        
                     except Exception as e:
                         all_read = False
                         break
@@ -234,6 +242,55 @@ class Dataset(object):
                       # Perform the rotation
                       img = cv2.warpAffine(img, rotation_matrix, (w, h))
 
+                try:
+                  frame_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                  frame_rgb = (frame_rgb).astype(np.uint8)
+                  results = self.face_mesh.process(frame_rgb)
+
+                  if results.multi_face_landmarks:
+                      # Get the mouth landmarks (MediaPipe Face Mesh landmarks for mouth are from 61 to 80)
+                      mouth_points = []
+                      h, w, _ = img.shape
+                      split_row = h // 2
+                      for idx in LIPS_LANDMARKS:
+                          lm = results.multi_face_landmarks[0].landmark[idx]
+                          x, y = int(lm.x * w), int(lm.y * h)
+                          mouth_points.append([x, y])
+
+                      # Convert the list of mouth points to a NumPy array for easier manipulation.
+                      mouth_points = np.array(mouth_points)
+
+                      # Compute the bounding rectangle coordinates.
+                      x_min = np.min(mouth_points[:, 0])
+                      x_max = np.max(mouth_points[:, 0])
+                      y_min = np.min(mouth_points[:, 1])
+                      y_max = np.max(mouth_points[:, 1])
+
+                      # Calculate the width and height of the mouth region.
+                      width = x_max - x_min
+                      height = y_max - y_min
+
+                      # Define a padding factor (e.g., 50% larger in each direction).
+                      pad_width_factor = 0.5  # Adjust this value as needed.
+                      pad_height_factor = 0.5  # Adjust this value as needed.
+                      pad_x = int(width * pad_width_factor)
+                      pad_y = int(height * pad_height_factor)
+
+                      # Expand the rectangle and ensure the coordinates stay within frame boundaries.
+                      x_min_expanded = max(x_min - pad_x, 0)
+                      y_min_expanded = max(y_min - pad_y, 0)
+                      x_max_expanded = min(x_max + pad_x, w)
+                      y_max_expanded = min(y_max + pad_y, h)
+
+                      bbox = [x_min_expanded, y_min_expanded, x_max_expanded, y_max_expanded]
+                      img_masked = self.blackout_non_lip(img, bbox)
+                      img = img_masked
+                  
+                  if len(face_image_cache) < hparams.syncnet_image_cache_size:
+                      face_image_cache[fname] = img  # Cache the resized image
+                except Exception as e:
+                  print(e)
+                  
                 face_window.append(img)
 
             if not all_read: continue
@@ -262,10 +319,11 @@ class Dataset(object):
                 should_load_diff_video = True
                 #print("This specific audio is invalid {0}".format(join(vidname, "audio.wav")))
                 continue
-
-            # if idx % 1000 == 0:
-            #   save_sample_images(np.concatenate(face_window, axis=2), idx, mel)
-
+            
+            
+            #face_window = self.apply_lip_mask(face_window)
+            save_sample_images(face_window)
+            
             # H x W x 3 * T
             x = np.concatenate(face_window, axis=2) / 255.
             x = x.transpose(2, 0, 1)
@@ -277,37 +335,93 @@ class Dataset(object):
 
             return x, mel, regression_y, classification_y
 
-def save_sample_images(x, idx, orig_mel):
+    def blackout_non_lip(self, img, bbox):
+        """
+        Black out areas outside the lips region.
+        
+        Args:
+            img (np.ndarray): Input image as a numpy array of shape (H, W, C).
+            bbox (list or tuple): Normalized bounding box [x_min, y_min, x_max, y_max] 
+                                  with values between 0 and 1.
+        
+        Returns:
+            np.ndarray: The image with non-lip areas blacked out.
+        """
+        H, W = img.shape[:2]
+        # Convert normalized coordinates to pixel coordinates.
+        x_min = int(bbox[0])
+        y_min = int(bbox[1])
+        x_max = int(bbox[2])
+        y_max = int(bbox[3])
+        
+        # Create a binary mask with 1s in the lips region and 0s elsewhere.
+        mask = np.zeros((H, W), dtype=np.float32)
+        mask[y_min:y_max, x_min:x_max] = 1.0
+        
+        # If the image has multiple channels, expand the mask.
+        if img.ndim == 3:
+            mask = np.expand_dims(mask, axis=-1)
+        
+        # Multiply the image by the mask to blackout non-lip regions.
+        img_masked = img * mask
+        return img_masked
+
+    def apply_lip_mask(self, window):
+            masked_frames = []
+
+            for frame in window:
+                #frame_rgb = (frame * 255).astype(np.uint8)
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                results = self.face_mesh.process(frame_rgb)
+
+                if results.multi_face_landmarks:
+                    # Get the mouth landmarks (MediaPipe Face Mesh landmarks for mouth are from 61 to 80)
+                    mouth_points = []
+                    h, w, _ = frame.shape
+                    split_row = h // 2
+                    for idx in LIPS_LANDMARKS:
+                        lm = results.multi_face_landmarks[0].landmark[idx]
+                        x, y = int(lm.x * w), int(lm.y * h)
+                        mouth_points.append([x, y])
+
+                    # Convert the list of mouth points to a NumPy array for easier manipulation.
+                    mouth_points = np.array(mouth_points)
+
+                    # Compute the bounding rectangle coordinates.
+                    x_min = np.min(mouth_points[:, 0])
+                    x_max = np.max(mouth_points[:, 0])
+                    y_min = np.min(mouth_points[:, 1])
+                    y_max = np.max(mouth_points[:, 1])
+
+                    # Calculate the width and height of the mouth region.
+                    width = x_max - x_min
+                    height = y_max - y_min
+
+                    # Define a padding factor (e.g., 50% larger in each direction).
+                    pad_width_factor = 0.5  # Adjust this value as needed.
+                    pad_height_factor = 0.5  # Adjust this value as needed.
+                    pad_x = int(width * pad_width_factor)
+                    pad_y = int(height * pad_height_factor)
+
+                    # Expand the rectangle and ensure the coordinates stay within frame boundaries.
+                    x_min_expanded = max(x_min - pad_x, 0)
+                    y_min_expanded = max(y_min - pad_y, 0)
+                    x_max_expanded = min(x_max + pad_x, w)
+                    y_max_expanded = min(y_max + pad_y, h)
+
+                    bbox = [x_min_expanded, y_min_expanded, x_max_expanded, y_max_expanded]
+                    img_masked = self.blackout_non_lip(frame, bbox)
+                    masked_frames.append(img_masked)
+                else:
+                    bbox = [0.0, 0.0, 1.0, 1.0]
+                    masked_frames.append(frame)
+                    
+            return masked_frames
+
+def save_sample_images(x):
     
-    x = x.transpose(2, 0, 1)  # Now x is of shape (3*T, H, W)
-
-    x = x[:, x.shape[1] // 2:, :]
-
-    x_final = x.transpose(1, 2, 0)  # Transpose back to H x W x C
-
-    # Initialize an empty list to store each image
-    images = []
-
-    for i in range(5):  # There are 5 images, hence 5 sets of 3 channels
-        img = x_final[:, :, i*3:(i+1)*3]  # Select the i-th image channels
-        img = img.astype(np.uint8)  # Convert back to uint8 for saving
-        images.append(img)
-
-    # Concatenate the images horizontally
-    concatenated_image = np.hstack(images)
-
-    # Save the concatenated image
-    cv2.imwrite('img_{0}_concatenated.jpg'.format(idx), concatenated_image)
+    for idx, img in enumerate(x):
+      # Save the concatenated image
+      cv2.imwrite('img_{0}_concatenated.jpg'.format(idx), img)
     
-    # Persist the mel-spectrogram as an image
-    plt.figure(figsize=(10, 4))
-    plt.imshow(orig_mel.T, aspect='auto', origin='lower', interpolation='none')
-    plt.colorbar(format='%+2.0f dB')
-    plt.title('Mel-Spectrogram')
-    plt.xlabel('Time')
-    plt.ylabel('Frequency')
-    plt.tight_layout()
-
-    # Save as image
-    plt.savefig("img_{0}_mel_spectrogram.png".format(idx))
-    plt.close()
