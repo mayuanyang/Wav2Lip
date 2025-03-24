@@ -20,6 +20,38 @@ def initialize_weights(module):
             nn.init.constant_(module.bias, 0)
             #print('Init')
 
+class PositionalEncoding2D(nn.Module):
+    def __init__(self, d_model: int, max_h: int, max_w: int, dropout: float = 0.1):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        
+        # 创建二维位置编码张量 (H, W, d_model)
+        pe = torch.zeros(max_h, max_w, d_model)
+        
+        # 行方向的位置编码（height）
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+        pos_row = torch.arange(max_h).unsqueeze(1)  # 形状：(H, 1)
+        # 广播相乘：(H,1) * (d_model/2,) → (H, d_model/2)
+        pe[:, :, 0::2] = torch.sin(pos_row * div_term).unsqueeze(1)  # 扩展为 (H, 1, d_model/2)
+        
+        # 列方向的位置编码（width）
+        pos_col = torch.arange(max_w).unsqueeze(0)  # 形状：(1, W)
+        # 广播相乘：(1, W) * (d_model/2,) → (W, d_model/2) → 需要调整维度
+        pe[:, :, 1::2] = torch.cos(pos_col.unsqueeze(-1) * div_term.unsqueeze(0))  # 关键修改
+        
+        # 调整形状为 (1, d_model, H, W)
+        self.register_buffer('pe', pe.permute(2, 0, 1).unsqueeze(0))  # 形状：(1, d_model, H, W)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: 输入特征图，形状为 (B, C, H, W)
+        Returns:
+            编码后的位置特征，形状与输入相同
+        """
+        # 确保位置编码的 H 和 W 不超过输入的 H 和 W
+        _, _, H, W = x.shape
+        return self.dropout(x + self.pe[:, :, :H, :W])
       
 class TransformerSyncnetV2(nn.Module):
     def __init__(self, num_heads=8, num_encoder_layers=4, embed_dim=512):
@@ -87,6 +119,9 @@ class TransformerSyncnetV2(nn.Module):
         )        
         
         self.ln1 = nn.LayerNorm(512)
+        
+        self.face_pos_encoder = PositionalEncoding2D(512, 12, 24)
+        self.audio_pos_encoder = PositionalEncoding2D(512, 20, 4)
                 
         
         self.attn_layers = nn.ModuleList([
@@ -147,7 +182,7 @@ class TransformerSyncnetV2(nn.Module):
         # Scale to ensure it does not reach exactly 0 or 1
         audio_embedding = audio_embedding * (1 - epsilon) + epsilon
         
-        save_every_s_steps = 200
+        save_every_s_steps = 2000
         
         face1 = self.face_encoder1(face_embedding)
         #face1_to_face3 = self.face1_to_face3_skip(face1)
@@ -189,8 +224,8 @@ class TransformerSyncnetV2(nn.Module):
         
                 
         # --- Apply positional encoding separately to each modality ---
-        # face_features = self.pos_encoder(face_features)
-        # audio_features = self.pos_encoder(audio_features)
+        face_features = self.face_pos_encoder(face_features)
+        audio_features = self.audio_pos_encoder(audio_features)
                 
         
         B, C, H, W = face_features.shape

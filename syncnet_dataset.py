@@ -204,6 +204,7 @@ class Dataset(object):
                     try:
                         img = cv2.resize(img, (hparams.img_size * self.img_size_factor, hparams.img_size * self.img_size_factor))                            
                         
+                        img = self.apply_lip_mask_single(img)
                         if len(face_image_cache) < hparams.syncnet_image_cache_size:
                           face_image_cache[fname] = img  # Cache the resized image
                         
@@ -275,7 +276,7 @@ class Dataset(object):
                 continue
             
             
-            face_window = self.apply_lip_mask(face_window)
+            #face_window = self.apply_lip_mask(face_window)
             save_sample_images(face_window)
             
             # H x W x 3 * T
@@ -320,6 +321,55 @@ class Dataset(object):
         img_masked = img * mask
         return img_masked
 
+    def apply_lip_mask_single(self, frame):
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        results = self.face_mesh.process(frame_rgb)
+
+        if results.multi_face_landmarks:
+            # Get the mouth landmarks (MediaPipe Face Mesh landmarks for mouth are from 61 to 80)
+            mouth_points = []
+            h, w, _ = frame.shape
+            split_row = h // 2
+            for idx in LIPS_LANDMARKS:
+                lm = results.multi_face_landmarks[0].landmark[idx]
+                x, y = int(lm.x * w), int(lm.y * h)
+                mouth_points.append([x, y])
+
+            # Convert the list of mouth points to a NumPy array for easier manipulation.
+            mouth_points = np.array(mouth_points)
+
+            # Compute the bounding rectangle coordinates.
+            x_min = np.min(mouth_points[:, 0])
+            x_max = np.max(mouth_points[:, 0])
+            y_min = np.min(mouth_points[:, 1])
+            y_max = np.max(mouth_points[:, 1])
+
+            # Calculate the width and height of the mouth region.
+            width = x_max - x_min
+            height = y_max - y_min
+
+            # Define a padding factor (e.g., 50% larger in each direction).
+            pad_width_factor = 0.4  # Adjust this value as needed.
+            pad_height_factor = 0.4  # Adjust this value as needed.
+            pad_x = int(width * pad_width_factor)
+            pad_y = int(height * pad_height_factor)
+
+            # Expand the rectangle and ensure the coordinates stay within frame boundaries.
+            x_min_expanded = max(x_min - pad_x, 0)
+            y_min_expanded = max(y_min - pad_y, 0)
+            x_max_expanded = min(x_max + pad_x, w)
+            y_max_expanded = min(y_max + pad_y, h)
+
+            bbox = [x_min_expanded, y_min_expanded, x_max_expanded, y_max_expanded]
+            img_masked = self.blackout_non_lip(frame, bbox)
+            
+        else:
+            bbox = [0.0, 0.0, 1.0, 1.0]
+        
+        return img_masked
+      
+      
     def apply_lip_mask(self, window):
             masked_frames = []
 
