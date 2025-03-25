@@ -277,7 +277,7 @@ class Dataset(object):
             
             
             #face_window = self.apply_lip_mask(face_window)
-            save_sample_images(face_window)
+            #save_sample_images(face_window)
             
             # H x W x 3 * T
             x = np.concatenate(face_window, axis=2) / 255.
