@@ -64,14 +64,14 @@ class TransformerSyncnetV2(nn.Module):
             Conv2d(15, 128, kernel_size=3, stride=2, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            #SpatialAttention(hidden_channels=128)
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.face_encoder2 = nn.Sequential(
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            #SpatialAttention(hidden_channels=256)
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.face_encoder3 = nn.Sequential(
