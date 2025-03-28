@@ -86,6 +86,9 @@ class TransformerSyncnetV2(nn.Module):
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
+        
+        self.face1_attention = nn.MultiheadAttention(embed_dim=128, num_heads=4)
+    
                 
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
@@ -169,6 +172,7 @@ class TransformerSyncnetV2(nn.Module):
         face_embedding: tensor of shape (B, 15, H, W) -> 5 images concatenated (each 3 channels)
         audio_embedding: tensor of shape (B, 1, H_audio, W_audio)
         """
+        
 
         # Calculate min and max values
         min_value = torch.min(audio_embedding)
@@ -185,7 +189,14 @@ class TransformerSyncnetV2(nn.Module):
         save_every_s_steps = 2000
         
         face1 = self.face_encoder1(face_embedding)
-        #face1_to_face3 = self.face1_to_face3_skip(face1)
+        # B, C, H, W = face1.size()
+        # # 将特征图展平并转换为 (L, B, C)
+        # x_seq = face1.view(B, C, H * W).permute(2, 0, 1)  # (H*W, B, C)
+        # # 执行 self attention
+        # attn_output, _ = self.face1_attention(x_seq, x_seq, x_seq)
+        # # 将序列还原成 (B, C, H, W)
+        # face1 = face1 + attn_output.permute(1, 2, 0).view(B, C, H, W)
+        
         
         if step % save_every_s_steps == 0:
           self.save_sample_images(face1, 'face1', step)
@@ -247,7 +258,7 @@ class TransformerSyncnetV2(nn.Module):
             # Apply multi-head attention
             attn_output, _ = layer(attn_output, combined, combined)
             # Apply LayerNorm after attention
-            attn_output = layer_norm(attn_output)
+            attn_output = layer_norm(attn_output + combined)
 
         attn_output = attn_output.permute(1, 0, 2).view(B, C, 16, 23)
         
