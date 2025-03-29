@@ -61,15 +61,15 @@ class TransformerSyncnetV2(nn.Module):
         # --- Face encoder for individual frames ---
         self.face_encoder1 = nn.Sequential(
             # Input: (B, 15, H, W)  where 15 = 5 images x 3 channels
-            Conv2d(15, 128, kernel_size=3, stride=2, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(15, 256, kernel_size=3, stride=2, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.face_encoder2 = nn.Sequential(
-            Conv2d(128, 256, kernel_size=3, stride=2, padding=1),  # Downsample
+            Conv2d(256, 256, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
@@ -205,14 +205,14 @@ class TransformerSyncnetV2(nn.Module):
         if step % save_every_s_steps == 0:
           self.save_sample_images(face3, 'face3', step)
         
-        B, C, H, W = face3.size()
-        #print('The size', H, W)
-        # 将特征图展平并转换为 (L, B, C)
-        x_seq = face3.view(B, C, H * W).permute(2, 0, 1)  # (H*W, B, C)
-        # 执行 self attention
-        attn_output, _ = self.face3_attention(x_seq, x_seq, x_seq)
-        # 将序列还原成 (B, C, H, W)
-        face3 = face3 + attn_output.permute(1, 2, 0).view(B, C, H, W)
+        # B, C, H, W = face3.size()
+        # #print('The size', H, W)
+        # # 将特征图展平并转换为 (L, B, C)
+        # x_seq = face3.view(B, C, H * W).permute(2, 0, 1)  # (H*W, B, C)
+        # # 执行 self attention
+        # attn_output, _ = self.face3_attention(x_seq, x_seq, x_seq)
+        # # 将序列还原成 (B, C, H, W)
+        # face3 = face3 + attn_output.permute(1, 2, 0).view(B, C, H, W)
         
         face4 = self.face_encoder4(face3)
         
