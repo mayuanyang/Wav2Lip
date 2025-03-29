@@ -65,6 +65,7 @@ class TransformerSyncnetV2(nn.Module):
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.face_encoder2 = nn.Sequential(
@@ -78,6 +79,7 @@ class TransformerSyncnetV2(nn.Module):
             Conv2d(256, 512, kernel_size=3, stride=2, padding=1),  # Downsample width
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
             #SpatialAttention(hidden_channels=512)
         )
         
@@ -87,7 +89,7 @@ class TransformerSyncnetV2(nn.Module):
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
-        self.face1_attention = nn.MultiheadAttention(embed_dim=128, num_heads=4)
+        self.face3_attention = nn.MultiheadAttention(embed_dim=512, num_heads=4)
     
                 
         # --- Audio encoder ---
@@ -121,8 +123,7 @@ class TransformerSyncnetV2(nn.Module):
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )        
         
-        self.ln1 = nn.LayerNorm(512)
-        
+        self.face3_pos_encoder = PositionalEncoding2D(512, 24, 48)
         self.face_pos_encoder = PositionalEncoding2D(512, 12, 24)
         self.audio_pos_encoder = PositionalEncoding2D(512, 20, 4)
                 
@@ -149,7 +150,7 @@ class TransformerSyncnetV2(nn.Module):
             # nn.Linear(1536, 512), for 192
             nn.Linear(3072, 512), 
             nn.LeakyReLU(0.2, inplace=False),
-            nn.Dropout(p=0.3),
+            nn.Dropout(p=0.1),
             nn.Linear(512, 1)  # binary classification output
         )
       
@@ -189,14 +190,7 @@ class TransformerSyncnetV2(nn.Module):
         save_every_s_steps = 2000
         
         face1 = self.face_encoder1(face_embedding)
-        # B, C, H, W = face1.size()
-        # # 将特征图展平并转换为 (L, B, C)
-        # x_seq = face1.view(B, C, H * W).permute(2, 0, 1)  # (H*W, B, C)
-        # # 执行 self attention
-        # attn_output, _ = self.face1_attention(x_seq, x_seq, x_seq)
-        # # 将序列还原成 (B, C, H, W)
-        # face1 = face1 + attn_output.permute(1, 2, 0).view(B, C, H, W)
-        
+                
         
         if step % save_every_s_steps == 0:
           self.save_sample_images(face1, 'face1', step)
@@ -205,12 +199,20 @@ class TransformerSyncnetV2(nn.Module):
         if step % save_every_s_steps == 0:
           self.save_sample_images(face2, 'face2', step)
         
-        #face2 = face2 + face_skip1
                         
         face3 = self.face_encoder3(face2)
+        face3 = self.face3_pos_encoder(face3)
         if step % save_every_s_steps == 0:
           self.save_sample_images(face3, 'face3', step)
-        #face3 = face3 + face1_to_face3
+        
+        B, C, H, W = face3.size()
+        #print('The size', H, W)
+        # 将特征图展平并转换为 (L, B, C)
+        x_seq = face3.view(B, C, H * W).permute(2, 0, 1)  # (H*W, B, C)
+        # 执行 self attention
+        attn_output, _ = self.face3_attention(x_seq, x_seq, x_seq)
+        # 将序列还原成 (B, C, H, W)
+        face3 = face3 + attn_output.permute(1, 2, 0).view(B, C, H, W)
         
         face4 = self.face_encoder4(face3)
         
