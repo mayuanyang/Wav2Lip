@@ -54,13 +54,11 @@ class PositionalEncoding2D(nn.Module):
         return self.dropout(x + self.pe[:, :, :H, :W])
       
 class TransformerSyncnet(nn.Module):
-    def __init__(self, num_heads=8, num_encoder_layers=4, embed_dim=512):
+    def __init__(self, num_heads=8, num_encoder_layers=4):
         super(TransformerSyncnet, self).__init__()
         
-        self.embed_dim = embed_dim
         # --- Face encoder for individual frames ---
         self.face_encoder1 = nn.Sequential(
-            # Input: (B, 15, H, W)  where 15 = 5 images x 3 channels
             Conv2d(3, 128, kernel_size=3, stride=2, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
@@ -120,13 +118,13 @@ class TransformerSyncnet(nn.Module):
             Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-        )        
+        )                        
         
-        self.face_pos_encoder = PositionalEncoding2D(512, 12, 24)
-        self.audio_pos_encoder = PositionalEncoding2D(512, 20, 4)
-                
+        # 新增：各自模态的 self-attention 层
+        self.face_self_attn = nn.MultiheadAttention(embed_dim=512, num_heads=num_heads)
+        self.audio_self_attn = nn.MultiheadAttention(embed_dim=256, num_heads=num_heads)
         
-        self.attn_layers = nn.ModuleList([
+        self.cross_attn_layers = nn.ModuleList([
             nn.MultiheadAttention(768, num_heads, dropout=0.1) 
             for _ in range(num_encoder_layers)
         ])
@@ -134,9 +132,7 @@ class TransformerSyncnet(nn.Module):
         self.layer_norms = nn.ModuleList([
             nn.LayerNorm(768) for _ in range(num_encoder_layers)
         ])
-        
-        self.fusion_proj = nn.Linear(768 ,256)
-        
+                
         
         # Final classification head.
         # We pool tokens for each modality separately, then concatenate their global features.
@@ -167,22 +163,11 @@ class TransformerSyncnet(nn.Module):
         face_embedding: tensor of shape (B, 15, H, W) -> 5 images concatenated (each 3 channels)
         audio_embedding: tensor of shape (B, 1, H_audio, W_audio)
         """
+        num_of_frames = 5
         
-        save_every_s_steps = 2
+        save_every_s_steps = 1000
         
         batch_size = face_embedding.shape[0]
-
-        # Calculate min and max values
-        min_value = torch.min(audio_embedding)
-        max_value = torch.max(audio_embedding)
-
-        epsilon = 1e-6
-
-        # Normalize the tensor to range (0, 1)
-        audio_embedding = (audio_embedding - min_value) / (max_value - min_value + epsilon)
-
-        # Scale to ensure it does not reach exactly 0 or 1
-        audio_embedding = audio_embedding * (1 - epsilon) + epsilon
         
         # --- Process audio modality ---
         audio_features1 = self.audio_encoder1(audio_embedding)  # (B, 512, H_a, W_a)        
@@ -191,16 +176,14 @@ class TransformerSyncnet(nn.Module):
         
         audio_features3 = self.audio_encoder3(audio_features2)
         
-        audio_features4 = self.audio_encoder4(audio_features3)
+        audio_features4 = self.audio_encoder4(audio_features3)        
         
+        a_seq=audio_features4.view(batch_size, num_of_frames ,-1).permute(1, 0, 2) 
         
-        a_seq=audio_features4.view(batch_size, 5 ,-1).permute(1, 0, 2) 
-        a_seq_flat = a_seq.flatten(1)
-        a_seq_flat = a_seq_flat.view(batch_size, 5, -1).permute(1, 0, 2)
                 
         ### ---视觉分支--- ###
                 
-        face_embedding = face_embedding.view(batch_size *5 ,3 ,192 ,384)
+        face_embedding = face_embedding.view(batch_size * num_of_frames ,3 ,192 ,384)
         
         face1 = self.face_encoder1(face_embedding)
         face2 = self.face_encoder2(face1)
@@ -215,11 +198,26 @@ class TransformerSyncnet(nn.Module):
           self.save_sample_images(face3, 'face3', step)
           self.save_sample_images(face4, 'face4', step)
         
-        combined = torch.cat((face_seq, a_seq_flat), dim=2)
+        
+        face_self_out, _ = self.face_self_attn(
+            query=face_seq,
+            key=face_seq,
+            value=face_seq
+        )
+        
+        # Audio 的 self-attention
+        audio_self_out, _ = self.audio_self_attn(
+            query=a_seq,
+            key=a_seq,
+            value=a_seq
+        )
+
+        # --- 合并特征 ---
+        combined = torch.cat((face_self_out, audio_self_out), dim=2)  # 沿特征维度拼接
         
         attn_output = combined
         
-        for layer, layer_norm in zip(self.attn_layers, self.layer_norms):
+        for layer, layer_norm in zip(self.cross_attn_layers, self.layer_norms):
             # Apply multi-head attention
             attn_output, _ = layer(attn_output, combined, combined)
             # Apply LayerNorm after attention
