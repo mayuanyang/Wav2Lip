@@ -1,7 +1,7 @@
 from os.path import join
 from tqdm import tqdm
 
-from models import TransformerSyncnetV2 as TransformerSyncnet
+from models import TransformerSyncnet as TransformerSyncnet
 import audio
 import torch.nn.functional as F
 
@@ -181,8 +181,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               
               
               # Flatten the tensors to [2, 1024 * 24 * 48]
-              face_embedding = face_embedding.reshape(face_embedding.size(0), -1)
-              audio_embedding = audio_embedding.reshape(audio_embedding.size(0), -1)
+              #face_embedding = face_embedding.reshape(face_embedding.size(0), -1)
+              #audio_embedding = audio_embedding.reshape(audio_embedding.size(0), -1)
               
               #print('The shapes', face_embedding.shape, audio_embedding.shape, cosine_y.shape, classification_y.shape)
               #cos_loss = cosine_loss(face_embedding, audio_embedding, classification_y)
