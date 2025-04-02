@@ -67,7 +67,7 @@ consecutive_threshold_count = 0
 print('use_cuda: {}'.format(use_cuda))
 
 
-cross_entropy_loss = nn.CrossEntropyLoss()
+cross_entropy_loss = nn.BCEWithLogitsLoss()
 
 logloss = nn.BCELoss()
 def cosine_loss(a, v, y):
@@ -122,7 +122,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         
         prog_bar = tqdm(enumerate(train_data_loader))
         #print_current_lr(optimizer)
-        for step, (x, mel, y) in prog_bar:
+        for step, (x, mel, regression_y, classification_y) in prog_bar:
             
             model.train()
             optimizer.zero_grad()
@@ -134,9 +134,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
             output, audio_embedding, face_embedding = model(x, mel)
             
-            y = y.to(device)                        
+            classification_y = classification_y.unsqueeze(1).float()
+            classification_y = classification_y.to(device)              
             
-            ce_loss = cross_entropy_loss(output, y)
+            ce_loss = cross_entropy_loss(output, classification_y)
             
             scaler.scale(ce_loss).backward()
 
@@ -324,8 +325,8 @@ if __name__ == "__main__":
     if not os.path.exists(checkpoint_dir): os.mkdir(checkpoint_dir)
 
     # Dataset and Dataloader setup
-    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation)
-    test_dataset = Dataset('val', args.data_root, args.train_root, False)
+    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation, img_size_factor=2)
+    test_dataset = Dataset('val', args.data_root, args.train_root, False, img_size_factor=2)
     #print(train_dataset.all_videos)
 
     train_data_loader = data_utils.DataLoader(
