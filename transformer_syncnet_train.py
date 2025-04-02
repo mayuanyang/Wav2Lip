@@ -178,22 +178,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               classification_y = classification_y.to(device)
               
               ce_loss = cross_entropy_loss(output, classification_y)
-              
-              
-              # Flatten the tensors to [2, 1024 * 24 * 48]
-              #face_embedding = face_embedding.reshape(face_embedding.size(0), -1)
-              #audio_embedding = audio_embedding.reshape(audio_embedding.size(0), -1)
-              
-              #print('The shapes', face_embedding.shape, audio_embedding.shape, cosine_y.shape, classification_y.shape)
-              #cos_loss = cosine_loss(face_embedding, audio_embedding, classification_y)
-              
-              # For regression, we want predictions in the [0,1] range.
-              #pred = torch.sigmoid(output)
-              #loss = regression_loss(pred, regression_y)
-              
-              #print('The shapes', face_embedding.shape, audio_embedding.shape, classification_y.shape)
-              #contra_loss = contrastive_loss(face_embedding, audio_embedding, classification_y)
-            
             
             ce_loss.backward()
             optimizer.step()
@@ -442,7 +426,7 @@ if __name__ == "__main__":
 
     if checkpoint_path is not None:
         load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=True)
-
+            
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
     train(device, model, train_data_loader, test_data_loader, optimizer,

@@ -55,7 +55,6 @@ class TransformerEfficientNetB3Syncnet(nn.Module):
         
         # Face Encoder
         self.face_encoder = models.efficientnet_b3(pretrained=True)
-        #self.face_encoder.features[0][0] = modify_efficientnet_conv1(self.face_encoder, in_channels=15)
         self.face_encoder.classifier = nn.Identity()
         
         # Audio Encoder
