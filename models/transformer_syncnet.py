@@ -20,38 +20,23 @@ def initialize_weights(module):
             nn.init.constant_(module.bias, 0)
             #print('Init')
 
-class PositionalEncoding2D(nn.Module):
+class LearnablePositionalEncoding2D(nn.Module):
     def __init__(self, d_model: int, max_h: int, max_w: int, dropout: float = 0.1):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
+        # 初始化一个可学习的位置编码参数，形状为 (1, d_model, max_h, max_w)
+        self.pos_embedding = nn.Parameter(torch.randn(1, d_model, max_h, max_w))
         
-        # 创建二维位置编码张量 (H, W, d_model)
-        pe = torch.zeros(max_h, max_w, d_model)
-        
-        # 行方向的位置编码（height）
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
-        pos_row = torch.arange(max_h).unsqueeze(1)  # 形状：(H, 1)
-        # 广播相乘：(H,1) * (d_model/2,) → (H, d_model/2)
-        pe[:, :, 0::2] = torch.sin(pos_row * div_term).unsqueeze(1)  # 扩展为 (H, 1, d_model/2)
-        
-        # 列方向的位置编码（width）
-        pos_col = torch.arange(max_w).unsqueeze(0)  # 形状：(1, W)
-        # 广播相乘：(1, W) * (d_model/2,) → (W, d_model/2) → 需要调整维度
-        pe[:, :, 1::2] = torch.cos(pos_col.unsqueeze(-1) * div_term.unsqueeze(0))  # 关键修改
-        
-        # 调整形状为 (1, d_model, H, W)
-        self.register_buffer('pe', pe.permute(2, 0, 1).unsqueeze(0))  # 形状：(1, d_model, H, W)
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
             x: 输入特征图，形状为 (B, C, H, W)
         Returns:
-            编码后的位置特征，形状与输入相同
+            加入可学习位置编码后的特征图，形状与输入相同
         """
-        # 确保位置编码的 H 和 W 不超过输入的 H 和 W
+        # 确保只取对应输入大小的部分
         _, _, H, W = x.shape
-        return self.dropout(x + self.pe[:, :, :H, :W])
+        return self.dropout(x + self.pos_embedding[:, :, :H, :W])
       
 class TransformerSyncnet(nn.Module):
     def __init__(self, num_heads=8, num_encoder_layers=4):
@@ -118,20 +103,19 @@ class TransformerSyncnet(nn.Module):
             Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-        )                        
+        )
+        
+        self.face_pos_encoder = LearnablePositionalEncoding2D(d_model=256, max_h=1, max_w=2, dropout=0.1)
+        self.audio_pos_encoder = LearnablePositionalEncoding2D(d_model=256, max_h=5, max_w=1, dropout=0.1)
         
         # 新增：各自模态的 self-attention 层
         self.face_self_attn = nn.MultiheadAttention(embed_dim=512, num_heads=num_heads)
         self.audio_self_attn = nn.MultiheadAttention(embed_dim=256, num_heads=num_heads)
         
-        self.cross_attn_layers = nn.ModuleList([
-            nn.MultiheadAttention(768, num_heads, dropout=0.1) 
-            for _ in range(num_encoder_layers)
-        ])
-        
-        self.layer_norms = nn.ModuleList([
-            nn.LayerNorm(768) for _ in range(num_encoder_layers)
-        ])
+        self.transformer_encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=768, nhead=num_heads, dropout=0.1),
+            num_layers=num_encoder_layers
+        )
                 
         
         # Final classification head.
@@ -176,19 +160,21 @@ class TransformerSyncnet(nn.Module):
         
         audio_features3 = self.audio_encoder3(audio_features2)
         
-        audio_features4 = self.audio_encoder4(audio_features3)        
+        audio_features4 = self.audio_encoder4(audio_features3)
+        
+        audio_features4 = self.audio_pos_encoder(audio_features4)
         
         a_seq=audio_features4.view(batch_size, num_of_frames ,-1).permute(1, 0, 2) 
-        
-                
+                        
         ### ---视觉分支--- ###
-                
         face_embedding = face_embedding.view(batch_size * num_of_frames ,3 ,192 ,384)
         
         face1 = self.face_encoder1(face_embedding)
         face2 = self.face_encoder2(face1)
         face3 = self.face_encoder3(face2)
         face4 = self.face_encoder4(face3)
+        face4 = self.face_pos_encoder(face4)
+        
         face_features = face4.flatten(1) #[b*5 ，512]
         face_seq = face_features.view(batch_size, 5, -1).permute(1, 0, 2)
         
@@ -213,16 +199,9 @@ class TransformerSyncnet(nn.Module):
         )
 
         # --- 合并特征 ---
-        combined = torch.cat((face_self_out, audio_self_out), dim=2)  # 沿特征维度拼接
+        combined = torch.cat((face_self_out, audio_self_out), dim=2)  # 沿特征维度拼接       
         
-        attn_output = combined
-        
-        for layer, layer_norm in zip(self.cross_attn_layers, self.layer_norms):
-            # Apply multi-head attention
-            attn_output, _ = layer(attn_output, combined, combined)
-            # Apply LayerNorm after attention
-            attn_output = layer_norm(attn_output + combined)
-        
+        attn_output = self.transformer_encoder(combined)
         attn_output = attn_output.permute(1, 0, 2).reshape(batch_size, -1)
         
         output = self.classifier(attn_output)

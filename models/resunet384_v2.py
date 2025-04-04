@@ -211,11 +211,13 @@ class ResUNet384V2(nn.Module):
         else:
             outputs = x
             
+        # TODO: 讲output替换原本input的masked的images放去FaceEnhancer进行微调
+            
         return outputs
 
-class Discriminator(nn.Module):
+class FaceEnhancer(nn.Module):
     def __init__(self):
-        super(Discriminator, self).__init__()
+        super(FaceEnhancer, self).__init__()
         self.model = nn.Sequential(
             Conv2d(3, 64, kernel_size=4, stride=2, padding=1),  # Input channels are now 3
             Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
@@ -225,6 +227,7 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, x):
+        
         input_dim_size = len(x.size())
         if input_dim_size > 4:
             x = torch.cat([x[:, :, i] for i in range(x.size(2))], dim=0)
