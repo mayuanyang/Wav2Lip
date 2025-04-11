@@ -414,14 +414,14 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # Model
-    model = TransformerSyncnet(num_heads=8, num_encoder_layers=4).to(device)
+    model = TransformerSyncnet(num_heads=8, num_encoder_layers=6).to(device)
     
     
     optimizer = optim.AdamW(
         model.parameters(),
-        lr=1e-5,          
+        lr=5e-6,          
         #momentum=0.9,     # 推荐添加动量
-        weight_decay=1e-5 # 可选正则化
+        weight_decay=1e-6 # 可选正则化
     )
 
     if checkpoint_path is not None:
