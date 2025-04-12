@@ -74,11 +74,11 @@ class TransformerSyncnet(nn.Module):
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             
-            Conv2d(256, 256, kernel_size=3, stride=2, padding=1),  # Downsample
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(256, 512, kernel_size=3, stride=2, padding=1),  # Downsample
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
             
-            Conv2d(256, 256, kernel_size=3, stride=2, padding=1),  # Downsample
+            Conv2d(512, 256, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )    
                 
@@ -95,16 +95,19 @@ class TransformerSyncnet(nn.Module):
             Conv2d(64, 128, kernel_size=3, stride=2, padding=1, leaking=0.05),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.audio_encoder3 = nn.Sequential(
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1, leaking=0.05),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.audio_encoder4 = nn.Sequential(
             Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )

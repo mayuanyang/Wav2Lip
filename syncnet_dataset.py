@@ -204,7 +204,7 @@ class Dataset(object):
                     try:
                         img = cv2.resize(img, (hparams.img_size * self.img_size_factor, hparams.img_size * self.img_size_factor))                            
                         
-                        img = self.apply_lip_mask_single(img)
+                        img = apply_lip_mask_single(img, self.face_mesh)
                         if len(face_image_cache) < hparams.syncnet_image_cache_size:
                           face_image_cache[fname] = img  # Cache the resized image
                         
@@ -276,9 +276,6 @@ class Dataset(object):
                 continue
             
             
-            #face_window = self.apply_lip_mask(face_window)
-            #save_sample_images(face_window)
-            
             # H x W x 3 * T
             x = np.concatenate(face_window, axis=2) / 255.
             x = x.transpose(2, 0, 1)
@@ -290,138 +287,76 @@ class Dataset(object):
 
             return x, mel, regression_y, classification_y
 
-    def blackout_non_lip(self, img, bbox):
-        """
-        Black out areas outside the lips region.
+def blackout_non_lip(img, bbox):
+    """
+    Black out areas outside the lips region.
+    
+    Args:
+        img (np.ndarray): Input image as a numpy array of shape (H, W, C).
+        bbox (list or tuple): Normalized bounding box [x_min, y_min, x_max, y_max] 
+                              with values between 0 and 1.
+    
+    Returns:
+        np.ndarray: The image with non-lip areas blacked out.
+    """
+    H, W = img.shape[:2]
+    # Convert normalized coordinates to pixel coordinates.
+    x_min = int(bbox[0])
+    y_min = int(bbox[1])
+    x_max = int(bbox[2])
+    y_max = int(bbox[3])
+    
+    # Create a binary mask with 1s in the lips region and 0s elsewhere.
+    mask = np.zeros((H, W), dtype=np.float32)
+    mask[y_min:y_max, x_min:x_max] = 1.0
+    
+    # If the image has multiple channels, expand the mask.
+    if img.ndim == 3:
+        mask = np.expand_dims(mask, axis=-1)
+    
+    # Multiply the image by the mask to blackout non-lip regions.
+    img_masked = img * mask
+    return img_masked
+def apply_lip_mask_single(frame, face_mesh):
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = face_mesh.process(frame_rgb)
+    if results.multi_face_landmarks:
+        # Get the mouth landmarks (MediaPipe Face Mesh landmarks for mouth are from 61 to 80)
+        mouth_points = []
+        h, w, _ = frame.shape
+        split_row = h // 2
+        for idx in LIPS_LANDMARKS:
+            lm = results.multi_face_landmarks[0].landmark[idx]
+            x, y = int(lm.x * w), int(lm.y * h)
+            mouth_points.append([x, y])
+        # Convert the list of mouth points to a NumPy array for easier manipulation.
+        mouth_points = np.array(mouth_points)
+        # Compute the bounding rectangle coordinates.
+        x_min = np.min(mouth_points[:, 0])
+        x_max = np.max(mouth_points[:, 0])
+        y_min = np.min(mouth_points[:, 1])
+        y_max = np.max(mouth_points[:, 1])
+        # Calculate the width and height of the mouth region.
+        width = x_max - x_min
+        height = y_max - y_min
+        # Define a padding factor (e.g., 50% larger in each direction).
+        pad_width_factor = 0.4  # Adjust this value as needed.
+        pad_height_factor = 0.5  # Adjust this value as needed.
+        pad_x = int(width * pad_width_factor)
+        pad_y = int(height * pad_height_factor)
+        # Expand the rectangle and ensure the coordinates stay within frame boundaries.
+        x_min_expanded = max(x_min - pad_x, 0)
+        y_min_expanded = max(y_min - pad_y, 0)
+        x_max_expanded = min(x_max + pad_x, w)
+        y_max_expanded = min(y_max + pad_y, h)
+        bbox = [x_min_expanded, y_min_expanded, x_max_expanded, y_max_expanded]
+        img_masked = blackout_non_lip(frame, bbox)
         
-        Args:
-            img (np.ndarray): Input image as a numpy array of shape (H, W, C).
-            bbox (list or tuple): Normalized bounding box [x_min, y_min, x_max, y_max] 
-                                  with values between 0 and 1.
-        
-        Returns:
-            np.ndarray: The image with non-lip areas blacked out.
-        """
-        H, W = img.shape[:2]
-        # Convert normalized coordinates to pixel coordinates.
-        x_min = int(bbox[0])
-        y_min = int(bbox[1])
-        x_max = int(bbox[2])
-        y_max = int(bbox[3])
-        
-        # Create a binary mask with 1s in the lips region and 0s elsewhere.
-        mask = np.zeros((H, W), dtype=np.float32)
-        mask[y_min:y_max, x_min:x_max] = 1.0
-        
-        # If the image has multiple channels, expand the mask.
-        if img.ndim == 3:
-            mask = np.expand_dims(mask, axis=-1)
-        
-        # Multiply the image by the mask to blackout non-lip regions.
-        img_masked = img * mask
-        return img_masked
+    else:
+        bbox = [0.0, 0.0, 1.0, 1.0]
+    
+    return img_masked
 
-    def apply_lip_mask_single(self, frame):
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        results = self.face_mesh.process(frame_rgb)
-
-        if results.multi_face_landmarks:
-            # Get the mouth landmarks (MediaPipe Face Mesh landmarks for mouth are from 61 to 80)
-            mouth_points = []
-            h, w, _ = frame.shape
-            split_row = h // 2
-            for idx in LIPS_LANDMARKS:
-                lm = results.multi_face_landmarks[0].landmark[idx]
-                x, y = int(lm.x * w), int(lm.y * h)
-                mouth_points.append([x, y])
-
-            # Convert the list of mouth points to a NumPy array for easier manipulation.
-            mouth_points = np.array(mouth_points)
-
-            # Compute the bounding rectangle coordinates.
-            x_min = np.min(mouth_points[:, 0])
-            x_max = np.max(mouth_points[:, 0])
-            y_min = np.min(mouth_points[:, 1])
-            y_max = np.max(mouth_points[:, 1])
-
-            # Calculate the width and height of the mouth region.
-            width = x_max - x_min
-            height = y_max - y_min
-
-            # Define a padding factor (e.g., 50% larger in each direction).
-            pad_width_factor = 0.4  # Adjust this value as needed.
-            pad_height_factor = 0.5  # Adjust this value as needed.
-            pad_x = int(width * pad_width_factor)
-            pad_y = int(height * pad_height_factor)
-
-            # Expand the rectangle and ensure the coordinates stay within frame boundaries.
-            x_min_expanded = max(x_min - pad_x, 0)
-            y_min_expanded = max(y_min - pad_y, 0)
-            x_max_expanded = min(x_max + pad_x, w)
-            y_max_expanded = min(y_max + pad_y, h)
-
-            bbox = [x_min_expanded, y_min_expanded, x_max_expanded, y_max_expanded]
-            img_masked = self.blackout_non_lip(frame, bbox)
-            
-        else:
-            bbox = [0.0, 0.0, 1.0, 1.0]
-        
-        return img_masked
-      
-      
-    def apply_lip_mask(self, window):
-            masked_frames = []
-
-            for frame in window:
-                #frame_rgb = (frame * 255).astype(np.uint8)
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-                results = self.face_mesh.process(frame_rgb)
-
-                if results.multi_face_landmarks:
-                    # Get the mouth landmarks (MediaPipe Face Mesh landmarks for mouth are from 61 to 80)
-                    mouth_points = []
-                    h, w, _ = frame.shape
-                    split_row = h // 2
-                    for idx in LIPS_LANDMARKS:
-                        lm = results.multi_face_landmarks[0].landmark[idx]
-                        x, y = int(lm.x * w), int(lm.y * h)
-                        mouth_points.append([x, y])
-
-                    # Convert the list of mouth points to a NumPy array for easier manipulation.
-                    mouth_points = np.array(mouth_points)
-
-                    # Compute the bounding rectangle coordinates.
-                    x_min = np.min(mouth_points[:, 0])
-                    x_max = np.max(mouth_points[:, 0])
-                    y_min = np.min(mouth_points[:, 1])
-                    y_max = np.max(mouth_points[:, 1])
-
-                    # Calculate the width and height of the mouth region.
-                    width = x_max - x_min
-                    height = y_max - y_min
-
-                    # Define a padding factor (e.g., 50% larger in each direction).
-                    pad_width_factor = 0.4  # Adjust this value as needed.
-                    pad_height_factor = 0.5  # Adjust this value as needed.
-                    pad_x = int(width * pad_width_factor)
-                    pad_y = int(height * pad_height_factor)
-
-                    # Expand the rectangle and ensure the coordinates stay within frame boundaries.
-                    x_min_expanded = max(x_min - pad_x, 0)
-                    y_min_expanded = max(y_min - pad_y, 0)
-                    x_max_expanded = min(x_max + pad_x, w)
-                    y_max_expanded = min(y_max + pad_y, h)
-
-                    bbox = [x_min_expanded, y_min_expanded, x_max_expanded, y_max_expanded]
-                    img_masked = self.blackout_non_lip(frame, bbox)
-                    masked_frames.append(img_masked)
-                else:
-                    bbox = [0.0, 0.0, 1.0, 1.0]
-                    masked_frames.append(frame)
-                    
-            return masked_frames
 
 def save_sample_images(x):
     
