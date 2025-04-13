@@ -85,21 +85,21 @@ class TransformerSyncnet(nn.Module):
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
             # Example input shape: (B, 1, H_audio, W_audio)
-            Conv2d(1, 64, kernel_size=3, stride=2, padding=1, leaking=0.05),
+            Conv2d(1, 64, kernel_size=3, stride=2, padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
 
         self.audio_encoder2 = nn.Sequential(
-            Conv2d(64, 128, kernel_size=3, stride=2, padding=1, leaking=0.05),
+            Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
         self.audio_encoder3 = nn.Sequential(
-            Conv2d(128, 256, kernel_size=3, stride=2, padding=1, leaking=0.05),
+            Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
