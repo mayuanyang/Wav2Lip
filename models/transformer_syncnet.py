@@ -120,7 +120,7 @@ class TransformerSyncnet(nn.Module):
         self.audio_self_attn = nn.MultiheadAttention(embed_dim=256, num_heads=num_heads)
         
         self.transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=768, nhead=num_heads, dropout=0.1),
+            nn.TransformerEncoderLayer(d_model=768, nhead=num_heads, dropout=0.1, activation='gelu'),
             num_layers=num_encoder_layers
         )
                 
