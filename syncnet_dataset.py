@@ -39,7 +39,7 @@ class Dataset(object):
         self.use_augmentation = use_augmentation
         self.img_size_factor = img_size_factor
         self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
+        #self.face_mesh = self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
         
 
     def get_frame_id(self, frame):
@@ -82,6 +82,10 @@ class Dataset(object):
 
     def __len__(self):
         return len(self.all_videos)
+      
+    def process_videos(self, num_workers):
+        with multiprocessing.Pool(processes=num_workers) as pool:
+            pool.map(self.process_video, self.all_videos)
 
     def compute_alignment_score(self, chosen_id, wrong_img_id, max_difference):
         """
@@ -193,60 +197,61 @@ class Dataset(object):
             face_window = []
 
             all_read = True
-            for fname in window_fnames:
-                if fname in face_image_cache:
-                    img = face_image_cache[fname]
-                else:
-                    img = cv2.imread(fname)
-                    if img is None:
-                        all_read = False
-                        break
-                    try:
-                        img = cv2.resize(img, (hparams.img_size * self.img_size_factor, hparams.img_size * self.img_size_factor))                            
-                        
-                        img = apply_lip_mask_single(img, self.face_mesh)
-                        if len(face_image_cache) < hparams.syncnet_image_cache_size:
-                          face_image_cache[fname] = img  # Cache the resized image
-                        
-                    except Exception as e:
-                        all_read = False
-                        break
-                
-                '''
-                Data augmentation
-                0 means unchange
-                1 for grayscale
-                2 for brightness
-                3 for contrast
-                '''
-                if self.use_augmentation:
-                  option = random.choices([0, 0, 0, 0, 0, 0, 0, 0, 4, 4])[0] 
+            with self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True) as face_mesh:
+              for fname in window_fnames:
+                  if fname in face_image_cache:
+                      img = face_image_cache[fname]
+                  else:
+                      img = cv2.imread(fname)
+                      if img is None:
+                          all_read = False
+                          break
+                      try:
+                          img = cv2.resize(img, (hparams.img_size * self.img_size_factor, hparams.img_size * self.img_size_factor))                            
+
+                          img = apply_lip_mask_single(img, face_mesh)
+                          if len(face_image_cache) < hparams.syncnet_image_cache_size:
+                            face_image_cache[fname] = img  # Cache the resized image
+                          
+                      except Exception as e:
+                          all_read = False
+                          break
                   
-                  if option == 1:
-                      img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                      img = cv2.merge([img_gray, img_gray, img_gray])
-                  elif option == 2:
-                      brightness_factor = np.random.uniform(0.7, 1.3)
-                      img = cv2.convertScaleAbs(img, alpha=brightness_factor, beta=0)
-                  elif option == 3:
-                      contrast_factor = np.random.uniform(0.7, 1.3)
-                      img = cv2.convertScaleAbs(img, alpha=contrast_factor, beta=0)
-                  elif option == 4:
-                      angle = np.random.uniform(-15, 15)  # Random angle between -15 and 15 degrees
+                  '''
+                  Data augmentation
+                  0 means unchange
+                  1 for grayscale
+                  2 for brightness
+                  3 for contrast
+                  '''
+                  if self.use_augmentation:
+                    option = random.choices([0, 0, 0, 0, 0, 0, 0, 0, 4, 4])[0] 
+                    
+                    if option == 1:
+                        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                        img = cv2.merge([img_gray, img_gray, img_gray])
+                    elif option == 2:
+                        brightness_factor = np.random.uniform(0.7, 1.3)
+                        img = cv2.convertScaleAbs(img, alpha=brightness_factor, beta=0)
+                    elif option == 3:
+                        contrast_factor = np.random.uniform(0.7, 1.3)
+                        img = cv2.convertScaleAbs(img, alpha=contrast_factor, beta=0)
+                    elif option == 4:
+                        angle = np.random.uniform(-15, 15)  # Random angle between -15 and 15 degrees
 
-                      # Get the image dimensions
-                      (h, w) = img.shape[:2]
+                        # Get the image dimensions
+                        (h, w) = img.shape[:2]
 
-                      # Calculate the center of the image
-                      center = (w // 2, h // 2)
+                        # Calculate the center of the image
+                        center = (w // 2, h // 2)
 
-                      # Get the rotation matrix
-                      rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+                        # Get the rotation matrix
+                        rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
 
-                      # Perform the rotation
-                      img = cv2.warpAffine(img, rotation_matrix, (w, h))
+                        # Perform the rotation
+                        img = cv2.warpAffine(img, rotation_matrix, (w, h))
 
-                face_window.append(img)
+                  face_window.append(img)
 
             if not all_read: continue
 
