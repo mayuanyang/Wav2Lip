@@ -116,8 +116,16 @@ class TransformerSyncnet(nn.Module):
         self.audio_pos_encoder = LearnablePositionalEncoding2D(d_model=256, max_h=5, max_w=1, dropout=0.1)
         
         # 新增：各自模态的 self-attention 层
-        self.face_self_attn = nn.MultiheadAttention(embed_dim=512, num_heads=num_heads)
-        self.audio_self_attn = nn.MultiheadAttention(embed_dim=256, num_heads=num_heads)
+        
+        self.face_self_attn = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=512, nhead=num_heads, dropout=0.1, activation='gelu'),
+            num_layers=2
+        )
+        
+        self.audio_self_attn = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=256, nhead=num_heads, dropout=0.1, activation='gelu'),
+            num_layers=2
+        )
         
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=768, nhead=num_heads, dropout=0.1, activation='gelu'),
@@ -181,6 +189,7 @@ class TransformerSyncnet(nn.Module):
         face3 = self.face_encoder3(face2)
         face4 = self.face_encoder4(face3)
         face4 = self.face_pos_encoder(face4)
+        #print('The face4', face4.shape)
         
         face_features = face4.flatten(1) #[b*5 ，512]
         face_seq = face_features.view(batch_size, 5, -1).permute(1, 0, 2)
@@ -192,17 +201,13 @@ class TransformerSyncnet(nn.Module):
           self.save_sample_images(face4, 'face4', step)
         
         
-        face_self_out, _ = self.face_self_attn(
-            query=face_seq,
-            key=face_seq,
-            value=face_seq
+        face_self_out = self.face_self_attn(
+            face_seq,
         )
         
         # Audio 的 self-attention
-        audio_self_out, _ = self.audio_self_attn(
-            query=a_seq,
-            key=a_seq,
-            value=a_seq
+        audio_self_out = self.audio_self_attn(
+            a_seq,
         )
 
         # --- 合并特征 ---
