@@ -10,9 +10,9 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import mediapipe as mp
 
-face_image_cache = multiprocessing.Manager().dict()
-file_exist_cache = multiprocessing.Manager().dict()
-orig_mel_cache = multiprocessing.Manager().dict()
+face_image_cache = {} #multiprocessing.Manager().dict()
+file_exist_cache = {} #multiprocessing.Manager().dict()
+orig_mel_cache = {} #multiprocessing.Manager().dict()
 
 """
 The FPS is set to 25 for video, 5/25 is 0.2, we need to have 0.2 seconds for the audio,
@@ -358,7 +358,7 @@ def apply_lip_mask_single(frame, face_mesh):
         img_masked = blackout_non_lip(frame, bbox)
         
     else:
-        bbox = [0.0, 0.0, 1.0, 1.0]
+        frame
     
     return img_masked
 
