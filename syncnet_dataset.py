@@ -358,7 +358,7 @@ def apply_lip_mask_single(frame, face_mesh):
         img_masked = blackout_non_lip(frame, bbox)
         
     else:
-        frame
+        return frame
     
     return img_masked
 
