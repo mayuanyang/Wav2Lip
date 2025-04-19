@@ -23,9 +23,13 @@ from hparams import hparams, get_image_list
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from models.conv import Conv2d, Conv2dTranspose
 from wav2lip_dataset import Dataset, syncnet_T
+from syncnet_dataset import apply_lip_mask_single, blackout_non_lip
+
 import torch.nn.functional as F
 from pytorch_msssim import ms_ssim
 from torch.cuda.amp import autocast, GradScaler
+import mediapipe as mp
+from PIL import Image
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -92,74 +96,47 @@ for p in syncnet.parameters():
     p.requires_grad = False
 
 
-cross_entropy_loss = nn.CrossEntropyLoss()
+cross_entropy_loss = nn.BCEWithLogitsLoss()
 recon_loss = nn.L1Loss()
+
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
 
 def get_sync_loss(mel, g):
     
-    B, C, T, H, W = g.shape
-
-    # Reshape to (B*T, C, H, W) for interpolation
-    g_reshaped = g.view(B * T, C, H, W)
-
-    # Resize H and W to half using bilinear interpolation
-    g_resized = F.interpolate(g_reshaped, scale_factor=0.5, mode='bilinear', align_corners=False)
-
-    # Reshape back to (B, T, C, H//2, W//2)
-    H_half, W_half = g_resized.shape[2], g_resized.shape[3]
+    #img = apply_lip_mask_single(g, face_mesh)
     
-    g_resized = g_resized.view(B, C, T, H_half, W_half)
-
-    # =========================
-    # Step 2: Persist Resized `g`
-    # =========================
-    # 
-    # import torchvision.transforms as transforms
-    # import datetime
-    # transform = transforms.ToPILImage()
-    # g_cpu = g.detach().cpu()
-
-    # # Iterate over batch and temporal dimensions
-    # for b in range(B):
-    #     for t in range(T):
-    #         img_tensor = g_cpu[b, t]  # Shape: (C, H, W)
-
-    #         # Handle different channel scenarios
-    #         if C == 1:
-    #             # Grayscale image
-    #             img_tensor = img_tensor.squeeze(0)  # Shape: (H, W)
-    #             mode = 'L'
-    #         elif C == 3:
-    #             # RGB image
-    #             mode = 'RGB'
-    #         else:
-    #             # Other channels: Handle accordingly or skip
-    #             print(f"Skipping image with {C} channels.")
-    #             continue
-
-    #         # Convert tensor to PIL Image
-    #         img = transform(img_tensor)
-
-    #         # Generate a unique filename
-    #         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    #         filename = f"b{b}_t{t}_{timestamp}.png"
-
-    #         file_path = os.path.join('temp/sync_imgs', filename)
-
-    #         # Save the image
-    #         img.save(file_path)
-    # g = g.view(B, C, T, H_half, W_half)
-
-    # Continue with existing processing
-    # Proceed with the rest of your code
-    # print('The resized shape', g_resized.shape)
-    g_resized = g_resized[:, :, :, g_resized.size(3)//2:]
-    g_resized = torch.cat([g_resized[:, :, i] for i in range(syncnet_T)], dim=1)
-    # B, 3 * T, H//2, W
-    output, audio_embedding, face_embedding = syncnet(g_resized, mel)
-
-    y = torch.ones(g_resized.size(0), dtype=torch.long).squeeze().to(device)
+    for batch_idx in range(g.size(0)):
+      for timestep_idx in range(g.size(2)):
+          # Extract RGB image (shape: [3, 384, 384])
+          img_tensor = g[batch_idx, :, timestep_idx]  # Channels first
+          
+          # Convert to NumPy and normalize to [0, 255]
+          img_np = img_tensor.detach().numpy()
+          
+          # Normalize based on input range (adjust if needed)
+          if img_np.max() <= 1.0:
+              img_np = (img_np * 255).astype('uint8')
+          else:
+              img_np = img_np.astype('uint8')
+          
+          # Transpose from [C,H,W] to [H,W,C] for PIL
+          img_np = img_np.transpose(1, 2, 0)
+          
+          
+          # Save as RGB image
+          filename = f"temp/batch_{batch_idx}_timestep_{timestep_idx}.png"
+          Image.fromarray(img_np).save(filename)
     
+    g = g[:, :, :, g.size(3)//2:]
+    
+    g = torch.cat([g[:, :, i] for i in range(syncnet_T)], dim=1)
+    
+    output, _, _ = syncnet(g, mel, 10)
+    
+
+    y = torch.ones(g.size(0), dtype=torch.float).unsqueeze(1).to(device)
+ 
     return cross_entropy_loss(output, y)
 
 
@@ -441,10 +418,12 @@ if __name__ == "__main__":
     # Model
     if version == 'v1':
       model = ResUNet384(args.num_of_unet_layers).to(device)
+      print('Using v1')
     else:
+      print('Using v2')
       model = ResUNet384V2().to(device)
 
-    print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
+    
 
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
                            lr=hparams.initial_learning_rate)
@@ -473,6 +452,7 @@ if __name__ == "__main__":
         }
       )
 
+    print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
     # Train!
     train(device, model, train_data_loader, test_data_loader, optimizer,
               checkpoint_dir=checkpoint_dir,
