@@ -209,7 +209,7 @@ class Dataset(object):
                       try:
                           img = cv2.resize(img, (hparams.img_size * self.img_size_factor, hparams.img_size * self.img_size_factor))                            
 
-                          img = apply_lip_mask_single(img, face_mesh)
+                          #img = apply_lip_mask_single(img, face_mesh)
                           if len(face_image_cache) < hparams.syncnet_image_cache_size:
                             face_image_cache[fname] = img  # Cache the resized image
                           
