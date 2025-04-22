@@ -197,34 +197,34 @@ class Dataset(object):
             face_window = []
 
             all_read = True
-            with self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True) as face_mesh:
-              for fname in window_fnames:
-                  if fname in face_image_cache:
-                      img = face_image_cache[fname]
-                  else:
-                      img = cv2.imread(fname)
-                      if img is None:
-                          all_read = False
-                          break
-                      try:
-                          img = cv2.resize(img, (hparams.img_size * self.img_size_factor, hparams.img_size * self.img_size_factor))                            
+            #with self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True) as face_mesh:
+            for fname in window_fnames:
+                if fname in face_image_cache:
+                    img = face_image_cache[fname]
+                else:
+                    img = cv2.imread(fname)
+                    if img is None:
+                        all_read = False
+                        break
+                    try:
+                        img = cv2.resize(img, (hparams.img_size * self.img_size_factor, hparams.img_size * self.img_size_factor))                            
 
-                          #img = apply_lip_mask_single(img, face_mesh)
-                          if len(face_image_cache) < hparams.syncnet_image_cache_size:
-                            face_image_cache[fname] = img  # Cache the resized image
-                          
-                      except Exception as e:
-                          all_read = False
-                          break
-                  
-                  '''
-                  Data augmentation
-                  0 means unchange
-                  1 for grayscale
-                  2 for brightness
-                  3 for contrast
-                  '''
-                  if self.use_augmentation:
+                        #img = apply_lip_mask_single(img, face_mesh)
+                        if len(face_image_cache) < hparams.syncnet_image_cache_size:
+                          face_image_cache[fname] = img  # Cache the resized image
+                        
+                    except Exception as e:
+                        all_read = False
+                        break
+                
+                '''
+                Data augmentation
+                0 means unchange
+                1 for grayscale
+                2 for brightness
+                3 for contrast
+                '''
+                if self.use_augmentation:
                     option = random.choices([0, 0, 0, 0, 0, 0, 0, 0, 4, 4])[0] 
                     
                     if option == 1:
@@ -251,7 +251,7 @@ class Dataset(object):
                         # Perform the rotation
                         img = cv2.warpAffine(img, rotation_matrix, (w, h))
 
-                  face_window.append(img)
+                face_window.append(img)
 
             if not all_read: continue
 

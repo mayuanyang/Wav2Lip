@@ -124,7 +124,7 @@ class TransformerSyncnet(nn.Module):
         
         self.audio_self_attn = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=256, nhead=num_heads, dropout=0.1, activation='gelu'),
-            num_layers=2
+            num_layers=4
         )
         
         self.transformer_encoder = nn.TransformerEncoder(
