@@ -194,9 +194,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 save_checkpoint(
                     model, optimizer, global_step, checkpoint_dir, global_epoch)
 
-            if global_step % hparams.syncnet_eval_interval == 0:
-                with torch.no_grad():
-                    eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler)
+            # if global_step % hparams.syncnet_eval_interval == 0:
+            #     with torch.no_grad():
+            #         eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler)
                 
             current_training_regression_loss = avg_regression_loss / (step + 1)
             current_training_classification_loss = avg_classification_loss / (step + 1)
