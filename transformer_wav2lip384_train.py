@@ -2,7 +2,7 @@ from os.path import dirname, join, basename, isfile
 from tqdm import tqdm
 
 from models import TransformerSyncnet
-from models import ResUNet384, ResUNet384V2
+from models import ResUNet384, ResUNet384V2, ResUNet384V3
 import torch
 
 import wandb
@@ -184,7 +184,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               gt = gt.to(device)
 
               with autocast():
-                g = model(indiv_mels, x)
+                g = model(indiv_mels, x, True)
                 
                 # Compare two images
                 '''
@@ -423,9 +423,12 @@ if __name__ == "__main__":
     if version == 'v1':
       model = ResUNet384(args.num_of_unet_layers).to(device)
       print('Using v1')
-    else:
+    elif version == 'v2':
       print('Using v2')
       model = ResUNet384V2().to(device)
+    else:
+      print('Using v3')
+      model = ResUNet384V3().to(device)
 
     
 
@@ -455,6 +458,11 @@ if __name__ == "__main__":
         "epochs": 2000000,
         }
       )
+      
+    # for name, param in model.named_parameters():
+    #   if 'face_enhancer' not in name:
+    #     param.requires_grad = False
+    #     print('nooooo')
 
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
     # Train!

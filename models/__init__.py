@@ -1,6 +1,7 @@
 from .resunet import ResUNet
 from .resunet384 import ResUNet384
 from .resunet384_v2 import ResUNet384V2, FaceEnhancer
+from .resunet384_v3 import ResUNet384V3, FaceEnhancer
 from .transformer_syncnet import TransformerSyncnet
 from .transformer_syncnet_v2 import TransformerSyncnetV2
 from .transformer_ressyncnet import TransformerResSyncnet
