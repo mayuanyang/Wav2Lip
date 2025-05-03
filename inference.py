@@ -6,7 +6,7 @@ import json, subprocess, random, string
 from tqdm import tqdm
 from glob import glob
 import torch, face_detection
-from models import ResUNet384V2
+from models import ResUNet384V2, ResUNet384V3
 from realesrgan import RealESRGANer
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from PIL import Image
@@ -79,6 +79,8 @@ parser.add_argument('--model_layers', default=2, type=int,
 parser.add_argument('--use_esrgan', default=False, type=str2bool)
 
 parser.add_argument('--iteration', type=int, help='Number of iteration to inference', default=2)
+
+parser.add_argument('--version', type=str, help='The version of the model', default='V3')
 
 args = parser.parse_args()
 args.img_size = 384
@@ -390,7 +392,10 @@ def _load(checkpoint_path):
   return checkpoint
 
 def load_model(path, lora_path=None):
-  model = ResUNet384V2()
+  if args.version == 'V3':
+    model = ResUNet384V3()
+  else:
+    model = ResUNet384V2()
   print("Load checkpoint from: {}".format(path))
   checkpoint = _load(path)
   s = checkpoint["state_dict"]
