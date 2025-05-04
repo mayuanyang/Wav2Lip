@@ -402,20 +402,11 @@ if __name__ == "__main__":
       
     train_data_loader = data_utils.DataLoader(
         train_dataset, batch_size=hparams.batch_size, shuffle=True,
-        num_workers=hparams.resunet_num_workers,
-        worker_init_fn=worker_init_fn)
-
-    if hparams.resunet_num_workers == 0:
-      train_dataset.face_mesh = mp.solutions.face_mesh.FaceMesh(
-        static_image_mode=False, 
-        max_num_faces=1, 
-        refine_landmarks=True
-      )
+        num_workers=hparams.resunet_num_workers)
       
     test_data_loader = data_utils.DataLoader(
         test_dataset, batch_size=hparams.batch_size,
-        num_workers=4,
-        worker_init_fn=worker_init_fn)
+        num_workers=4)
 
     device = torch.device("cuda" if use_cuda else "cpu")
 

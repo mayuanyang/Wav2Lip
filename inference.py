@@ -169,8 +169,6 @@ LIPS_LANDMARKS = [
 ]
 
 def apply_dynamic_blur(window, sigma=12):
-        mp_face_mesh = mp.solutions.face_mesh
-        face_mesh = mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
         # This function assumes window has shape (C, T, H, W)
         # It applies a gaussian blur to the mouth region and gradually diffuses it outward.
         
@@ -181,78 +179,56 @@ def apply_dynamic_blur(window, sigma=12):
         
 
         for frame in frames:
-            frame_rgb = (frame).astype(np.uint8)
+            #frame_rgb = (frame).astype(np.uint8)
 
-            results = face_mesh.process(frame_rgb)
+            # h, w, _ = frame.shape
+            # split_row = h // 2
 
-            if results.multi_face_landmarks:
-                # Get the mouth landmarks (MediaPipe Face Mesh landmarks for mouth are from 61 to 80)
-                mouth_points = []
-                h, w, _ = frame.shape
-                split_row = h // 2
-                for idx in LIPS_LANDMARKS:
-                    lm = results.multi_face_landmarks[0].landmark[idx]
-                    x, y = int(lm.x * w), int(lm.y * h)
-                    mouth_points.append([x, y])
+            # # Split the frame into the top and bottom halves.
+            # top_half = frame[:split_row, :, :]
+            # bottom_half = frame[split_row:, :, :]
 
-                # Convert the list of mouth points to a NumPy array for easier manipulation.
-                mouth_points = np.array(mouth_points)
+            # # For clarity, compute the height of the bottom half.
+            # bottom_height = h - split_row
 
-                # Compute the bounding rectangle coordinates.
-                x_min = np.min(mouth_points[:, 0])
-                x_max = np.max(mouth_points[:, 0])
-                y_min = np.min(mouth_points[:, 1])
-                y_max = np.max(mouth_points[:, 1])
+            # # Define the rectangle size as a percentage of the bottom half's dimensions.
+            # rectangle_height = int(bottom_height * 0.65)  # 30% of the bottom half height
+            # rectangle_width = int(w * 0.8)              # 30% of the full frame width
 
-                # Calculate the width and height of the mouth region.
-                width = x_max - x_min
-                height = y_max - y_min
+            # # Calculate coordinates to center the rectangle in the bottom half.
+            # start_x = (w - rectangle_width) // 2
+            # end_x = start_x + rectangle_width
+            # start_y = (bottom_height - rectangle_height) // 2
+            # end_y = start_y + rectangle_height
 
-                # Define a padding factor (e.g., 50% larger in each direction).
-                pad_width_factor = 0.6  # Adjust this value as needed.
-                pad_height_factor = 0.6  # Adjust this value as needed.
-                pad_x = int(width * pad_width_factor)
-                pad_y = int(height * pad_height_factor)
+            # print('Rectangle dimensions and coordinates:', rectangle_height, rectangle_width, start_x, end_x, start_y, end_y)
 
-                # Expand the rectangle and ensure the coordinates stay within frame boundaries.
-                x_min_expanded = max(x_min - pad_x, 0)
-                y_min_expanded = max(y_min - pad_y, 0)
-                x_max_expanded = min(x_max + pad_x, w)
-                y_max_expanded = min(y_max + pad_y, h)
+            # # Fill the specific rectangle in the bottom half with black.
+            # bottom_half[start_y:end_y, start_x:end_x] = [0, 0, 0]
 
-                # Black out the expanded rectangular region.
-                frame[y_min_expanded:y_max_expanded, x_min_expanded:x_max_expanded] = [0, 0, 0]
-                blurred_frames.append(frame)
-            else:
-                
-                h, w, _ = frame.shape
-                split_row = h // 2
+            # # Reassemble the full frame from the top and modified bottom halves.
+            # frame_masked = np.vstack([top_half, bottom_half])
+            # blurred_frames.append(frame_masked)    
+            
+            h, w, _ = frame.shape
+            split_row = h // 2
 
-                # Split the frame into the top and bottom halves.
-                top_half = frame[:split_row, :, :]
-                bottom_half = frame[split_row:, :, :]
+            # Split into top and bottom halves
+            top_half = frame[:split_row, :, :]
+            bottom_half = frame[split_row:, :, :].copy()  # Copy to avoid modifying original
+            
+            ellipse_height = int(h * 0.17)
 
-                # For clarity, compute the height of the bottom half.
-                bottom_height = h - split_row
 
-                # Define the rectangle size as a percentage of the bottom half's dimensions.
-                rectangle_height = int(bottom_height * 0.65)  # 30% of the bottom half height
-                rectangle_width = int(w * 0.8)              # 30% of the full frame width
+            # Draw a black-filled ellipse in the bottom half
+            center = (w // 2, split_row // 2)  # Center relative to bottom_half dimensions
+            axes = (w // 2, ellipse_height)    # Semi-major and semi-minor axes
+            cv2.ellipse(bottom_half, center, axes, 0, 0, 360, (0, 0, 0), -1)
 
-                # Calculate coordinates to center the rectangle in the bottom half.
-                start_x = (w - rectangle_width) // 2
-                end_x = start_x + rectangle_width
-                start_y = (bottom_height - rectangle_height) // 2
-                end_y = start_y + rectangle_height
 
-                print('Rectangle dimensions and coordinates:', rectangle_height, rectangle_width, start_x, end_x, start_y, end_y)
-
-                # Fill the specific rectangle in the bottom half with black.
-                bottom_half[start_y:end_y, start_x:end_x] = [0, 0, 0]
-
-                # Reassemble the full frame from the top and modified bottom halves.
-                frame_masked = np.vstack([top_half, bottom_half])
-                blurred_frames.append(frame_masked)     
+            # Reassemble frame
+            frame_masked = np.vstack([top_half, bottom_half])
+            blurred_frames.append(frame_masked) 
 
         # Reassemble the frames and convert back to (C, T, H, W)
         result = np.stack(blurred_frames, axis=0)  # shape: (T, H, W, C)
