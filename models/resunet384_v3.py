@@ -111,7 +111,7 @@ class ResUNet384V3(nn.Module):
         
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=512, nhead=8, dropout=0.1, activation='gelu'),
-            num_layers=2
+            num_layers=4
         )
         
         # Decoders
@@ -234,10 +234,9 @@ class ResUNet384V3(nn.Module):
         
         FB, _, H, W = fed7.shape
         
+        combined = fed7 + audio_embedding1
         
-        fed7 = fed7 + audio_embedding1
-        
-        flatten = fed7.view(FB, 512, -1)
+        flatten = combined.view(FB, 512, -1)
         transformer_input = flatten.permute(0, 2, 1)  # [5, 9, 512]
         
         
@@ -245,8 +244,9 @@ class ResUNet384V3(nn.Module):
         swapped_back = transformer_output.permute(0, 2, 1)  # Shape: [5, 512, 9]
         original_shape = swapped_back.reshape(FB ,512 ,3 ,3 ) 
         
+        
         # Get face bottleneck features
-        bottlenet = self.bottlenet(original_shape)
+        bottlenet = self.bottlenet(fed7 + original_shape)
         
         deface7 = self.face_decoder7(bottlenet)
         cat7 = torch.cat([deface7, face7], dim=1)
