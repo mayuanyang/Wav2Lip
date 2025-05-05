@@ -29,6 +29,7 @@ class ResUNet384V3(nn.Module):
         self.face_encoder2 = nn.Sequential( 
             Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
         self.fe_down2 = nn.Sequential(
             Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
@@ -111,7 +112,7 @@ class ResUNet384V3(nn.Module):
         
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=512, nhead=8, dropout=0.1, activation='gelu'),
-            num_layers=4
+            num_layers=6
         )
         
         # Decoders
@@ -163,6 +164,7 @@ class ResUNet384V3(nn.Module):
 
         self.face_decoder2 = nn.Sequential( #192x192
             Conv2dTranspose(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
         self.fd_conv2 = nn.Sequential(
