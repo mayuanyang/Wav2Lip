@@ -128,6 +128,15 @@ def get_current_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
+def trepa_loss(real_frames, generated_frames):
+    loss = 0.0
+    for t in range(1, len(real_frames)):
+        delta_real = real_frames[t] - real_frames[t-1]
+        delta_gen = generated_frames[t] - generated_frames[t-1]
+        loss += torch.abs(delta_real - delta_gen).mean()
+    
+    return loss / (len(real_frames) - 1)
+  
 def train(device, model, train_data_loader, test_data_loader, optimizer, 
           checkpoint_dir=None, checkpoint_interval=None, nepochs=None, should_print_grad_norm=False):
 
@@ -154,8 +163,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
     syncnet_wt = hparams.syncnet_wt
     sync_loss = 0.
-
-    scaler = GradScaler()
 
     while global_epoch < nepochs:
         current_lr = get_current_lr(optimizer)
@@ -218,17 +225,16 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                     sync_loss = 0.
 
                 l1loss = recon_loss(g, gt)
+                
+                #tempora_loss = trepa_loss(gt, g)
 
                 running_l1_loss += l1loss.item()
                 
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss # + 0.5 * tempora_loss
               
-              scaler.scale(loss).backward()
-              scaler.step(optimizer)
-              scaler.update()
+              loss.backward()
+              optimizer.step()
               
-
-
               if global_step % checkpoint_interval == 0:
                   save_sample_images(x, g, gt, global_step, checkpoint_dir)
 
@@ -263,6 +269,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   "train/avg_l1": avg_l1_loss, 
                   "train/sync_loss": running_sync_loss / (step + 1), 
                   "train/disc_loss": avg_disc_loss,
+                  #"train/tempora_loss": tempora_loss.item(),
                   "params/step": global_step,
                   "params/learning_rate": current_lr,
                   "params/l1_wt": hparams.l1_wt,
@@ -371,17 +378,6 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
     #      print('Not freeze', name)
 
     return model
-
-def worker_init_fn(worker_id):
-    print('hello1')
-    worker_info = torch.utils.data.get_worker_info()
-    dataset = worker_info.dataset
-    dataset.face_mesh = mp.solutions.face_mesh.FaceMesh(
-        static_image_mode=False, 
-        max_num_faces=1, 
-        refine_landmarks=True
-    )
-    print('hello')
 
 if __name__ == "__main__":
     checkpoint_dir = args.checkpoint_dir

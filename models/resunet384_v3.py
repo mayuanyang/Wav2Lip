@@ -6,15 +6,31 @@ from torch.nn import functional as F
 from .conv import Conv2dTranspose, Conv2d
 from .transformer_syncnet import LearnablePositionalEncoding2D
 
+    
+def cosine_noise_schedule(num_steps, s=0.008):
 
-def check_nan(tensor, name):
-  if torch.isnan(tensor).any():
-    print('NaN problem', f"NaN in {name}") 
+    num_steps = num_steps - 1 # make it 1 step less, and append a no noice step manually at the end
+    steps = torch.linspace(0, num_steps, num_steps + 1)
+    # Remove the extra .cos() - it's already cosine!
+    f = torch.cos((steps / num_steps + s) / (1 + s) * (math.pi / 2))
+    alphas = f ** 2  # Squaring is correct (cos²)
+    alphas = alphas / alphas[0]  # Normalize to start at 1
+    betas = 1 - (alphas[1:] / alphas[:-1])
+    result = betas.clamp(min=0.001, max=0.999)
+
+    result = torch.cat([result, torch.ones(1)])
+    return result
+
     
 class ResUNet384V3(nn.Module):
     def __init__(self):
         super(ResUNet384V3, self).__init__()
         
+        num_diffusion_steps = 20
+        self.num_diffusion_steps = num_diffusion_steps
+        self.betas = cosine_noise_schedule(num_diffusion_steps)  # or cosine_noise_schedule()
+        self.alphas = 1 - self.betas
+        self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
         
         self.face_encoder1 = nn.Sequential( #384x384
             Conv2d(12, 64, kernel_size=3, stride=1, padding=1),
@@ -192,8 +208,34 @@ class ResUNet384V3(nn.Module):
         self.face_pos_encoder = LearnablePositionalEncoding2D(d_model=512, max_h=3, max_w=3, dropout=0.1)
         self.audio_pos_encoder = LearnablePositionalEncoding2D(d_model=512, max_h=3, max_w=3, dropout=0.1)
         
+    def diffuse(self, x, t, noise_factor=0.5):
+        """Diffuses only the first 3 channels in bottom half"""
+        b, c, h, w = x.shape
+        
+        # Split spatial dimensions (bottom half only)
+        split_idx = h // 2
+        top_half = x[:, :, :split_idx, :]  # Entire top (all channels)
+        bottom_half = x[:, :, split_idx:, :]  # Bottom to process
+        
+        # Split channels
+        rgb_channels = bottom_half[:, :3, :, :]  # First 3 channels (R,G,B)
+        other_channels = bottom_half[:, 3:, :, :]  # Other channels (unchanged)
+        
+        # Apply noise only to RGB
+        sqrt_alpha_t = torch.sqrt(self.alphas_cumprod[t]).view(-1, 1, 1, 1)
+        sqrt_one_minus_alpha_t = torch.sqrt(1 - self.alphas_cumprod[t]).view(-1, 1, 1, 1)
+        
+        epsilon = torch.randn_like(rgb_channels) * noise_factor
+        noisy_rgb = sqrt_alpha_t * rgb_channels + sqrt_one_minus_alpha_t * epsilon
+        
+        # Recombine
+        noisy_bottom = torch.cat([noisy_rgb, other_channels], dim=1)
+        return torch.cat([top_half, noisy_bottom], dim=2)
 
-    def forward(self, audio_sequences, face_sequences, use_face_enhancer=False):
+
+
+    
+    def forward(self, audio_sequences, face_sequences, use_face_enhancer=False, add_noise=True):
         
         B = audio_sequences.size(0)       
         input_dim_size = len(face_sequences.size())
@@ -202,12 +244,20 @@ class ResUNet384V3(nn.Module):
             audio_sequences = torch.cat([audio_sequences[:, i] for i in range(audio_sequences.size(1))], dim=0)
             face_sequences = torch.cat([face_sequences[:, :, i] for i in range(face_sequences.size(2))], dim=0)
 
+        t = torch.randint(0, self.num_diffusion_steps - 1, (1,)).to(face_sequences.device)
+
+        self.alphas_cumprod = self.alphas_cumprod.to(face_sequences.device)
+
+        # Diffuse face input with scheduled noise
+        if add_noise:
+          face_sequences = self.diffuse(face_sequences.float(), t)
         
         # Obtain audio features
         audio_embedding1 = self.audio_encoder1(audio_sequences)
         
         audio_embedding1 = F.interpolate(audio_embedding1.float(), size=(3, 3), mode="bilinear")
         
+
         # ----The face encoder-----
         face1 = self.face_encoder1(face_sequences)
         
