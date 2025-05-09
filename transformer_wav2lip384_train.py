@@ -386,8 +386,8 @@ if __name__ == "__main__":
     version = args.version
 
     # Dataset and Dataloader setup
-    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation, img_size_factor=2)
-    test_dataset = Dataset('val', args.data_root, args.train_root, False, img_size_factor=2)
+    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation, img_size_factor=2, use_face_mesh=False)
+    test_dataset = Dataset('val', args.data_root, args.train_root, False, img_size_factor=2, use_face_mesh=False)
 
     if hparams.resunet_num_workers == 0:
       train_dataset.face_mesh = mp.solutions.face_mesh.FaceMesh(
