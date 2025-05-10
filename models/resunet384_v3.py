@@ -237,7 +237,7 @@ class ResUNet384V3(nn.Module):
         return torch.cat([top_half, noisy_bottom], dim=2)
 
     
-    def forward(self, audio_sequences, face_sequences, use_face_enhancer=False, add_noise=True):
+    def forward(self, audio_sequences, face_sequences, use_face_enhancer=False, add_noise=False):
         
         B = audio_sequences.size(0)       
         input_dim_size = len(face_sequences.size())
