@@ -1,6 +1,6 @@
 import torch
 import math
-from torch import nn
+from torch import nn, random
 from torch.nn import functional as F
 
 from .conv import Conv2dTranspose, Conv2d
@@ -9,6 +9,7 @@ import torch
 from torchvision.utils import save_image
 import os
 from datetime import datetime
+import os, random, cv2, argparse
     
 def cosine_noise_schedule(num_steps, s=0.008):
 
@@ -237,7 +238,7 @@ class ResUNet384V3(nn.Module):
         return torch.cat([top_half, noisy_bottom], dim=2)
 
     
-    def forward(self, audio_sequences, face_sequences, use_face_enhancer=False, add_noise=False):
+    def forward(self, audio_sequences, face_sequences, use_face_enhancer=False, add_noise=True):
         
         B = audio_sequences.size(0)       
         input_dim_size = len(face_sequences.size())
@@ -246,7 +247,7 @@ class ResUNet384V3(nn.Module):
             audio_sequences = torch.cat([audio_sequences[:, i] for i in range(audio_sequences.size(1))], dim=0)
             face_sequences = torch.cat([face_sequences[:, :, i] for i in range(face_sequences.size(2))], dim=0)
 
-        t = torch.randint(0, self.num_diffusion_steps - 1, (1,)).to(face_sequences.device)
+        t = random.choices([0, 1,2])
 
         self.alphas_cumprod = self.alphas_cumprod.to(face_sequences.device)
         
@@ -258,93 +259,92 @@ class ResUNet384V3(nn.Module):
         
         audio_embedding1 = self.audio_pos_encoder(audio_embedding1)
           
-        previous_result = None
+        if add_noise:
+            face_sequences = self.diffuse(face_sequences.float(), t)
+
         
-        for step in range(2):
-          
-          # 2. 拼接回12通道（复制噪声到后9通道）
-          if previous_result  is not None:
-            if add_noise:
-              previous_result = self.diffuse(previous_result.float(), [step])
-              
-            face_sequences = torch.cat([
-                previous_result,  # [B,3,H,W]
-                face_sequences[:, 3:]
-            ], dim=1)  # [B,12,H,W]
-          
-          # ----The face encoder-----
-          face1 = self.face_encoder1(face_sequences)
-          
-          fed1 = self.fe_down1(face1)
+        # # 2. 拼接回12通道（复制噪声到后9通道）
+        # if previous_result  is not None:
+        #   print('Previous result not yet', step)
+        #   if add_noise:
+        #     previous_result = self.diffuse(previous_result.float(), [step])
+            
+        #   face_sequences = torch.cat([
+        #       previous_result,  # [B,3,H,W]
+        #       face_sequences[:, 3:]
+        #   ], dim=1)  # [B,12,H,W]
+        
+        # ----The face encoder-----
+        face1 = self.face_encoder1(face_sequences)
+        
+        fed1 = self.fe_down1(face1)
 
-          face2 = self.face_encoder2(fed1)
-          fed2 = self.fe_down2(face2)
+        face2 = self.face_encoder2(fed1)
+        fed2 = self.fe_down2(face2)
 
-          face3 = self.face_encoder3(fed2)
-          fed3 = self.fe_down3(face3)
+        face3 = self.face_encoder3(fed2)
+        fed3 = self.fe_down3(face3)
 
-          face4 = self.face_encoder4(fed3)
-          fed4 = self.fe_down4(face4)
-          
-          face5 = self.face_encoder5(fed4)
-          fed5 = self.fe_down5(face5)
-          
-          face6 = self.face_encoder6(fed5)
-          fed6 = self.fe_down6(face6)
-          
-          face7 = self.face_encoder7(fed6)
-          fed7 = self.fe_down7(face7)
-          
-          fed7 = self.face_pos_encoder(fed7)
-          
-          
-          FB, _, H, W = fed7.shape
-          
-          combined = fed7 + audio_embedding1
-          
-          flatten = combined.view(FB, 512, -1)
-          transformer_input = flatten.permute(0, 2, 1)  # [5, 9, 512]
-          
-          
-          transformer_output = self.transformer_encoder(transformer_input)
-          swapped_back = transformer_output.permute(0, 2, 1)  # Shape: [5, 512, 9]
-          original_shape = swapped_back.reshape(FB ,512 ,3 ,3 ) 
-          
-          
-          # Get face bottleneck features
-          bottlenet = self.bottlenet(fed7 + original_shape)
-          
-          deface7 = self.face_decoder7(bottlenet)
-          cat7 = torch.cat([deface7, face7], dim=1)
-          cat7 = self.fd_conv7(cat7)
-          
-          deface6 = self.face_decoder6(cat7)
-          cat6 = torch.cat([deface6, face6], dim=1)
-          cat6 = self.fd_conv6(cat6)
-          
-          deface5 = self.face_decoder5(cat6)
-          cat5 = torch.cat([deface5, face5], dim=1)
-          cat5 = self.fd_conv5(cat5)
+        face4 = self.face_encoder4(fed3)
+        fed4 = self.fe_down4(face4)
+        
+        face5 = self.face_encoder5(fed4)
+        fed5 = self.fe_down5(face5)
+        
+        face6 = self.face_encoder6(fed5)
+        fed6 = self.fe_down6(face6)
+        
+        face7 = self.face_encoder7(fed6)
+        fed7 = self.fe_down7(face7)
+        
+        fed7 = self.face_pos_encoder(fed7)
+        
+        
+        FB, _, H, W = fed7.shape
+        
+        combined = fed7 + audio_embedding1
+        
+        flatten = combined.view(FB, 512, -1)
+        transformer_input = flatten.permute(0, 2, 1)  # [5, 9, 512]
+        
+        
+        transformer_output = self.transformer_encoder(transformer_input)
+        swapped_back = transformer_output.permute(0, 2, 1)  # Shape: [5, 512, 9]
+        original_shape = swapped_back.reshape(FB ,512 ,3 ,3 ) 
+        
+        
+        # Get face bottleneck features
+        bottlenet = self.bottlenet(fed7 + original_shape)
+        
+        deface7 = self.face_decoder7(bottlenet)
+        cat7 = torch.cat([deface7, face7], dim=1)
+        cat7 = self.fd_conv7(cat7)
+        
+        deface6 = self.face_decoder6(cat7)
+        cat6 = torch.cat([deface6, face6], dim=1)
+        cat6 = self.fd_conv6(cat6)
+        
+        deface5 = self.face_decoder5(cat6)
+        cat5 = torch.cat([deface5, face5], dim=1)
+        cat5 = self.fd_conv5(cat5)
 
-          deface4 = self.face_decoder4(cat5)
-          cat4 = torch.cat([deface4, face4], dim=1)
-          cat4 = self.fd_conv4(cat4)
+        deface4 = self.face_decoder4(cat5)
+        cat4 = torch.cat([deface4, face4], dim=1)
+        cat4 = self.fd_conv4(cat4)
 
-          deface3 = self.face_decoder3(cat4)
-          cat3 = torch.cat([deface3, face3], dim=1)
-          cat3 = self.fd_conv3(cat3)
-          
-          deface2 = self.face_decoder2(cat3)
-          cat2 = torch.cat([deface2, face2], dim=1)
-          cat2 = self.fd_conv2(cat2)
-          
-          deface1 = self.face_decoder1(cat2)
-          cat1 = torch.cat([deface1, face1], dim=1)
-          cat1 = self.fd_conv1(cat1)
+        deface3 = self.face_decoder3(cat4)
+        cat3 = torch.cat([deface3, face3], dim=1)
+        cat3 = self.fd_conv3(cat3)
+        
+        deface2 = self.face_decoder2(cat3)
+        cat2 = torch.cat([deface2, face2], dim=1)
+        cat2 = self.fd_conv2(cat2)
+        
+        deface1 = self.face_decoder1(cat2)
+        cat1 = torch.cat([deface1, face1], dim=1)
+        cat1 = self.fd_conv1(cat1)
 
-          x = self.output_block(cat1)
-          previous_result = x
-          
+        x = self.output_block(cat1)
         
 
         outputs = x
