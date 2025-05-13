@@ -213,8 +213,8 @@ class ResUNet384V3(nn.Module):
         self.audio_pos_encoder = LearnablePositionalEncoding2D(d_model=512, max_h=3, max_w=3, dropout=0.1)
         
 
+
     def diffuse(self, x, t, noise_factor=0.5):
-        """Diffuses only the first 3 channels in bottom half"""
         b, c, h, w = x.shape
         
         # Split spatial dimensions (bottom half only)
@@ -225,18 +225,21 @@ class ResUNet384V3(nn.Module):
         # Split channels
         rgb_channels = bottom_half[:, :3, :, :]  # First 3 channels (R,G,B)
         other_channels = bottom_half[:, 3:, :, :]  # Other channels (unchanged)
+
+        # t的形状应为 [B]
+        sqrt_alpha_t = torch.sqrt(self.alphas_cumprod[t])          # 自动广播为 [B,1,1,1]
+        sqrt_one_minus_alpha_t = torch.sqrt(1 - self.alphas_cumprod[t])
         
-        # Apply noise only to RGB
-        sqrt_alpha_t = torch.sqrt(self.alphas_cumprod[t]).view(-1, 1, 1, 1)
-        sqrt_one_minus_alpha_t = torch.sqrt(1 - self.alphas_cumprod[t]).view(-1, 1, 1, 1)
-        
+        # 每个样本独立添加噪声
         epsilon = torch.randn_like(rgb_channels) * noise_factor
-        noisy_rgb = sqrt_alpha_t * rgb_channels + sqrt_one_minus_alpha_t * epsilon
-        
+        noisy_rgb = sqrt_alpha_t.view(-1,1,1,1) * rgb_channels + sqrt_one_minus_alpha_t.view(-1,1,1,1) * epsilon
+
         # Recombine
         noisy_bottom = torch.cat([noisy_rgb, other_channels], dim=1)
-        return torch.cat([top_half, noisy_bottom], dim=2)
+        result = torch.cat([top_half, noisy_bottom], dim=2)
 
+
+        return result
     
     def forward(self, audio_sequences, face_sequences, use_face_enhancer=False, add_noise=True):
         
@@ -247,7 +250,9 @@ class ResUNet384V3(nn.Module):
             audio_sequences = torch.cat([audio_sequences[:, i] for i in range(audio_sequences.size(1))], dim=0)
             face_sequences = torch.cat([face_sequences[:, :, i] for i in range(face_sequences.size(2))], dim=0)
 
-        t = torch.randint(0, self.num_diffusion_steps, (1,)).to(face_sequences.device)
+        expanded_B = face_sequences.size(0)  # 展平后的 batch size
+
+        t = torch.randint(0, self.num_diffusion_steps, (expanded_B,)).to(face_sequences.device)
         
 
         self.alphas_cumprod = self.alphas_cumprod.to(face_sequences.device)
