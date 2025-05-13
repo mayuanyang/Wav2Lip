@@ -247,7 +247,8 @@ class ResUNet384V3(nn.Module):
             audio_sequences = torch.cat([audio_sequences[:, i] for i in range(audio_sequences.size(1))], dim=0)
             face_sequences = torch.cat([face_sequences[:, :, i] for i in range(face_sequences.size(2))], dim=0)
 
-        t = random.choices([0, 1,2])
+        t = torch.randint(0, self.num_diffusion_steps, (1,)).to(face_sequences.device)
+        
 
         self.alphas_cumprod = self.alphas_cumprod.to(face_sequences.device)
         
