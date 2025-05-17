@@ -44,6 +44,7 @@ class ResUNet384V3(nn.Module):
         self.fe_down1 = nn.Sequential( 
             Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )#192x192
         
         self.face_encoder2 = nn.Sequential( 
@@ -53,6 +54,7 @@ class ResUNet384V3(nn.Module):
         )
         self.fe_down2 = nn.Sequential(
             Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )#96x96
 
@@ -190,6 +192,7 @@ class ResUNet384V3(nn.Module):
         self.fd_conv2 = nn.Sequential(
             Conv2d(256, 128, kernel_size=3, stride=1, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
 
 
@@ -201,6 +204,7 @@ class ResUNet384V3(nn.Module):
         
         self.fd_conv1 = nn.Sequential(
             Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
 
@@ -241,7 +245,7 @@ class ResUNet384V3(nn.Module):
 
         return result
     
-    def forward(self, audio_sequences, face_sequences, use_face_enhancer=False, add_noise=True):
+    def forward(self, audio_sequences, face_sequences, use_face_enhancer=False, add_noise=True, noise_level=-1):
         
         B = audio_sequences.size(0)       
         input_dim_size = len(face_sequences.size())
@@ -252,8 +256,11 @@ class ResUNet384V3(nn.Module):
 
         expanded_B = face_sequences.size(0)  # 展平后的 batch size
 
-        t = torch.randint(0, self.num_diffusion_steps, (expanded_B,)).to(face_sequences.device)
-        
+        if noise_level < 0:
+          t = torch.randint(0, self.num_diffusion_steps, (expanded_B,)).to(face_sequences.device)
+        else:
+          t = [noise_level]
+          print('Using noise', noise_level)
 
         self.alphas_cumprod = self.alphas_cumprod.to(face_sequences.device)
         
