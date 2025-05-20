@@ -245,6 +245,12 @@ class ResUNet384V3(nn.Module):
 
         return result
     
+    def sample_t(self, expanded_B):
+        # Create a biased distribution towards higher values
+        probabilities = torch.tensor([1, 1, 1, 1, 1, 0, 0, 0, 0, 0], dtype=torch.float32)
+        probabilities = probabilities / probabilities.sum()
+        t = torch.multinomial(probabilities, expanded_B, replacement=True)
+    
     def forward(self, audio_sequences, face_sequences, use_face_enhancer=False, add_noise=True, noise_level=-1):
         
         B = audio_sequences.size(0)       
@@ -257,7 +263,7 @@ class ResUNet384V3(nn.Module):
         expanded_B = face_sequences.size(0)  # 展平后的 batch size
 
         if noise_level < 0:
-          t = torch.randint(0, self.num_diffusion_steps, (expanded_B,)).to(face_sequences.device)
+          t = self.sample_t(expanded_B).to(face_sequences.device)
         else:
           t = [noise_level]
           print('Using noise', noise_level)
@@ -368,5 +374,5 @@ class ResUNet384V3(nn.Module):
         else:
             outputs = x
             
-        return outputs
+        return outputs, fed7, audio_embedding1
 

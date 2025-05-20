@@ -70,6 +70,36 @@ use_cuda = torch.cuda.is_available()
 
 print('use_cuda: {}'.format(use_cuda))
 
+def cosine_similarity_loss(face_embedding, audio_embedding):
+    """
+    Computes the cosine similarity loss between two tensors.
+    
+    Parameters:
+    - face_embedding: Tensor of shape [batch_size, channels, height, width]
+    - audio_embedding: Tensor of shape [batch_size, channels, height, width]
+    
+    Returns:
+    - average_loss: The average cosine similarity loss over the batch
+    """
+    # Flatten the spatial dimensions of both tensors
+    face_flatten = face_embedding.view(face_embedding.size(0), -1)
+    audio_flatten = audio_embedding.view(audio_embedding.size(0), -1)
+    
+    # Normalize the tensors
+    face_normalized = F.normalize(face_flatten, p=2, dim=1)
+    audio_normalized = F.normalize(audio_flatten, p=2, dim=1)
+    
+    # Compute the cosine similarity
+    cosine_similarity = F.cosine_similarity(face_normalized, audio_normalized, dim=1)
+    
+    # Compute the cosine similarity loss (1 - cosine_similarity)
+    cosine_similarity_loss = 1 - cosine_similarity
+    
+    # Compute the average loss over the batch
+    average_loss = torch.mean(cosine_similarity_loss)
+    
+    return average_loss
+
 def save_sample_images(x, g, gt, global_step, checkpoint_dir):
     '''
     refs: Reference images (extracted from the input x with channels 3 onward).
@@ -191,7 +221,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               gt = gt.to(device)
 
               with autocast():
-                g = model(indiv_mels, x, True)
+                g, face_embedding, audio_embedding = model(indiv_mels, x, True)
+                
                 
                 # Compare two images
                 '''
@@ -230,7 +261,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
                 running_l1_loss += l1loss.item()
                 
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss # + 0.5 * tempora_loss
+                cossine_loss = cosine_similarity_loss(face_embedding, audio_embedding)
+                
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + 0.05 * cossine_loss
               
               loss.backward()
               optimizer.step()
@@ -261,7 +294,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, LR: {current_lr:.7f}")
+              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Cos Loss: {cossine_loss.item()}, LR: {current_lr:.7f}")
               
               
               metrics = {
