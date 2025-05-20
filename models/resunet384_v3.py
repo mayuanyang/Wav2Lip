@@ -132,6 +132,11 @@ class ResUNet384V3(nn.Module):
             Conv2d(512, 1024, kernel_size=3, stride=1, padding=1),
         )
         
+        self.face_transformer_encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=512, nhead=8, dropout=0.1, activation='gelu'),
+            num_layers=2
+        )
+        
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=512, nhead=8, dropout=0.1, activation='gelu'),
             num_layers=2
@@ -250,6 +255,7 @@ class ResUNet384V3(nn.Module):
         probabilities = torch.tensor([1, 1, 1, 1, 1, 0, 0, 0, 0, 0], dtype=torch.float32)
         probabilities = probabilities / probabilities.sum()
         t = torch.multinomial(probabilities, expanded_B, replacement=True)
+        return t
     
     def forward(self, audio_sequences, face_sequences, use_face_enhancer=False, add_noise=True, noise_level=-1):
         
@@ -321,13 +327,19 @@ class ResUNet384V3(nn.Module):
         
         FB, _, H, W = fed7.shape
         
-        combined = fed7 + audio_embedding1
+        face_flatten = fed7.view(FB, 512, -1).permute(0, 2, 1)
         
-        flatten = combined.view(FB, 512, -1)
-        transformer_input = flatten.permute(0, 2, 1)  # [5, 9, 512]
+        face_flatten = self.face_transformer_encoder(face_flatten)
+        
+        audio_flatten = audio_embedding1.view(FB, 512, -1).permute(0, 2, 1)
+        
+        combined = face_flatten + audio_flatten
+        
+        #flatten = combined.view(FB, 512, -1)
+        #transformer_input = combined.permute(0, 2, 1)  # [5, 9, 512]
         
         
-        transformer_output = self.transformer_encoder(transformer_input)
+        transformer_output = self.transformer_encoder(combined)
         swapped_back = transformer_output.permute(0, 2, 1)  # Shape: [5, 512, 9]
         original_shape = swapped_back.reshape(FB ,512 ,3 ,3 ) 
         
