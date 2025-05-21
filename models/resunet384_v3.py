@@ -84,24 +84,6 @@ class ResUNet384V3(nn.Module):
             Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         ) #12x12
-
-        self.face_encoder6 = nn.Sequential( 
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-        )
-        self.fe_down6 = nn.Sequential( 
-            Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-        ) #6x6
-
-        self.face_encoder7 = nn.Sequential( 
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-        )
-        self.fe_down7 = nn.Sequential( 
-            Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-        ) #3x3
         
         
         
@@ -136,6 +118,11 @@ class ResUNet384V3(nn.Module):
             nn.TransformerEncoderLayer(d_model=512, nhead=8, dropout=0.1, activation='gelu'),
             num_layers=2
         )
+
+        self.audio_transformer_encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=512, nhead=8, dropout=0.1, activation='gelu'),
+            num_layers=2
+        )
         
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=512, nhead=8, dropout=0.1, activation='gelu'),
@@ -143,26 +130,9 @@ class ResUNet384V3(nn.Module):
         )
         
         # Decoders
-        self.face_decoder7 = nn.Sequential( #48x48
-            Conv2dTranspose(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-        )
-        self.fd_conv7 = nn.Sequential(
-            Conv2d(1024, 512, kernel_size=3, stride=1, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-        )
-        
-        self.face_decoder6 = nn.Sequential( #48x48
-            Conv2dTranspose(512, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-        )
-        self.fd_conv6 = nn.Sequential(
-            Conv2d(1024, 512, kernel_size=3, stride=1, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-        )
         
         self.face_decoder5 = nn.Sequential( #48x48
-            Conv2dTranspose(512, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2dTranspose(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         )
         self.fd_conv5 = nn.Sequential(
@@ -218,8 +188,8 @@ class ResUNet384V3(nn.Module):
             nn.Sigmoid()
         )
         
-        self.face_pos_encoder = LearnablePositionalEncoding2D(d_model=512, max_h=3, max_w=3, dropout=0.1)
-        self.audio_pos_encoder = LearnablePositionalEncoding2D(d_model=512, max_h=3, max_w=3, dropout=0.1)
+        self.face_pos_encoder = LearnablePositionalEncoding2D(d_model=512, max_h=12, max_w=12, dropout=0.1)
+        self.audio_pos_encoder = LearnablePositionalEncoding2D(d_model=512, max_h=12, max_w=12, dropout=0.1)
         
 
 
@@ -280,7 +250,7 @@ class ResUNet384V3(nn.Module):
         # Obtain audio features
         audio_embedding1 = self.audio_encoder1(audio_sequences)
           
-        audio_embedding1 = F.interpolate(audio_embedding1.float(), size=(3, 3), mode="bilinear")
+        audio_embedding1 = F.interpolate(audio_embedding1.float(), size=(12, 12), mode="bilinear")
         
         audio_embedding1 = self.audio_pos_encoder(audio_embedding1)
           
@@ -304,43 +274,34 @@ class ResUNet384V3(nn.Module):
         face5 = self.face_encoder5(fed4)
         fed5 = self.fe_down5(face5)
         
-        face6 = self.face_encoder6(fed5)
-        fed6 = self.fe_down6(face6)
-        
-        face7 = self.face_encoder7(fed6)
-        fed7 = self.fe_down7(face7)
-        
-        fed7 = self.face_pos_encoder(fed7)
         
         
-        FB, _, H, W = fed7.shape
+        fed5 = self.face_pos_encoder(fed5)
         
-        face_flatten = fed7.view(FB, 512, -1).permute(0, 2, 1)
+        
+        FB, _, H, W = fed5.shape
+        
+        face_flatten = fed5.view(FB, 512, -1).permute(0, 2, 1)
         
         face_flatten = self.face_transformer_encoder(face_flatten)
         
         audio_flatten = audio_embedding1.view(FB, 512, -1).permute(0, 2, 1)
+
+        audio_flatten = self.audio_transformer_encoder(audio_flatten)
         
         combined = face_flatten + audio_flatten
         
         
         transformer_output = self.transformer_encoder(combined)
         swapped_back = transformer_output.permute(0, 2, 1)  # Shape: [5, 512, 9]
-        original_shape = swapped_back.reshape(FB ,512 ,3 ,3 ) 
+        original_shape = swapped_back.reshape(FB ,512 ,12 ,12 ) 
         
         
         # Get face bottleneck features
-        bottlenet = self.bottlenet(fed7 + original_shape)
+        bottlenet = self.bottlenet(fed5 + original_shape)
         
-        deface7 = self.face_decoder7(bottlenet)
-        cat7 = torch.cat([deface7, face7], dim=1)
-        cat7 = self.fd_conv7(cat7)
         
-        deface6 = self.face_decoder6(cat7)
-        cat6 = torch.cat([deface6, face6], dim=1)
-        cat6 = self.fd_conv6(cat6)
-        
-        deface5 = self.face_decoder5(cat6)
+        deface5 = self.face_decoder5(bottlenet)
         cat5 = torch.cat([deface5, face5], dim=1)
         cat5 = self.fd_conv5(cat5)
 
@@ -371,5 +332,5 @@ class ResUNet384V3(nn.Module):
         else:
             outputs = x
             
-        return outputs, fed7, audio_embedding1
+        return outputs, fed5, audio_embedding1
 

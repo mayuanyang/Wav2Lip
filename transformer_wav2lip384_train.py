@@ -173,7 +173,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     global global_step, global_epoch
     resumed_step = global_step
 
-    patience = 5000
+    patience = 25000
 
     current_lr = get_current_lr(optimizer)
     print('The learning rate is: {0}'.format(current_lr))
@@ -194,6 +194,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     syncnet_wt = hparams.syncnet_wt
     sync_loss = 0.
 
+    model.train()
+
     while global_epoch < nepochs:
         current_lr = get_current_lr(optimizer)
                 
@@ -206,9 +208,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         for step, (x, indiv_mels, mel, gt) in prog_bar:
             #print("The x shape", x.shape)
             if x.shape[0] == hparams.batch_size:
-              model.train()
-              optimizer.zero_grad()
-
+              
               # Move data to CUDA device
               x = x.to(device)
               
@@ -266,8 +266,11 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + 0.05 * cossine_loss
               
               loss.backward()
-              optimizer.step()
-              
+              if (step + 1) % 20 == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+                
+
               if global_step % checkpoint_interval == 0:
                   save_sample_images(x, g, gt, global_step, checkpoint_dir)
 
@@ -389,6 +392,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
     s = checkpoint["state_dict"]
     new_s = {}
     for k, v in s.items():
+      if k in model.state_dict() and v.size() == model.state_dict()[k].size():
         new_s[k.replace('module.', '')] = v
     model.load_state_dict(new_s, strict=False)
     if not reset_optimizer:
