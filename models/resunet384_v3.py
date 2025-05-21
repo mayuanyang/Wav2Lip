@@ -252,7 +252,7 @@ class ResUNet384V3(nn.Module):
     
     def sample_t(self, expanded_B):
         # Create a biased distribution towards higher values
-        probabilities = torch.tensor([1, 1, 1, 1, 1, 0, 0, 0, 0, 0], dtype=torch.float32)
+        probabilities = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=torch.float32)
         probabilities = probabilities / probabilities.sum()
         t = torch.multinomial(probabilities, expanded_B, replacement=True)
         return t
@@ -286,18 +286,6 @@ class ResUNet384V3(nn.Module):
           
         if add_noise:
             face_sequences = self.diffuse(face_sequences.float(), t)
-
-        
-        # # 2. 拼接回12通道（复制噪声到后9通道）
-        # if previous_result  is not None:
-        #   print('Previous result not yet', step)
-        #   if add_noise:
-        #     previous_result = self.diffuse(previous_result.float(), [step])
-            
-        #   face_sequences = torch.cat([
-        #       previous_result,  # [B,3,H,W]
-        #       face_sequences[:, 3:]
-        #   ], dim=1)  # [B,12,H,W]
         
         # ----The face encoder-----
         face1 = self.face_encoder1(face_sequences)
@@ -334,9 +322,6 @@ class ResUNet384V3(nn.Module):
         audio_flatten = audio_embedding1.view(FB, 512, -1).permute(0, 2, 1)
         
         combined = face_flatten + audio_flatten
-        
-        #flatten = combined.view(FB, 512, -1)
-        #transformer_input = combined.permute(0, 2, 1)  # [5, 9, 512]
         
         
         transformer_output = self.transformer_encoder(combined)
