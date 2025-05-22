@@ -264,9 +264,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 cossine_loss = cosine_similarity_loss(face_embedding, audio_embedding)
                 
                 loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + 0.05 * cossine_loss
-              
+
+              #loss = loss / 20
               loss.backward()
-              if (step + 1) % 20 == 0:
+              if (step + 1) % 25 == 0:
                 optimizer.step()
                 optimizer.zero_grad()
                 
