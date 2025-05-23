@@ -115,7 +115,7 @@ class ResUNet384V3(nn.Module):
         
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=512, nhead=8, dropout=0.1, activation='gelu'),
-            num_layers=2
+            num_layers=6
         )
         
         self.combined_layer = nn.Linear(1024, 512)
@@ -204,7 +204,7 @@ class ResUNet384V3(nn.Module):
     
     def sample_t(self, expanded_B):
         # Create a biased distribution towards higher values
-        probabilities = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=torch.float32)
+        probabilities = torch.tensor([1, 1, 1, 1, 1, 1, 2, 2, 2, 2], dtype=torch.float32)
         probabilities = probabilities / probabilities.sum()
         t = torch.multinomial(probabilities, expanded_B, replacement=True)
         return t
