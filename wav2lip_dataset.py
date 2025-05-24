@@ -290,12 +290,12 @@ class Dataset(object):
                 '''
 
                 #window = self.apply_gaussian_blur_to_bottom_half_vectorized(window)
-                # use_face_mesh = False
-                # if use_face_mesh:
-                #   with self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True) as face_mesh:
-                #     window = self.apply_dynamic_blur(window, face_mesh, True)
-                # else:
-                #   window = self.apply_dynamic_blur(window, None, False)
+                use_face_mesh = False
+                if use_face_mesh:
+                  with self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True) as face_mesh:
+                    window = self.apply_dynamic_blur(window, face_mesh, True)
+                else:
+                  window = self.apply_dynamic_blur(window, None, False)
 
                 wrong_window = self.prepare_window(wrong_window)
 

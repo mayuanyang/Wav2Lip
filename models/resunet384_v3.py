@@ -20,7 +20,7 @@ def cosine_noise_schedule(num_steps, s=0.008):
     alphas = f ** 2  # Squaring is correct (cos²)
     alphas = alphas / alphas[0]  # Normalize to start at 1
     betas = 1 - (alphas[1:] / alphas[:-1])
-    result = betas.clamp(min=0.001, max=0.85)
+    result = betas.clamp(min=0.01, max=0.3)
 
     #result = torch.cat([result, torch.zeros(1)])
     return result
@@ -30,7 +30,7 @@ class ResUNet384V3(nn.Module):
     def __init__(self):
         super(ResUNet384V3, self).__init__()
         
-        num_diffusion_steps = 10
+        num_diffusion_steps = 2
         self.num_diffusion_steps = num_diffusion_steps
         self.betas = cosine_noise_schedule(num_diffusion_steps)  # or cosine_noise_schedule()
         self.alphas = 1 - self.betas
@@ -40,15 +40,18 @@ class ResUNet384V3(nn.Module):
             Conv2d(12, 64, kernel_size=3, stride=1, padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
         self.fe_down1 = nn.Sequential( 
             Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            
         )#192x192
         
         self.face_encoder2 = nn.Sequential( 
             Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
@@ -175,7 +178,7 @@ class ResUNet384V3(nn.Module):
         
 
 
-    def diffuse(self, x, t, noise_factor=0.5):
+    def diffuse(self, x, t):
         b, c, h, w = x.shape
         
         # Split spatial dimensions (bottom half only)
@@ -192,7 +195,7 @@ class ResUNet384V3(nn.Module):
         sqrt_one_minus_alpha_t = torch.sqrt(1 - self.alphas_cumprod[t])
         
         # 每个样本独立添加噪声
-        epsilon = torch.randn_like(rgb_channels) * noise_factor
+        epsilon = torch.randn_like(rgb_channels)
         noisy_rgb = sqrt_alpha_t.view(-1,1,1,1) * rgb_channels + sqrt_one_minus_alpha_t.view(-1,1,1,1) * epsilon
 
         # Recombine
@@ -204,7 +207,7 @@ class ResUNet384V3(nn.Module):
     
     def sample_t(self, expanded_B):
         # Create a biased distribution towards higher values
-        probabilities = torch.tensor([1, 1, 1, 1, 1, 1, 2, 2, 2, 2], dtype=torch.float32)
+        probabilities = torch.tensor([1, 1], dtype=torch.float32)
         probabilities = probabilities / probabilities.sum()
         t = torch.multinomial(probabilities, expanded_B, replacement=True)
         return t
