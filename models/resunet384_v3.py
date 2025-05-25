@@ -285,19 +285,19 @@ class ResUNet384V3(nn.Module):
         fed1 = self.fe_down1(face1)
         
         if add_noise:
-          fed1 = self.diffuse(fed1.float(), t1, 3)
+          fed1 = self.diffuse(fed1.float(), t1, 16)
 
         face2 = self.face_encoder2(fed1)
         fed2 = self.fe_down2(face2)
         
         if add_noise:
-          fed2 = self.diffuse(fed2.float(), t2, 3)
+          fed2 = self.diffuse(fed2.float(), t2, 128)
 
         face3 = self.face_encoder3(fed2)
         fed3 = self.fe_down3(face3)
         
         if add_noise:
-          fed3 = self.diffuse(fed3.float(), t3, 3)
+          fed3 = self.diffuse(fed3.float(), t3, 256)
 
         face4 = self.face_encoder4(fed3)
         fed4 = self.fe_down4(face4)        
