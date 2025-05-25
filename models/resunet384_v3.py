@@ -25,14 +25,32 @@ def cosine_noise_schedule(num_steps, s=0.008):
     #result = torch.cat([result, torch.zeros(1)])
     return result
 
+def linear_schedule():
+    return torch.tensor([0.01, 0.15, 0.2, 0.3])
     
+class SpatialAttention(nn.Module):
+    def __init__(self, kernel_size=7):
+        super(SpatialAttention, self).__init__()
+        assert kernel_size in (3, 7), 'kernel size must be 3 or 7'
+        padding = 3 if kernel_size == 7 else 1
+        self.conv1 = nn.Conv2d(2, 1, kernel_size, padding=padding, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        x_att = torch.cat([avg_out, max_out], dim=1)
+        x_att = self.conv1(x_att)
+        x_att = self.sigmoid(x_att)
+        return x + x_att * x  # 使用skip connection
+      
 class ResUNet384V3(nn.Module):
     def __init__(self):
         super(ResUNet384V3, self).__init__()
         
         num_diffusion_steps = 2
         self.num_diffusion_steps = num_diffusion_steps
-        self.betas = cosine_noise_schedule(num_diffusion_steps)  # or cosine_noise_schedule()
+        self.betas = linear_schedule()  # or cosine_noise_schedule()
         self.alphas = 1 - self.betas
         self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
         
@@ -41,12 +59,13 @@ class ResUNet384V3(nn.Module):
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
         )
         self.fe_down1 = nn.Sequential( 
             Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-            
+            SpatialAttention()
         )#192x192
         
         self.face_encoder2 = nn.Sequential( 
@@ -54,29 +73,35 @@ class ResUNet384V3(nn.Module):
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
         )
         self.fe_down2 = nn.Sequential(
             Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
         )#96x96
 
         self.face_encoder3 = nn.Sequential( 
             Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
         )
         self.fe_down3 = nn.Sequential( 
             Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
         )#48x48
 
         self.face_encoder4 = nn.Sequential( 
             Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
         )
         self.fe_down4 = nn.Sequential( 
             Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
         ) #24x24
         
 
@@ -87,23 +112,28 @@ class ResUNet384V3(nn.Module):
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
        
             Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
        
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
        
             Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
         )
 
         self.bottlenet = nn.Sequential(
             Conv2d(1024, 1024, kernel_size=3, stride=1, padding=1),
+            SpatialAttention(),
         )
         
         self.face_transformer_encoder = nn.TransformerEncoder(
@@ -128,19 +158,23 @@ class ResUNet384V3(nn.Module):
         self.face_decoder4 = nn.Sequential( #48x48
             Conv2dTranspose(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
         )
         self.fd_conv4 = nn.Sequential(
             Conv2d(1024, 512, kernel_size=3, stride=1, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
         )
 
         self.face_decoder3 = nn.Sequential( #96x96
             Conv2dTranspose(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
         )
         self.fd_conv3 = nn.Sequential(
             Conv2d(512, 256, kernel_size=3, stride=1, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
         )
         
 
@@ -148,11 +182,13 @@ class ResUNet384V3(nn.Module):
             Conv2dTranspose(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
         )
         self.fd_conv2 = nn.Sequential(
             Conv2d(256, 128, kernel_size=3, stride=1, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
         )
 
 
@@ -160,12 +196,14 @@ class ResUNet384V3(nn.Module):
             Conv2dTranspose(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
         )
         
         self.fd_conv1 = nn.Sequential(
             Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
         )
 
         self.output_block = nn.Sequential(
@@ -178,7 +216,7 @@ class ResUNet384V3(nn.Module):
         
 
 
-    def diffuse(self, x, t):
+    def diffuse(self, x, t, channels_to_mask):
         b, c, h, w = x.shape
         
         # Split spatial dimensions (bottom half only)
@@ -187,8 +225,8 @@ class ResUNet384V3(nn.Module):
         bottom_half = x[:, :, split_idx:, :]  # Bottom to process
         
         # Split channels
-        rgb_channels = bottom_half[:, :3, :, :]  # First 3 channels (R,G,B)
-        other_channels = bottom_half[:, 3:, :, :]  # Other channels (unchanged)
+        rgb_channels = bottom_half[:, :channels_to_mask, :, :]  # First 3 channels (R,G,B)
+        other_channels = bottom_half[:, channels_to_mask:, :, :]  # Other channels (unchanged)
 
         # t的形状应为 [B]
         sqrt_alpha_t = torch.sqrt(self.alphas_cumprod[t])          # 自动广播为 [B,1,1,1]
@@ -205,7 +243,7 @@ class ResUNet384V3(nn.Module):
 
         return result
     
-    def sample_t(self, expanded_B):
+    def sample_t(self, expanded_B, probabilities):
         # Create a biased distribution towards higher values
         probabilities = torch.tensor([1, 1], dtype=torch.float32)
         probabilities = probabilities / probabilities.sum()
@@ -223,12 +261,12 @@ class ResUNet384V3(nn.Module):
 
         expanded_B = face_sequences.size(0)  # 展平后的 batch size
 
-        if noise_level < 0:
-          t = self.sample_t(expanded_B).to(face_sequences.device)
-        else:
-          t = [noise_level]
-          print('Using noise', noise_level)
-
+       
+        t0 = self.sample_t(expanded_B, torch.tensor([0, 0, 0, 1], dtype=torch.float32)).to(face_sequences.device)
+        t1 = self.sample_t(expanded_B, torch.tensor([0, 0, 1, 0], dtype=torch.float32)).to(face_sequences.device)
+        t2 = self.sample_t(expanded_B, torch.tensor([0, 1, 0, 0], dtype=torch.float32)).to(face_sequences.device)
+        t3 = self.sample_t(expanded_B, torch.tensor([1, 0, 0, 0], dtype=torch.float32)).to(face_sequences.device)
+       
         self.alphas_cumprod = self.alphas_cumprod.to(face_sequences.device)
         
         
@@ -240,20 +278,29 @@ class ResUNet384V3(nn.Module):
         audio_embedding1 = self.audio_pos_encoder(audio_embedding1)
           
         if add_noise:
-            face_sequences = self.diffuse(face_sequences.float(), t)
+            face_sequences = self.diffuse(face_sequences.float(), t0, 3)
         
         # ----The face encoder-----
         face1 = self.face_encoder1(face_sequences)
         fed1 = self.fe_down1(face1)
+        
+        if add_noise:
+          fed1 = self.diffuse(fed1.float(), t1, 3)
 
         face2 = self.face_encoder2(fed1)
         fed2 = self.fe_down2(face2)
+        
+        if add_noise:
+          fed2 = self.diffuse(fed2.float(), t2, 3)
 
         face3 = self.face_encoder3(fed2)
         fed3 = self.fe_down3(face3)
+        
+        if add_noise:
+          fed3 = self.diffuse(fed3.float(), t3, 3)
 
         face4 = self.face_encoder4(fed3)
-        fed4 = self.fe_down4(face4)
+        fed4 = self.fe_down4(face4)        
         fed4 = self.face_pos_encoder(fed4)
         
         

@@ -129,6 +129,7 @@ for p in syncnet.parameters():
 
 cross_entropy_loss = nn.BCEWithLogitsLoss()
 recon_loss = nn.L1Loss()
+mse_loss = nn.MSELoss()
 
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
@@ -267,7 +268,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               #loss = loss / 20
               loss.backward()
-              if (step + 1) % 25 == 0:
+              if (step + 1) % 5 == 0:
                 optimizer.step()
                 optimizer.zero_grad()
                 
