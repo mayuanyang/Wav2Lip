@@ -138,7 +138,7 @@ class ResUNet384V3(nn.Module):
         
         self.face_transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=512, nhead=8, dropout=0.1, activation='gelu'),
-            num_layers=6
+            num_layers=8
         )
 
         self.audio_transformer_encoder = nn.TransformerEncoder(
@@ -289,12 +289,13 @@ class ResUNet384V3(nn.Module):
 
         face2 = self.face_encoder2(fed1)
         fed2 = self.fe_down2(face2)
-        
+
         if add_noise:
           fed2 = self.diffuse(fed2.float(), t2, 128)
 
         face3 = self.face_encoder3(fed2)
         fed3 = self.fe_down3(face3)
+
         
         if add_noise:
           fed3 = self.diffuse(fed3.float(), t3, 256)
@@ -307,12 +308,12 @@ class ResUNet384V3(nn.Module):
         FB, _, H, W = fed4.shape
         
         face_flatten = fed4.view(FB, 512, -1).permute(0, 2, 1)
-        
-        face_flatten = self.face_transformer_encoder(face_flatten)
-        
-        audio_flatten = audio_embedding1.view(FB, 512, -1).permute(0, 2, 1)
 
-        audio_flatten = self.audio_transformer_encoder(audio_flatten)
+        audio_flatten = audio_embedding1.view(FB, 512, -1).permute(0, 2, 1)
+        
+        face_flatten = self.face_transformer_encoder(face_flatten + audio_flatten * 0.5)
+
+        audio_flatten = self.audio_transformer_encoder(audio_flatten + face_flatten * 0.5)
         
         # Concatenate face and audio features
         combined = torch.cat((face_flatten, audio_flatten), dim=-1)
@@ -329,24 +330,26 @@ class ResUNet384V3(nn.Module):
         swapped_back = transformer_output.permute(0, 2, 1)  # Shape: [5, 512, 9]
         original_shape = swapped_back.reshape(FB ,512 ,24 ,24 ) 
         
-        
+        fed4 = fed4 + audio_embedding1
         # Get face bottleneck features
         bottleneck_input = torch.cat([fed4, original_shape], dim=1)
         bottlenet = self.bottlenet(bottleneck_input)
+        
 
         deface4 = self.face_decoder4(bottlenet)
+
         cat4 = torch.cat([deface4, face4], dim=1)
         cat4 = self.fd_conv4(cat4)
 
-        deface3 = self.face_decoder3(cat4)
+        deface3 = self.face_decoder3(cat4 + deface4)
         cat3 = torch.cat([deface3, face3], dim=1)
         cat3 = self.fd_conv3(cat3)
-        
-        deface2 = self.face_decoder2(cat3)
+
+        deface2 = self.face_decoder2(cat3 + deface3)
         cat2 = torch.cat([deface2, face2], dim=1)
         cat2 = self.fd_conv2(cat2)
         
-        deface1 = self.face_decoder1(cat2)
+        deface1 = self.face_decoder1(cat2 + deface2)
         cat1 = torch.cat([deface1, face1], dim=1)
         cat1 = self.fd_conv1(cat1)
 
