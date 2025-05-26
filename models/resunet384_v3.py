@@ -85,10 +85,12 @@ class ResUNet384V3(nn.Module):
         self.face_encoder3 = nn.Sequential( 
             Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             SpatialAttention()
         )
         self.fe_down3 = nn.Sequential( 
             Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             SpatialAttention()
         )#48x48
@@ -169,10 +171,12 @@ class ResUNet384V3(nn.Module):
         self.face_decoder3 = nn.Sequential( #96x96
             Conv2dTranspose(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             SpatialAttention(),
         )
         self.fd_conv3 = nn.Sequential(
             Conv2d(512, 256, kernel_size=3, stride=1, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             SpatialAttention(),
         )
