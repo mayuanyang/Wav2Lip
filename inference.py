@@ -324,7 +324,7 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
       img_masked = img_batch.copy()
 
       # img_masked[:, args.img_size//2:] = 0
-      #img_masked = apply_dynamic_blur(img_masked)
+      img_masked = apply_dynamic_blur(img_masked)
       #print('The image shape 1', img_masked.shape, img_batch.shape)
 
       img_batch = np.concatenate((img_masked, img_batch, ref_batch, ref_batch2), axis=3) / 255.
@@ -341,7 +341,7 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
 
     
     #img_masked[:, args.img_size//2:] = 0
-    #img_masked = apply_dynamic_blur(img_masked)
+    img_masked = apply_dynamic_blur(img_masked)
 
     print('The image shape 2', img_masked.shape)
 
@@ -535,7 +535,7 @@ def main():
       
       with torch.no_grad():
         print('The img_batch shape', img_batch.shape)
-        pred, face_embedding, audio_embedding = model(mel_batch, img_batch, add_noise=True, noise_level=2)
+        pred, face_embedding, audio_embedding = model(mel_batch, img_batch, add_noise=True)
         
         #pred=inference_denoise(model, img_batch, mel_batch, num_steps=2) 
         

@@ -320,7 +320,12 @@ class ResUNet384V3(nn.Module):
         # Apply linear transformation
         combined = self.combined_layer(combined)
         
+        combined = combined + face_flatten + audio_flatten
+        
         transformer_output = self.transformer_encoder(combined)
+        
+        transformer_output = transformer_output + combined
+        
         swapped_back = transformer_output.permute(0, 2, 1)  # Shape: [5, 512, 9]
         original_shape = swapped_back.reshape(FB ,512 ,24 ,24 ) 
         
