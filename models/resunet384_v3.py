@@ -22,7 +22,6 @@ def cosine_noise_schedule(num_steps, s=0.008):
     betas = 1 - (alphas[1:] / alphas[:-1])
     result = betas.clamp(min=0.01, max=0.3)
 
-    #result = torch.cat([result, torch.zeros(1)])
     return result
 
 def linear_schedule():
@@ -65,7 +64,6 @@ class ResUNet384V3(nn.Module):
             Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention()
         )#192x192
         
         self.face_encoder2 = nn.Sequential( 
@@ -79,7 +77,6 @@ class ResUNet384V3(nn.Module):
             Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention()
         )#96x96
 
         self.face_encoder3 = nn.Sequential( 
@@ -103,57 +100,33 @@ class ResUNet384V3(nn.Module):
         self.fe_down4 = nn.Sequential( 
             Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention()
         ) #24x24
         
 
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
             # Example input shape: (B, 1, H_audio, W_audio)
-            Conv2d(1, 64, kernel_size=3, stride=2, padding=1),
+            Conv2d(1, 64, kernel_size=3, stride=1, padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(),
        
             Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(),
        
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(),
        
             Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(),
         )
 
         self.bottlenet = nn.Sequential(
-            Conv2d(1024, 1024, kernel_size=3, stride=1, padding=1),
+            Conv2d(512, 1024, kernel_size=3, stride=1, padding=1),
             SpatialAttention(),
         )
         
-        self.face_transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=512, nhead=8, dropout=0.1, activation='gelu'),
-            num_layers=8
-        )
-
-        self.audio_transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=512, nhead=8, dropout=0.1, activation='gelu'),
-            num_layers=2
-        )
-        
-        self.transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=512, nhead=8, dropout=0.1, activation='gelu'),
-            num_layers=6
-        )
-        
-        self.combined_layer = nn.Linear(1024, 512)
         
         # Decoders
         
@@ -200,14 +173,12 @@ class ResUNet384V3(nn.Module):
             Conv2dTranspose(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(),
         )
         
         self.fd_conv1 = nn.Sequential(
             Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(),
         )
 
         self.output_block = nn.Sequential(
@@ -309,35 +280,10 @@ class ResUNet384V3(nn.Module):
         fed4 = self.face_pos_encoder(fed4)
         
         
-        FB, _, H, W = fed4.shape
+        combined = fed4 + audio_embedding1
         
-        face_flatten = fed4.view(FB, 512, -1).permute(0, 2, 1)
-
-        audio_flatten = audio_embedding1.view(FB, 512, -1).permute(0, 2, 1)
         
-        face_flatten = self.face_transformer_encoder(face_flatten + audio_flatten * 0.5)
-
-        audio_flatten = self.audio_transformer_encoder(audio_flatten + face_flatten * 0.5)
-        
-        # Concatenate face and audio features
-        combined = torch.cat((face_flatten, audio_flatten), dim=-1)
-        
-        # Apply linear transformation
-        combined = self.combined_layer(combined)
-        
-        combined = combined + face_flatten + audio_flatten
-        
-        transformer_output = self.transformer_encoder(combined)
-        
-        transformer_output = transformer_output + combined
-        
-        swapped_back = transformer_output.permute(0, 2, 1)  # Shape: [5, 512, 9]
-        original_shape = swapped_back.reshape(FB ,512 ,24 ,24 ) 
-        
-        fed4 = fed4 + audio_embedding1
-        # Get face bottleneck features
-        bottleneck_input = torch.cat([fed4, original_shape], dim=1)
-        bottlenet = self.bottlenet(bottleneck_input)
+        bottlenet = self.bottlenet(combined)
         
 
         deface4 = self.face_decoder4(bottlenet)

@@ -148,10 +148,25 @@ def get_sync_loss(mel, g):
     return cross_entropy_loss(output, y)
 
 
-def print_grad_norm(module, grad_input, grad_output):
-    for i, grad in enumerate(grad_output):
-        if grad is not None and global_step % 1000 == 0:
-            print(f'{module.__class__.__name__} - grad_output[{i}] norm: {grad.norm().item()}')
+def print_grad_norm(name, module, grad_input, grad_output):
+    should_print = global_step % 100 == 0
+    if should_print:
+        print()
+        print(f"Module: {module.__class__.__name__}", name)
+        if isinstance(module, torch.nn.Conv2d):
+            print(f"Input Channels: {module.in_channels}, Output Channels: {module.out_channels}")
+        
+        # 检查梯度是否为 None
+        grad_input_norm = grad_input[0].norm().item() if grad_input[0] is not None else 0
+        grad_output_norm = grad_output[0].norm().item() if grad_output[0] is not None else 0
+        
+        print(f"Grad Input Norm: {grad_input_norm:.6f}")
+        print(f"Grad Output Norm: {grad_output_norm:.6f}")
+        
+        # 验证梯度是否合理
+        if grad_input_norm < 1e-6 and grad_output_norm > 1e-6:
+            print("!!!!---Potential vanishing gradient detected---!!!!")
+        print()
 
 # Added by eddy
 def get_current_lr(optimizer):
@@ -181,11 +196,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
     # Added by eddy
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=patience, verbose=True)
-
-    if should_print_grad_norm:
-      for name, module in model.named_modules():
-        if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear)):
-            module.register_backward_hook(print_grad_norm)
 
     # Initialize LPIPS model
     lpips_loss = lpips.LPIPS(net='vgg').to(device)  # You can choose 'alex', 'vgg', or 'squeeze'
@@ -489,6 +499,10 @@ if __name__ == "__main__":
     #   if 'face_enhancer' not in name:
     #     param.requires_grad = False
     #     print('nooooo')
+    
+    for name, module in model.named_modules():
+        if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear, nn.Conv2d, nn.TransformerEncoderLayer)):
+            module.register_backward_hook(lambda module, grad_input, grad_output, name=name: print_grad_norm(name, module, grad_input, grad_output))
 
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
     # Train!
