@@ -149,7 +149,7 @@ def get_sync_loss(mel, g):
 
 
 def print_grad_norm(name, module, grad_input, grad_output):
-    should_print = global_step % 100 == 0
+    should_print = global_step % 1000 == 0
     if should_print:
         print()
         print(f"Module: {module.__class__.__name__}", name)
@@ -274,7 +274,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 
                 cossine_loss = cosine_similarity_loss(face_embedding, audio_embedding)
                 
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + 0.05 * cossine_loss
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss #+ 0.05 * cossine_loss
 
               #loss = loss / 20
               loss.backward()

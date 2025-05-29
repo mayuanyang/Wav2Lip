@@ -64,8 +64,19 @@ class ResUNet384V3(nn.Module):
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )#192x192
         
+        self.face_encoder1_bottom = nn.Sequential( #384x384
+            Conv2d(12, 64, kernel_size=3, stride=1, padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+        )
+        self.fe_down1_bottom = nn.Sequential( 
+            Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+        )#192x192
+        
         self.face_encoder2 = nn.Sequential( 
-            Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
@@ -100,6 +111,15 @@ class ResUNet384V3(nn.Module):
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
         ) #24x24
         
+        self.face_encoder5 = nn.Sequential( 
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
+        )
+        self.fe_down5 = nn.Sequential( 
+            Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+        ) #24x24
 
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
@@ -128,8 +148,19 @@ class ResUNet384V3(nn.Module):
         
         # Decoders
         
-        self.face_decoder4 = nn.Sequential( #48x48
+        self.face_decoder5 = nn.Sequential( #48x48
             Conv2dTranspose(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
+        )
+        self.fd_conv4 = nn.Sequential(
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
+        )
+        
+        self.face_decoder4 = nn.Sequential( #48x48
+            Conv2dTranspose(512, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
             SpatialAttention(),
         )
@@ -246,19 +277,30 @@ class ResUNet384V3(nn.Module):
         # Obtain audio features
         audio_embedding1 = self.audio_encoder1(audio_sequences)
           
-        audio_embedding1 = F.interpolate(audio_embedding1.float(), size=(24, 24), mode="bilinear")
+        audio_embedding1 = F.interpolate(audio_embedding1.float(), size=(12, 12), mode="bilinear")
         
         audio_embedding1 = self.audio_pos_encoder(audio_embedding1)
+        
+        height = face_sequences.size(2)
+        width = face_sequences.size(3)
+        top_face_mask = torch.ones_like(face_sequences)
+        top_face_mask[:, :, :height // 2, :] = 0  # 将上半部分遮罩为0（黑色）
+        top_face_sequences = face_sequences * top_face_mask  # 应用遮罩
           
-        if add_noise:
-            face_sequences = self.diffuse(face_sequences.float(), t0, 3)
+        # if add_noise:
+        #     face_sequences = self.diffuse(face_sequences.float(), t0, 3)
         
         # ----The face encoder-----
         face1 = self.face_encoder1(face_sequences)
         fed1 = self.fe_down1(face1)
         
-        if add_noise:
-          fed1 = self.diffuse(fed1.float(), t1, 16)
+        face1_bottom = self.face_encoder1_bottom(top_face_sequences)
+        fed1_bottom = self.fe_down1_bottom(face1_bottom)
+        
+        fed1 = torch.cat([fed1, fed1_bottom], dim=1)
+        
+        # if add_noise:
+        #   fed1 = self.diffuse(fed1.float(), t1, 16)
 
         face2 = self.face_encoder2(fed1)
         fed2 = self.fe_down2(face2)
@@ -274,18 +316,26 @@ class ResUNet384V3(nn.Module):
         #   fed3 = self.diffuse(fed3.float(), t3, 256)
 
         face4 = self.face_encoder4(fed3)
-        fed4 = self.fe_down4(face4)        
-        fed4 = self.face_pos_encoder(fed4)
+        fed4 = self.fe_down4(face4)       
+        
+        face5 = self.face_encoder5(fed4)
+        fed5 = self.fe_down5(face5)       
+         
+        fed5 = self.face_pos_encoder(fed5)
         
         
-        combined = fed4 + audio_embedding1
+        combined = fed5 + audio_embedding1
         
         
         bottlenet = self.bottlenet(combined)
         
 
-        deface4 = self.face_decoder4(bottlenet)
+        deface5 = self.face_decoder5(bottlenet)
 
+        cat5 = torch.cat([deface5, face5], dim=1)
+        cat5 = self.fd_conv4(cat5)
+        
+        deface4 = self.face_decoder4(cat5 + deface5)
         cat4 = torch.cat([deface4, face4], dim=1)
         cat4 = self.fd_conv4(cat4)
 
@@ -312,5 +362,5 @@ class ResUNet384V3(nn.Module):
         else:
             outputs = x
             
-        return outputs, fed4, audio_embedding1
+        return outputs, fed5, audio_embedding1
 
