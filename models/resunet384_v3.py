@@ -88,8 +88,21 @@ class ResUNet384V3(nn.Module):
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )#96x96
 
+        self.face_encoder2_moe1 = nn.Sequential( 
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
+        )
+        self.fe_down2_moe1 = nn.Sequential(
+            Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+        )#96x96
+
         self.face_encoder3 = nn.Sequential( 
-            Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             SpatialAttention()
@@ -141,7 +154,7 @@ class ResUNet384V3(nn.Module):
         )
 
         self.bottlenet = nn.Sequential(
-            Conv2d(512, 1024, kernel_size=3, stride=1, padding=1),
+            Conv2d(1024, 1024, kernel_size=3, stride=1, padding=1),
             SpatialAttention(),
         )
         
@@ -305,10 +318,15 @@ class ResUNet384V3(nn.Module):
         face2 = self.face_encoder2(fed1)
         fed2 = self.fe_down2(face2)
 
+        face2_moe1 = self.face_encoder2(fed1)
+        fed2_moe1 = self.fe_down2_moe1(face2_moe1)
+
+        fed2_combined = torch.cat([fed2, fed2_moe1], dim=1)
+
         # if add_noise:
         #   fed2 = self.diffuse(fed2.float(), t2, 128)
 
-        face3 = self.face_encoder3(fed2)
+        face3 = self.face_encoder3(fed2_combined)
         fed3 = self.fe_down3(face3)
 
         
@@ -324,7 +342,7 @@ class ResUNet384V3(nn.Module):
         fed5 = self.face_pos_encoder(fed5)
         
         
-        combined = fed5 + audio_embedding1
+        combined = torch.cat([fed5, audio_embedding1], dim=1)
         
         
         bottlenet = self.bottlenet(combined)
