@@ -173,7 +173,7 @@ class ResUNet384V3(nn.Module):
         )
         
         self.face_decoder4 = nn.Sequential( #48x48
-            Conv2dTranspose(512, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2dTranspose(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
             SpatialAttention(),
         )
@@ -184,7 +184,7 @@ class ResUNet384V3(nn.Module):
         )
 
         self.face_decoder3 = nn.Sequential( #96x96
-            Conv2dTranspose(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2dTranspose(1024, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             SpatialAttention(),
@@ -198,7 +198,7 @@ class ResUNet384V3(nn.Module):
         
 
         self.face_decoder2 = nn.Sequential( #192x192
-            Conv2dTranspose(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2dTranspose(512, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             SpatialAttention(),
@@ -212,7 +212,7 @@ class ResUNet384V3(nn.Module):
 
 
         self.face_decoder1 = nn.Sequential( #384x384
-            Conv2dTranspose(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
+            Conv2dTranspose(256, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
@@ -353,20 +353,25 @@ class ResUNet384V3(nn.Module):
         cat5 = torch.cat([deface5, face5], dim=1)
         cat5 = self.fd_conv4(cat5)
         
-        deface4 = self.face_decoder4(cat5 + deface5)
+        cat5_with_skip = torch.cat([cat5, deface5], dim=1)
+        deface4 = self.face_decoder4(cat5_with_skip)
         cat4 = torch.cat([deface4, face4], dim=1)
         cat4 = self.fd_conv4(cat4)
 
-        deface3 = self.face_decoder3(cat4 + deface4)
+
+        cat4_with_skip = torch.cat([cat4, deface4], dim=1)
+        deface3 = self.face_decoder3(cat4_with_skip)
         cat3 = torch.cat([deface3, face3], dim=1)
         cat3 = self.fd_conv3(cat3)
 
-        deface2 = self.face_decoder2(cat3 + deface3)
-        cat2 = torch.cat([deface2, face2], dim=1)
+        cat3_with_skip = torch.cat([cat3, deface3], dim=1)
+        deface2 = self.face_decoder2(cat3_with_skip)
+        cat2 = torch.cat([deface2, face2 + face2_moe1], dim=1)
         cat2 = self.fd_conv2(cat2)
         
-        deface1 = self.face_decoder1(cat2 + deface2)
-        cat1 = torch.cat([deface1, face1], dim=1)
+        cat2_with_skip = torch.cat([cat2, deface2], dim=1)
+        deface1 = self.face_decoder1(cat2_with_skip)
+        cat1 = torch.cat([deface1, face1 + face1_bottom], dim=1)
         cat1 = self.fd_conv1(cat1)
 
         x = self.output_block(cat1)
