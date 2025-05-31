@@ -52,87 +52,29 @@ class ResUNet384V3(nn.Module):
         self.betas = linear_schedule()  # or cosine_noise_schedule()
         self.alphas = 1 - self.betas
         self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
+              
+        self.face_encoder1 = self.construct_encoder_layers(3, 12, 64, 1)
+        self.fe_down1 = self.construct_encoder_layers(3, 64, 64, 2)
         
-        self.face_encoder1 = nn.Sequential( #384x384
-            Conv2d(12, 64, kernel_size=3, stride=1, padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-        )
-        self.fe_down1 = nn.Sequential( 
-            Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-        )#192x192
         
-        self.face_encoder1_bottom = nn.Sequential( #384x384
-            Conv2d(12, 64, kernel_size=3, stride=1, padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-        )
-        self.fe_down1_bottom = nn.Sequential( 
-            Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-        )#192x192
+        self.face_encoder1_bottom = self.construct_encoder_layers(3, 12, 64, 1)
+        self.fe_down1_bottom = self.construct_encoder_layers(3, 64, 64, 2)
         
-        self.face_encoder2 = nn.Sequential( 
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention()
-        )
-        self.fe_down2 = nn.Sequential(
-            Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-        )#96x96
+        self.face_encoder2 = self.construct_encoder_layers(4, 128, 128, 1, True)
+        self.fe_down2 = self.construct_encoder_layers(3, 128, 128, 2)
+        
+        self.face_encoder2_moe1 = self.construct_encoder_layers(4, 128, 128, 1, True)
+        self.fe_down2_moe1 = self.construct_encoder_layers(3, 128, 128, 2)
 
-        self.face_encoder2_moe1 = nn.Sequential( 
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention()
-        )
-        self.fe_down2_moe1 = nn.Sequential(
-            Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-        )#96x96
+        self.face_encoder3 = self.construct_encoder_layers(3, 256, 256, 1, True)
+        self.fe_down3 = self.construct_encoder_layers(3, 256, 256, 2, True)
 
-        self.face_encoder3 = nn.Sequential( 
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention()
-        )
-        self.fe_down3 = nn.Sequential( 
-            Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention()
-        )#48x48
-
-        self.face_encoder4 = nn.Sequential( 
-            Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention()
-        )
-        self.fe_down4 = nn.Sequential( 
-            Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-        ) #24x24
+        self.face_encoder4 = self.construct_encoder_layers(2, 256, 512, 1, True)
+        self.fe_down4 = self.construct_encoder_layers(2, 512, 512, 2)
         
-        self.face_encoder5 = nn.Sequential( 
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention()
-        )
-        self.fe_down5 = nn.Sequential( 
-            Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-        ) #24x24
+        self.face_encoder5 = self.construct_encoder_layers(2, 512, 512, 1, True)
+        self.fe_down5 = self.construct_encoder_layers(2, 512, 512, 2)
+        
 
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
@@ -151,77 +93,28 @@ class ResUNet384V3(nn.Module):
        
             Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            nn.AdaptiveAvgPool2d((12, 12))
         )
 
-        self.bottlenet = nn.Sequential(
-            Conv2d(1024, 1024, kernel_size=3, stride=1, padding=1),
-            SpatialAttention(),
-        )
-        
+        self.bottlenet = self.construct_encoder_layers(1, 1024, 1024, 1, True)
+                
         
         # Decoders
+        self.face_decoder5 = self.construct_decoder_layers(2, 1024, 512, 2, True)
+        self.fd_conv5 = self.construct_encoder_layers(2, 1024, 512, 1, True)
         
-        self.face_decoder5 = nn.Sequential( #48x48
-            Conv2dTranspose(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(),
-        )
-        self.fd_conv4 = nn.Sequential(
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(),
-        )
+        self.face_decoder4 = self.construct_decoder_layers(2, 1024, 512, 2, True)
+        self.fd_conv4 = self.construct_encoder_layers(2, 1024, 512, 1, True)
         
-        self.face_decoder4 = nn.Sequential( #48x48
-            Conv2dTranspose(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(),
-        )
-        self.fd_conv4 = nn.Sequential(
-            Conv2d(1024, 512, kernel_size=3, stride=1, padding=1),
-            Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(),
-        )
-
-        self.face_decoder3 = nn.Sequential( #96x96
-            Conv2dTranspose(1024, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(),
-        )
-        self.fd_conv3 = nn.Sequential(
-            Conv2d(512, 256, kernel_size=3, stride=1, padding=1),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(),
-        )
+        self.face_decoder3 = self.construct_decoder_layers(3, 1024, 256, 2, True)
+        self.fd_conv3 = self.construct_encoder_layers(3, 512, 256, 1, True)
         
+        self.face_decoder2 = self.construct_decoder_layers(3, 512, 128, 2, True)
+        self.fd_conv2 = self.construct_encoder_layers(3, 256, 128, 1, True)
 
-        self.face_decoder2 = nn.Sequential( #192x192
-            Conv2dTranspose(512, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(),
-        )
-        self.fd_conv2 = nn.Sequential(
-            Conv2d(256, 128, kernel_size=3, stride=1, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            SpatialAttention(),
-        )
-
-
-        self.face_decoder1 = nn.Sequential( #384x384
-            Conv2dTranspose(256, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-        )
+        self.face_decoder1 = self.construct_decoder_layers(3, 256, 64, 2, True)
+        self.fd_conv1 = self.construct_encoder_layers(3, 128, 64, 1, True)
         
-        self.fd_conv1 = nn.Sequential(
-            Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-        )
 
         self.output_block = nn.Sequential(
             nn.Conv2d(64, 3, kernel_size=1, stride=1, padding=0),
@@ -231,7 +124,31 @@ class ResUNet384V3(nn.Module):
         self.face_pos_encoder = LearnablePositionalEncoding2D(d_model=512, max_h=24, max_w=24, dropout=0.1)
         self.audio_pos_encoder = LearnablePositionalEncoding2D(d_model=512, max_h=24, max_w=24, dropout=0.1)
         
+    def construct_encoder_layers(self, num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False):
+        layers = []
+        # First layer
+        layers.append(Conv2d(input_channels, output_channels, kernel_size=3, stride=first_layer_stride, padding=1))
+        # Subsequent layers
+        for _ in range(num_of_layers - 1):
+            layers.append(Conv2d(output_channels, output_channels, kernel_size=3, stride=1, padding=1, residual=True))
+        # Optional SpatialAttention
+        if add_spatial:
+            layers.append(SpatialAttention())  # Assumes SpatialAttention is a PyTorch Module
+        
+        return nn.Sequential(*layers)
 
+    def construct_decoder_layers(self, num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False):
+        layers = []
+        # First layer
+        layers.append(Conv2dTranspose(input_channels, output_channels, kernel_size=3, stride=first_layer_stride, padding=1, output_padding=1))
+        # Subsequent layers
+        for _ in range(num_of_layers - 1):
+            layers.append(Conv2d(output_channels, output_channels, kernel_size=3, stride=1, padding=1, residual=True))
+        # Optional SpatialAttention
+        if add_spatial:
+            layers.append(SpatialAttention())  # Assumes SpatialAttention is a PyTorch Module
+        
+        return nn.Sequential(*layers)
 
     def diffuse(self, x, t, channels_to_mask):
         b, c, h, w = x.shape
@@ -289,9 +206,7 @@ class ResUNet384V3(nn.Module):
         
         # Obtain audio features
         audio_embedding1 = self.audio_encoder1(audio_sequences)
-          
-        audio_embedding1 = F.interpolate(audio_embedding1.float(), size=(12, 12), mode="bilinear")
-        
+                  
         audio_embedding1 = self.audio_pos_encoder(audio_embedding1)
         
         height = face_sequences.size(2)
@@ -351,32 +266,34 @@ class ResUNet384V3(nn.Module):
         deface5 = self.face_decoder5(bottlenet)
 
         cat5 = torch.cat([deface5, face5], dim=1)
-        cat5 = self.fd_conv4(cat5)
+        cat5 = self.fd_conv5(cat5)
         
         cat5_with_skip = torch.cat([cat5, deface5], dim=1)
         deface4 = self.face_decoder4(cat5_with_skip)
+        
         cat4 = torch.cat([deface4, face4], dim=1)
         cat4 = self.fd_conv4(cat4)
 
-
         cat4_with_skip = torch.cat([cat4, deface4], dim=1)
         deface3 = self.face_decoder3(cat4_with_skip)
+        
         cat3 = torch.cat([deface3, face3], dim=1)
         cat3 = self.fd_conv3(cat3)
 
         cat3_with_skip = torch.cat([cat3, deface3], dim=1)
         deface2 = self.face_decoder2(cat3_with_skip)
+        
         cat2 = torch.cat([deface2, face2 + face2_moe1], dim=1)
         cat2 = self.fd_conv2(cat2)
         
         cat2_with_skip = torch.cat([cat2, deface2], dim=1)
         deface1 = self.face_decoder1(cat2_with_skip)
+        
         cat1 = torch.cat([deface1, face1 + face1_bottom], dim=1)
         cat1 = self.fd_conv1(cat1)
 
         x = self.output_block(cat1)
         
-
         outputs = x
         
         if input_dim_size > 4:
