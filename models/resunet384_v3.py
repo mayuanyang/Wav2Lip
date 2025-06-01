@@ -270,12 +270,16 @@ class ResUNet384V3(nn.Module):
         face_flatten = fed5.view(FB, 512, -1).permute(0, 2, 1)
         
         face_flatten = self.face_transformer_encoder(face_flatten)
+        
+        face_swapped_back = face_flatten.permute(0, 2, 1).view(FB, 512, 12, 12)  # Shape: [5, 512, 144]
 
         audio_flatten = audio_embedding1.view(FB, 512, -1).permute(0, 2, 1)
         
         audio_flatten = self.audio_transformer_encoder(audio_flatten)
         
-        combined = torch.cat([face_flatten, audio_flatten], dim=1)
+        audio_swapped_back = audio_flatten.permute(0, 2, 1).view(FB, 512, 12, 12)  # Shape: [5, 512, 144]
+        
+        combined = torch.cat([face_swapped_back, audio_swapped_back], dim=1)
         
         
         bottlenet = self.bottlenet(combined)
