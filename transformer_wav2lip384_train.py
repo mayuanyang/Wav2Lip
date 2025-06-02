@@ -167,6 +167,8 @@ def print_grad_norm(name, module, grad_input, grad_output):
         if grad_input_norm < 1e-6 and grad_output_norm > 1e-6:
             print("!!!!---Potential vanishing gradient detected---!!!!")
         print()
+        
+        
 
 # Added by eddy
 def get_current_lr(optimizer):
@@ -272,7 +274,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
                 running_l1_loss += l1loss.item()
                 
-                cossine_loss = cosine_similarity_loss(face_embedding, audio_embedding)
+                #cossine_loss = cosine_similarity_loss(face_embedding, audio_embedding)
                 
                 loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss #+ 0.05 * cossine_loss
 
@@ -287,6 +289,24 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   save_sample_images(x, g, gt, global_step, checkpoint_dir)
 
               global_step += 1
+              
+              # 在训练循环中添加梯度监控
+              if global_step % 100 == 0:
+                  for name, param in model.named_parameters():
+                      if param.grad is not None:
+                          grad_norm = param.grad.norm().item()
+                          if grad_norm > 0.01:  # 梯度爆炸风险
+                              print(f"!High grad: {name[:20]} grad={grad_norm:.3e}, adjusting from {pg['lr']} to {pg['lr'] * 0.8}")
+                              # 自动调低学习率
+                              for pg in optimizer.param_groups:
+                                  if param in pg['params']:
+                                      pg['lr'] *= 0.8
+                          elif grad_norm < 1e-6:  # 梯度消失
+                              print(f"!Vanishing grad: {name[:20]}, adjusting from {pg['lr']} to {pg['lr'] * 1.2}")
+                              # 尝试增大学习率
+                              for pg in optimizer.param_groups:
+                                  if param in pg['params']:
+                                      pg['lr'] *= 1.2
 
               running_img_loss += loss.item()
 
@@ -309,7 +329,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Cos Loss: {cossine_loss.item()}, LR: {current_lr:.7f}")
+              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Cos Loss: 0, LR: {current_lr:.7f}")
               
               
               metrics = {
