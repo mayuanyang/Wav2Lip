@@ -10,6 +10,7 @@ from torchvision.utils import save_image
 import os
 from datetime import datetime
 import os, random, cv2, argparse
+import numpy as np
     
 def cosine_noise_schedule(num_steps, s=0.008):
 
@@ -25,7 +26,7 @@ def cosine_noise_schedule(num_steps, s=0.008):
     return result
 
 def linear_schedule():
-    return torch.tensor([0.01, 0.15, 0.2, 0.3])
+    return torch.tensor([0.4, 0.5, 0.8, 0.9])
     
 class SpatialAttention(nn.Module):
     def __init__(self, kernel_size=7):
@@ -53,21 +54,27 @@ class ResUNet384V3(nn.Module):
         self.alphas = 1 - self.betas
         self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
               
-        self.face_encoder1 = self.construct_encoder_layers(2, 12, 64, 1)
-        self.fe_down1 = self.construct_encoder_layers(2, 64, 64, 2)
+        self.face_encoder1_moe1 = self.construct_encoder_layers(2, 12, 64, 1)
+        self.fe_down1_moe1 = self.construct_encoder_layers(2, 64, 64, 2)
+        
+        self.face_encoder1_moe2 = self.construct_encoder_layers(2, 12, 64, 1)
+        self.fe_down1_moe2 = self.construct_encoder_layers(2, 64, 64, 2)
+        
+        self.face_encoder1_moe3 = self.construct_encoder_layers(2, 12, 64, 1)
+        self.fe_down1_moe3 = self.construct_encoder_layers(2, 64, 64, 2)
+        
+        self.face_encoder1_moe4 = self.construct_encoder_layers(2, 12, 64, 1)
+        self.fe_down1_moe4 = self.construct_encoder_layers(2, 64, 64, 2)
         
         
-        self.face_encoder1_bottom = self.construct_encoder_layers(2, 12, 64, 1)
-        self.fe_down1_bottom = self.construct_encoder_layers(2, 64, 64, 2)
-        
-        self.face_encoder2 = self.construct_encoder_layers(2, 64, 128, 1, True)
-        self.fe_down2 = self.construct_encoder_layers(2, 128, 128, 2)
-        
-        self.face_encoder2_moe1 = self.construct_encoder_layers(2, 128, 128, 1, True)
+        self.face_encoder2_moe1 = self.construct_encoder_layers(3, 256, 128, 1, True)
         self.fe_down2_moe1 = self.construct_encoder_layers(2, 128, 128, 2)
+        
+        self.face_encoder2_moe2 = self.construct_encoder_layers(3, 256, 128, 1, True)
+        self.fe_down2_moe2 = self.construct_encoder_layers(2, 128, 128, 2)
 
-        self.face_encoder3 = self.construct_encoder_layers(2, 128, 128, 1, True)
-        self.fe_down3 = self.construct_encoder_layers(2, 128, 128, 2, True)
+        self.face_encoder3 = self.construct_encoder_layers(3, 256, 128, 1, True)
+        self.fe_down3 = self.construct_encoder_layers(3, 128, 128, 2, True)
 
         self.face_encoder4 = self.construct_encoder_layers(2, 128, 128, 1, True)
         self.fe_down4 = self.construct_encoder_layers(2, 128, 128, 2)
@@ -98,10 +105,6 @@ class ResUNet384V3(nn.Module):
             nn.AdaptiveAvgPool2d((12, 12))
         )
         
-        self.audio_transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=128, nhead=8, dropout=0.1, activation='gelu'),
-            num_layers=2
-        )
 
         self.bottlenet = self.construct_encoder_layers(1, 256, 128, 1, True)
                 
@@ -191,6 +194,32 @@ class ResUNet384V3(nn.Module):
         t = torch.multinomial(probabilities, expanded_B, replacement=True)
         return t
     
+    def save_sample_images(self, x, step):
+        base_dir = 'temp'
+        B, C, H, W = x.shape
+                
+        
+        grid_rows, grid_cols = 4, 3  # 16x16 = 256 channels
+
+        for b in range(B):
+            if b > 2:
+              break
+
+            # Create an empty grid image (grayscale)
+            grid_img = np.zeros((grid_rows * H, grid_cols * W), dtype=np.uint8)
+            for c in range(C):
+                if c < grid_cols * grid_rows:
+                  # Convert the channel to a NumPy array
+                  img = x[b, c].detach().cpu().numpy()  # (H, W)
+                  img = (img - np.min(img)) / (np.max(img) - np.min(img) + 1e-8) * 255.0
+                  img = img.astype(np.uint8)
+                  # Compute grid position
+                  row = c // grid_cols
+                  col = c % grid_cols
+                  grid_img[row*H:(row+1)*H, col*W:(col+1)*W] = img
+            grid_filename = os.path.join(base_dir, f"{step}_sample_{b}_grid.png")
+            cv2.imwrite(grid_filename, grid_img)
+            
     def forward(self, audio_sequences, face_sequences, use_face_enhancer=False, add_noise=True, noise_level=-1):
         
         B = audio_sequences.size(0)       
@@ -226,38 +255,43 @@ class ResUNet384V3(nn.Module):
         top_face_mask[:, :, :height // 2, :] = 0  # 将上半部分遮罩为0（黑色）
         top_face_sequences = face_sequences * top_face_mask  # 应用遮罩
           
-        # if add_noise:
-        #     face_sequences = self.diffuse(face_sequences.float(), t0, 3)
+        face_sequences1 = self.diffuse(face_sequences.float(), t0, 3)
+        face_sequences2 = self.diffuse(face_sequences.float(), t1, 3)
+        face_sequences3 = self.diffuse(face_sequences.float(), t2, 3)
+        face_sequences4 = self.diffuse(face_sequences.float(), t3, 3)
+        
+        self.save_sample_images(face_sequences1, 1)
+        self.save_sample_images(face_sequences2, 2)
+        self.save_sample_images(face_sequences3, 3)
+        self.save_sample_images(face_sequences4, 4)
         
         # ----The face encoder-----
-        face1 = self.face_encoder1(face_sequences)
-        fed1 = self.fe_down1(face1)
+        face1_moe1 = self.face_encoder1_moe1(face_sequences1)
+        fed1_moe1 = self.fe_down1_moe1(face1_moe1)
         
-        face1_bottom = self.face_encoder1_bottom(top_face_sequences)
-        fed1_bottom = self.fe_down1_bottom(face1_bottom)
+        face1_moe2 = self.face_encoder1_moe2(face_sequences2)
+        fed1_moe2 = self.fe_down1_moe2(face1_moe2)
         
-        fed1 = fed1 + fed1_bottom
+        face1_moe3 = self.face_encoder1_moe3(face_sequences3)
+        fed1_moe3 = self.fe_down1_moe3(face1_moe3)
         
-        # if add_noise:
-        #   fed1 = self.diffuse(fed1.float(), t1, 16)
+        face1_moe4 = self.face_encoder1_moe4(face_sequences4)
+        fed1_moe4 = self.fe_down1_moe4(face1_moe4)
+        
+        fed1_concatenated = torch.cat([fed1_moe1, fed1_moe2, fed1_moe3, fed1_moe4], dim=1)
+        
 
-        face2 = self.face_encoder2(fed1)
-        fed2 = self.fe_down2(face2)
-
-        face2_moe1 = self.face_encoder2(fed1)
+        face2_moe1 = self.face_encoder2_moe1(fed1_concatenated)
         fed2_moe1 = self.fe_down2_moe1(face2_moe1)
 
-        fed2_combined = fed2 + fed2_moe1
+        face2_moe2 = self.face_encoder2_moe2(fed1_concatenated)
+        fed2_moe2 = self.fe_down2_moe2(face2_moe2)
 
-        # if add_noise:
-        #   fed2 = self.diffuse(fed2.float(), t2, 128)
+        fed2_concatenated = torch.cat([fed2_moe1, fed2_moe2], dim=1)
 
-        face3 = self.face_encoder3(fed2_combined)
-        fed3 = self.fe_down3(fed2_combined + face3)
+        face3 = self.face_encoder3(fed2_concatenated)
+        fed3 = self.fe_down3(face3)
 
-        
-        # if add_noise:
-        #   fed3 = self.diffuse(fed3.float(), t3, 256)
 
         face4 = self.face_encoder4(fed3)
         fed4 = self.fe_down4(fed3 + face4)       
@@ -278,15 +312,8 @@ class ResUNet384V3(nn.Module):
         
         face_swapped_back = face_output.permute(0, 2, 1).view(FB, 128, 12, 12)  # Shape: [5, 512, 144]
 
-        audio_flatten = audio_embedding1.view(FB, 128, -1).permute(0, 2, 1)
         
-        audio_output = self.audio_transformer_encoder(audio_flatten)
-
-        audio_output = audio_flatten + audio_output
-        
-        audio_swapped_back = audio_output.permute(0, 2, 1).view(FB, 128, 12, 12)  # Shape: [5, 512, 144]
-        
-        combined = torch.cat([face_swapped_back, audio_swapped_back], dim=1)
+        combined = torch.cat([face_swapped_back, audio_embedding1], dim=1)
         
         
         bottlenet = self.bottlenet(combined)
@@ -312,13 +339,13 @@ class ResUNet384V3(nn.Module):
         cat3_with_skip = torch.cat([cat3, deface3], dim=1)
         deface2 = self.face_decoder2(cat3_with_skip)
         
-        cat2 = torch.cat([deface2, face2 + face2_moe1], dim=1)
+        cat2 = torch.cat([deface2, face2_moe1 + face2_moe2], dim=1)
         cat2 = self.fd_conv2(cat2)
         
         cat2_with_skip = torch.cat([cat2, deface2], dim=1)
         deface1 = self.face_decoder1(cat2_with_skip)
         
-        cat1 = torch.cat([deface1, face1 + face1_bottom], dim=1)
+        cat1 = torch.cat([deface1, face1_moe1 + face1_moe2 + face1_moe3 + face1_moe4], dim=1)
         cat1 = self.fd_conv1(cat1)
         
         #print('The shapes', deface5.shape, face5.shape, cat5.shape, deface4.shape, deface3.shape, cat3.shape, face4.shape, fed4.shape, face5.shape, fed5.shape)
