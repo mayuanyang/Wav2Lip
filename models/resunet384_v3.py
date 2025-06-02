@@ -26,7 +26,7 @@ def cosine_noise_schedule(num_steps, s=0.008):
     return result
 
 def linear_schedule():
-    return torch.tensor([0.4, 0.5, 0.8, 0.9])
+    return torch.tensor([0.1, 0.5, 0.8, 0.9])
     
 class SpatialAttention(nn.Module):
     def __init__(self, kernel_size=7):
@@ -54,33 +54,33 @@ class ResUNet384V3(nn.Module):
         self.alphas = 1 - self.betas
         self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
               
-        self.face_encoder1_moe1 = self.construct_encoder_layers(2, 12, 64, 1)
-        self.fe_down1_moe1 = self.construct_encoder_layers(2, 64, 64, 2)
+        self.face_encoder1_moe1 = self.construct_encoder_layers(3, 12, 64, 1)
+        self.fe_down1_moe1 = self.construct_encoder_layers(3, 64, 64, 2)
         
-        self.face_encoder1_moe2 = self.construct_encoder_layers(2, 12, 64, 1)
-        self.fe_down1_moe2 = self.construct_encoder_layers(2, 64, 64, 2)
+        self.face_encoder1_moe2 = self.construct_encoder_layers(3, 12, 64, 1)
+        self.fe_down1_moe2 = self.construct_encoder_layers(3, 64, 64, 2)
         
-        self.face_encoder1_moe3 = self.construct_encoder_layers(2, 12, 64, 1)
-        self.fe_down1_moe3 = self.construct_encoder_layers(2, 64, 64, 2)
+        self.face_encoder1_moe3 = self.construct_encoder_layers(3, 12, 64, 1)
+        self.fe_down1_moe3 = self.construct_encoder_layers(3, 64, 64, 2)
         
-        self.face_encoder1_moe4 = self.construct_encoder_layers(2, 12, 64, 1)
-        self.fe_down1_moe4 = self.construct_encoder_layers(2, 64, 64, 2)
+        self.face_encoder1_moe4 = self.construct_encoder_layers(3, 12, 64, 1)
+        self.fe_down1_moe4 = self.construct_encoder_layers(3, 64, 64, 2)
         
         
         self.face_encoder2_moe1 = self.construct_encoder_layers(3, 256, 128, 1, True)
-        self.fe_down2_moe1 = self.construct_encoder_layers(2, 128, 128, 2)
+        self.fe_down2_moe1 = self.construct_encoder_layers(3, 128, 128, 2)
         
         self.face_encoder2_moe2 = self.construct_encoder_layers(3, 256, 128, 1, True)
-        self.fe_down2_moe2 = self.construct_encoder_layers(2, 128, 128, 2)
+        self.fe_down2_moe2 = self.construct_encoder_layers(3, 128, 128, 2)
 
         self.face_encoder3 = self.construct_encoder_layers(3, 256, 128, 1, True)
         self.fe_down3 = self.construct_encoder_layers(3, 128, 128, 2, True)
 
-        self.face_encoder4 = self.construct_encoder_layers(2, 128, 128, 1, True)
-        self.fe_down4 = self.construct_encoder_layers(2, 128, 128, 2)
+        self.face_encoder4 = self.construct_encoder_layers(3, 128, 128, 1, True)
+        self.fe_down4 = self.construct_encoder_layers(3, 128, 128, 2)
         
-        self.face_encoder5 = self.construct_encoder_layers(2, 128, 128, 1, True)
-        self.fe_down5 = self.construct_encoder_layers(2, 128, 128, 2)
+        self.face_encoder5 = self.construct_encoder_layers(3, 128, 128, 1, True)
+        self.fe_down5 = self.construct_encoder_layers(3, 128, 128, 2)
         
         self.face_transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=128, nhead=8, dropout=0.1, activation='gelu'),
@@ -106,24 +106,24 @@ class ResUNet384V3(nn.Module):
         )
         
 
-        self.bottlenet = self.construct_encoder_layers(1, 256, 128, 1, True)
+        self.bottlenet = self.construct_encoder_layers(2, 256, 128, 1, True)
                 
         
         # Decoders
-        self.face_decoder5 = self.construct_decoder_layers(2, 128, 128, 2, True)
-        self.fd_conv5 = self.construct_encoder_layers(2, 256, 128, 1, True)
+        self.face_decoder5 = self.construct_decoder_layers(3, 128, 128, 2, True)
+        self.fd_conv5 = self.construct_encoder_layers(3, 256, 128, 1, True)
         
-        self.face_decoder4 = self.construct_decoder_layers(2, 256, 128, 2, True)
-        self.fd_conv4 = self.construct_encoder_layers(2, 256, 128, 1, True)
+        self.face_decoder4 = self.construct_decoder_layers(3, 256, 128, 2, True)
+        self.fd_conv4 = self.construct_encoder_layers(3, 256, 128, 1, True)
         
-        self.face_decoder3 = self.construct_decoder_layers(2, 256, 128, 2, True)
-        self.fd_conv3 = self.construct_encoder_layers(2, 256, 128, 1, True)
+        self.face_decoder3 = self.construct_decoder_layers(3, 256, 128, 2, True)
+        self.fd_conv3 = self.construct_encoder_layers(3, 256, 128, 1, True)
         
-        self.face_decoder2 = self.construct_decoder_layers(2, 256, 128, 2, True)
-        self.fd_conv2 = self.construct_encoder_layers(2, 256, 128, 1, True)
+        self.face_decoder2 = self.construct_decoder_layers(3, 256, 128, 2, True)
+        self.fd_conv2 = self.construct_encoder_layers(3, 256, 128, 1, True)
 
-        self.face_decoder1 = self.construct_decoder_layers(2, 256, 64, 2, True)
-        self.fd_conv1 = self.construct_encoder_layers(2, 128, 64, 1, True)
+        self.face_decoder1 = self.construct_decoder_layers(3, 256, 64, 2, True)
+        self.fd_conv1 = self.construct_encoder_layers(3, 128, 64, 1, True)
         
 
         self.output_block = nn.Sequential(
@@ -312,7 +312,7 @@ class ResUNet384V3(nn.Module):
         
         face_swapped_back = face_output.permute(0, 2, 1).view(FB, 128, 12, 12)  # Shape: [5, 512, 144]
 
-        
+        #self.save_sample_images(face_swapped_back, 10)
         combined = torch.cat([face_swapped_back, audio_embedding1], dim=1)
         
         
