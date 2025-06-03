@@ -82,10 +82,10 @@ class ResUNet384V3(nn.Module):
         self.face_encoder5 = self.construct_encoder_layers(3, 128, 128, 1, True)
         self.fe_down5 = self.construct_encoder_layers(3, 128, 128, 2)
         
-        self.face_transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=128, nhead=8, dropout=0.1, activation='gelu'),
-            num_layers=2
-        )
+        # self.face_transformer_encoder = nn.TransformerEncoder(
+        #     nn.TransformerEncoderLayer(d_model=128, nhead=8, dropout=0.1, activation='gelu'),
+        #     num_layers=2
+        # )
 
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
@@ -302,18 +302,18 @@ class ResUNet384V3(nn.Module):
                  
         fed5 = self.face_pos_encoder(fed5)
         
-        FB, _, H, W = fed5.shape
+        # FB, _, H, W = fed5.shape
         
-        face_flatten = fed5.view(FB, 128, -1).permute(0, 2, 1)
+        # face_flatten = fed5.view(FB, 128, -1).permute(0, 2, 1)
         
-        face_output = self.face_transformer_encoder(face_flatten)
+        # face_output = self.face_transformer_encoder(face_flatten)
 
-        face_output = face_flatten + face_output
+        # face_output = face_flatten + face_output
         
-        face_swapped_back = face_output.permute(0, 2, 1).view(FB, 128, 12, 12)  # Shape: [5, 512, 144]
+        # face_swapped_back = face_output.permute(0, 2, 1).view(FB, 128, 12, 12)  # Shape: [5, 512, 144]
 
         #self.save_sample_images(face_swapped_back, 10)
-        combined = torch.cat([face_swapped_back, audio_embedding1], dim=1)
+        combined = torch.cat([fed5, audio_embedding1], dim=1)
         
         
         bottlenet = self.bottlenet(combined)
