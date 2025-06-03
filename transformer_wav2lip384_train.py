@@ -290,24 +290,24 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               global_step += 1
               
-              # 在训练循环中添加梯度监控
-              if global_step % 100 == 0:
-                  for name, param in model.named_parameters():
-                      if param.grad is not None:
-                          grad_norm = param.grad.norm().item()
-                          if grad_norm > 0.01:  # 梯度爆炸风险
+              # # 在训练循环中添加梯度监控
+              # if global_step % 100 == 0:
+              #     for name, param in model.named_parameters():
+              #         if param.grad is not None:
+              #             grad_norm = param.grad.norm().item()
+              #             if grad_norm > 0.01:  # 梯度爆炸风险
                               
-                              # 自动调低学习率
-                              for pg in optimizer.param_groups:
-                                  if param in pg['params']:
-                                      pg['lr'] *= 0.8
-                                      print(f"!High grad: {name[:20]} grad={grad_norm:.3e}, adjusting from {pg['lr']} to {pg['lr'] * 0.8}")
-                          elif grad_norm < 1e-6:  # 梯度消失
-                              # 尝试增大学习率
-                              for pg in optimizer.param_groups:
-                                  if param in pg['params']:
-                                      pg['lr'] *= 1.2
-                                      print(f"!Vanishing grad: {name[:20]}, adjusting from {pg['lr']} to {pg['lr'] * 1.2}")
+              #                 # 自动调低学习率
+              #                 for pg in optimizer.param_groups:
+              #                     if param in pg['params']:
+              #                         pg['lr'] *= 0.8
+              #                         print(f"!High grad: {name[:20]} grad={grad_norm:.3e}, adjusting from {pg['lr']} to {pg['lr'] * 0.8}")
+              #             elif grad_norm < 1e-6:  # 梯度消失
+              #                 # 尝试增大学习率
+              #                 for pg in optimizer.param_groups:
+              #                     if param in pg['params']:
+              #                         pg['lr'] *= 1.2
+              #                         print(f"!Vanishing grad: {name[:20]}, adjusting from {pg['lr']} to {pg['lr'] * 1.2}")
 
               running_img_loss += loss.item()
 
