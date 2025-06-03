@@ -260,10 +260,10 @@ class ResUNet384V3(nn.Module):
         face_sequences3 = self.diffuse(face_sequences.float(), t2, 3)
         face_sequences4 = self.diffuse(face_sequences.float(), t3, 3)
         
-        self.save_sample_images(face_sequences1, 1)
-        self.save_sample_images(face_sequences2, 2)
-        self.save_sample_images(face_sequences3, 3)
-        self.save_sample_images(face_sequences4, 4)
+        # self.save_sample_images(face_sequences1, 1)
+        # self.save_sample_images(face_sequences2, 2)
+        # self.save_sample_images(face_sequences3, 3)
+        # self.save_sample_images(face_sequences4, 4)
         
         # ----The face encoder-----
         face1_moe1 = self.face_encoder1_moe1(face_sequences1)
