@@ -188,8 +188,6 @@ class ResUNet384V3(nn.Module):
         return result
     
     def sample_t(self, expanded_B, probabilities):
-        # Create a biased distribution towards higher values
-        probabilities = torch.tensor([1, 1], dtype=torch.float32)
         probabilities = probabilities / probabilities.sum()
         t = torch.multinomial(probabilities, expanded_B, replacement=True)
         return t
