@@ -505,10 +505,7 @@ def main():
       
       with torch.no_grad():
         print('The img_batch shape', img_batch.shape)
-        pred, face_embedding, audio_embedding = model(mel_batch, img_batch, add_noise=True)
-        
-        #pred=inference_denoise(model, img_batch, mel_batch, num_steps=2) 
-        
+        pred, face_embedding, audio_embedding = model(mel_batch, img_batch, 1)
         
         pred = pred[:,:3,:,:]
 

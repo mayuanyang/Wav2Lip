@@ -65,12 +65,15 @@ class ResUNet384V3(nn.Module):
         
         self.face_encoder1_moe4 = self.construct_encoder_layers(3, 12, 64, 1)
         self.fe_down1_moe4 = self.construct_encoder_layers(3, 64, 64, 2)
+
+        self.face_encoder1_moe5 = self.construct_encoder_layers(3, 12, 64, 1)
+        self.fe_down1_moe5 = self.construct_encoder_layers(3, 64, 64, 2)
         
         
-        self.face_encoder2_moe1 = self.construct_encoder_layers(3, 256, 128, 1, True)
+        self.face_encoder2_moe1 = self.construct_encoder_layers(3, 320, 128, 1, True)
         self.fe_down2_moe1 = self.construct_encoder_layers(3, 128, 128, 2)
         
-        self.face_encoder2_moe2 = self.construct_encoder_layers(3, 256, 128, 1, True)
+        self.face_encoder2_moe2 = self.construct_encoder_layers(3, 320, 128, 1, True)
         self.fe_down2_moe2 = self.construct_encoder_layers(3, 128, 128, 2)
 
         self.face_encoder3 = self.construct_encoder_layers(3, 256, 128, 1, True)
@@ -120,10 +123,10 @@ class ResUNet384V3(nn.Module):
         self.fd_conv3 = self.construct_encoder_layers(3, 256, 128, 1, True)
         
         self.face_decoder2 = self.construct_decoder_layers(3, 256, 128, 2, True)
-        self.fd_conv2 = self.construct_encoder_layers(3, 256, 128, 1, True)
+        self.fd_conv2 = self.construct_encoder_layers(3, 384, 128, 1, True)
 
         self.face_decoder1 = self.construct_decoder_layers(3, 256, 64, 2, True)
-        self.fd_conv1 = self.construct_encoder_layers(3, 128, 64, 1, True)
+        self.fd_conv1 = self.construct_encoder_layers(3, 384, 64, 1, True)
         
 
         self.output_block = nn.Sequential(
@@ -250,6 +253,7 @@ class ResUNet384V3(nn.Module):
         face_sequences2 = self.diffuse(face_sequences.float(), t1, 3)
         face_sequences3 = self.diffuse(face_sequences.float(), t2, 3)
         face_sequences4 = self.diffuse(face_sequences.float(), t3, 3)
+        face_sequences5 = face_sequences
         
         # ----The face encoder-----
         face1_moe1 = self.face_encoder1_moe1(face_sequences1)
@@ -263,8 +267,11 @@ class ResUNet384V3(nn.Module):
         
         face1_moe4 = self.face_encoder1_moe4(face_sequences4)
         fed1_moe4 = self.fe_down1_moe4(face1_moe4)
+
+        face1_moe5 = self.face_encoder1_moe5(face_sequences5)
+        fed1_moe5 = self.fe_down1_moe5(face1_moe5)
         
-        fed1_concatenated = torch.cat([fed1_moe1, fed1_moe2, fed1_moe3, fed1_moe4], dim=1)
+        fed1_concatenated = torch.cat([fed1_moe1, fed1_moe2, fed1_moe3, fed1_moe4, fed1_moe5], dim=1)
         
 
         face2_moe1 = self.face_encoder2_moe1(fed1_concatenated)
@@ -326,17 +333,18 @@ class ResUNet384V3(nn.Module):
         cat3_with_skip = torch.cat([cat3, deface3], dim=1)
         deface2 = self.face_decoder2(cat3_with_skip)
         
-        cat2 = torch.cat([deface2, face2_moe1 + face2_moe2], dim=1)
+        cat2 = torch.cat([deface2, face2_moe1, face2_moe2], dim=1)
         cat2 = self.fd_conv2(cat2)
         
         cat2_with_skip = torch.cat([cat2, deface2], dim=1)
         deface1 = self.face_decoder1(cat2_with_skip)
         
-        cat1 = torch.cat([deface1, face1_moe1 + face1_moe2 + face1_moe3 + face1_moe4], dim=1)
+        cat1 = torch.cat([deface1, face1_moe1, face1_moe2, face1_moe3, face1_moe4, face1_moe5], dim=1)
         cat1 = self.fd_conv1(cat1)
         
-        if step % 1000 == 0:       
+        if step % 5000 == 0:       
           self.save_sample_images(face_sequences1, f'face_sequences1_{step}')
+          self.save_sample_images(face_sequences5, f'face_sequences5_{step}')
         
           self.save_sample_images(face1_moe1, f'face1_moe1_{step}')
           self.save_sample_images(fed1_moe1, f'fed1_moe1_{step}')
@@ -349,6 +357,9 @@ class ResUNet384V3(nn.Module):
           
           self.save_sample_images(face1_moe4, f'face1_moe4_{step}')
           self.save_sample_images(fed1_moe4, f'fed1_moe4_{step}')
+
+          self.save_sample_images(face1_moe5, f'face1_moe5_{step}')
+          self.save_sample_images(fed1_moe5, f'fed1_moe5_{step}')
           
           self.save_sample_images(face2_moe1, f'face2_moe1_{step}')
           self.save_sample_images(fed2_moe1, f'fed2_moe1_{step}')
