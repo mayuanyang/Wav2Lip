@@ -234,7 +234,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               gt = gt.to(device)
 
               with autocast():
-                g, face_embedding, audio_embedding = model(indiv_mels, x, True)
+                g, face_embedding, audio_embedding = model(indiv_mels, x, global_step)
                 
                 
                 # Compare two images

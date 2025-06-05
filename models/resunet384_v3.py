@@ -192,7 +192,7 @@ class ResUNet384V3(nn.Module):
         t = torch.multinomial(probabilities, expanded_B, replacement=True)
         return t
     
-    def save_sample_images(self, x, step):
+    def save_sample_images(self, x, prefix):
         base_dir = 'temp'
         B, C, H, W = x.shape
                 
@@ -215,10 +215,10 @@ class ResUNet384V3(nn.Module):
                   row = c // grid_cols
                   col = c % grid_cols
                   grid_img[row*H:(row+1)*H, col*W:(col+1)*W] = img
-            grid_filename = os.path.join(base_dir, f"{step}_sample_{b}_grid.png")
+            grid_filename = os.path.join(base_dir, f"{prefix}_sample_{b}_grid.png")
             cv2.imwrite(grid_filename, grid_img)
             
-    def forward(self, audio_sequences, face_sequences, use_face_enhancer=False, add_noise=True, noise_level=-1):
+    def forward(self, audio_sequences, face_sequences, step):
         
         B = audio_sequences.size(0)       
         input_dim_size = len(face_sequences.size())
@@ -229,7 +229,7 @@ class ResUNet384V3(nn.Module):
 
         expanded_B = face_sequences.size(0)  # 展平后的 batch size
 
-       
+        
         t0 = self.sample_t(expanded_B, torch.tensor([0, 0, 0, 1], dtype=torch.float32)).to(face_sequences.device)
         t1 = self.sample_t(expanded_B, torch.tensor([0, 0, 1, 0], dtype=torch.float32)).to(face_sequences.device)
         t2 = self.sample_t(expanded_B, torch.tensor([0, 1, 0, 0], dtype=torch.float32)).to(face_sequences.device)
@@ -244,24 +244,12 @@ class ResUNet384V3(nn.Module):
 
         # Obtain audio features
         audio_embedding1 = self.audio_encoder1(audio_sequences_normalized)
-                  
-        audio_embedding1 = self.audio_pos_encoder(audio_embedding1)
-        
-        height = face_sequences.size(2)
-        width = face_sequences.size(3)
-        top_face_mask = torch.ones_like(face_sequences)
-        top_face_mask[:, :, :height // 2, :] = 0  # 将上半部分遮罩为0（黑色）
-        top_face_sequences = face_sequences * top_face_mask  # 应用遮罩
+        audio_embedding1 = self.audio_pos_encoder(audio_embedding1)        
           
         face_sequences1 = self.diffuse(face_sequences.float(), t0, 3)
         face_sequences2 = self.diffuse(face_sequences.float(), t1, 3)
         face_sequences3 = self.diffuse(face_sequences.float(), t2, 3)
         face_sequences4 = self.diffuse(face_sequences.float(), t3, 3)
-        
-        # self.save_sample_images(face_sequences1, 1)
-        # self.save_sample_images(face_sequences2, 2)
-        # self.save_sample_images(face_sequences3, 3)
-        # self.save_sample_images(face_sequences4, 4)
         
         # ----The face encoder-----
         face1_moe1 = self.face_encoder1_moe1(face_sequences1)
@@ -289,7 +277,8 @@ class ResUNet384V3(nn.Module):
 
         face3 = self.face_encoder3(fed2_concatenated)
         fed3 = self.fe_down3(face3)
-
+        
+        
 
         face4 = self.face_encoder4(fed3)
         fed4 = self.fe_down4(fed3 + face4)       
@@ -346,7 +335,35 @@ class ResUNet384V3(nn.Module):
         cat1 = torch.cat([deface1, face1_moe1 + face1_moe2 + face1_moe3 + face1_moe4], dim=1)
         cat1 = self.fd_conv1(cat1)
         
-        #print('The shapes', deface5.shape, face5.shape, cat5.shape, deface4.shape, deface3.shape, cat3.shape, face4.shape, fed4.shape, face5.shape, fed5.shape)
+        if step % 1000 == 0:       
+          self.save_sample_images(face_sequences1, f'face_sequences1_{step}')
+        
+          self.save_sample_images(face1_moe1, f'face1_moe1_{step}')
+          self.save_sample_images(fed1_moe1, f'fed1_moe1_{step}')
+          
+          self.save_sample_images(face1_moe2, f'face1_moe2_{step}')
+          self.save_sample_images(fed1_moe2, f'fed1_moe2_{step}')
+          
+          self.save_sample_images(face1_moe3, f'face1_moe3_{step}')
+          self.save_sample_images(fed1_moe3, f'fed1_moe3_{step}')
+          
+          self.save_sample_images(face1_moe4, f'face1_moe4_{step}')
+          self.save_sample_images(fed1_moe4, f'fed1_moe4_{step}')
+          
+          self.save_sample_images(face2_moe1, f'face2_moe1_{step}')
+          self.save_sample_images(fed2_moe1, f'fed2_moe1_{step}')
+          self.save_sample_images(face2_moe2, f'face2_moe2_{step}')
+          self.save_sample_images(fed2_moe2, f'fed2_moe2_{step}')
+          
+          self.save_sample_images(face3, f'face3_{step}')
+          self.save_sample_images(fed3, f'fed3_{step}')
+          
+          #-----Decoder------
+          self.save_sample_images(deface4, f'deface4_{step}')
+          self.save_sample_images(deface3, f'deface3_{step}')
+          self.save_sample_images(deface2, f'deface2_{step}')
+          self.save_sample_images(deface1, f'deface1_{step}')
+          
 
         x = self.output_block(cat1)
         
