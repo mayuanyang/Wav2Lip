@@ -108,6 +108,8 @@ class ResUNet384V3(nn.Module):
             nn.AdaptiveAvgPool2d((12, 12))
         )
         
+        #self.audio_proj = nn.Linear(128, 3 * 64 * 64)
+        
 
         self.bottlenet = self.construct_encoder_layers(2, 256, 128, 1, True)
                 
@@ -247,7 +249,7 @@ class ResUNet384V3(nn.Module):
 
         # Obtain audio features
         audio_embedding1 = self.audio_encoder1(audio_sequences_normalized)
-        audio_embedding1 = self.audio_pos_encoder(audio_embedding1)        
+        audio_embedding1 = self.audio_pos_encoder(audio_embedding1)
           
         face_sequences1 = self.diffuse(face_sequences.float(), t0, 3)
         face_sequences2 = self.diffuse(face_sequences.float(), t1, 3)
@@ -318,25 +320,25 @@ class ResUNet384V3(nn.Module):
         cat5 = torch.cat([deface5, face5], dim=1)
         cat5 = self.fd_conv5(cat5)
         
-        cat5_with_skip = torch.cat([cat5, deface5], dim=1)
+        cat5_with_skip = torch.cat([cat5, deface5 + face5], dim=1)
         deface4 = self.face_decoder4(cat5_with_skip)
         
         cat4 = torch.cat([deface4, face4], dim=1)
         cat4 = self.fd_conv4(cat4)
 
-        cat4_with_skip = torch.cat([cat4, deface4], dim=1)
+        cat4_with_skip = torch.cat([cat4, deface4 + face4], dim=1)
         deface3 = self.face_decoder3(cat4_with_skip)
         
         cat3 = torch.cat([deface3, face3], dim=1)
         cat3 = self.fd_conv3(cat3)
 
-        cat3_with_skip = torch.cat([cat3, deface3], dim=1)
+        cat3_with_skip = torch.cat([cat3, deface3 + face3], dim=1)
         deface2 = self.face_decoder2(cat3_with_skip)
         
         cat2 = torch.cat([deface2, face2_moe1, face2_moe2], dim=1)
         cat2 = self.fd_conv2(cat2)
         
-        cat2_with_skip = torch.cat([cat2, deface2], dim=1)
+        cat2_with_skip = torch.cat([cat2, deface2 + face2_moe1 + face2_moe2], dim=1)
         deface1 = self.face_decoder1(cat2_with_skip)
         
         cat1 = torch.cat([deface1, face1_moe1, face1_moe2, face1_moe3, face1_moe4, face1_moe5], dim=1)
