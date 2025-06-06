@@ -176,14 +176,22 @@ def get_current_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
-def trepa_loss(real_frames, generated_frames):
+def trepa_loss(real_frames, generated_frames, audio_features):
     loss = 0.0
+    
     for t in range(1, len(real_frames)):
-        delta_real = real_frames[t] - real_frames[t-1]
-        delta_gen = generated_frames[t] - generated_frames[t-1]
+        # 计算帧之间的差异
+        delta_real = torch.mean(real_frames[t] - real_frames[t-1])
+        delta_gen = torch.mean(generated_frames[t] - generated_frames[t-1])
+        
+        # 应用音频特征
+        delta_real = delta_real * audio_features[t]
+        delta_gen = delta_gen * audio_features[t]
+        
+        # 计算损失
         loss += torch.abs(delta_real - delta_gen).mean()
     
-    return loss / (len(real_frames) - 1)
+    return loss
   
 def train(device, model, train_data_loader, test_data_loader, optimizer, 
           checkpoint_dir=None, checkpoint_interval=None, nepochs=None, should_print_grad_norm=False):
@@ -236,7 +244,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               with autocast():
                 g, face_embedding, audio_embedding = model(indiv_mels, x, global_step)
                 
-                
                 # Compare two images
                 '''
                 The g and gt shape is torch.Size([2, 3, 5, 192, 192]), and vgg is expecting [batch, channels, h, w]
@@ -270,13 +277,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
                 l1loss = recon_loss(g, gt)
                 
-                #tempora_loss = trepa_loss(gt, g)
+                tempora_loss = trepa_loss(gt, g, audio_embedding)
 
                 running_l1_loss += l1loss.item()
                 
                 #cossine_loss = cosine_similarity_loss(face_embedding, audio_embedding)
                 
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss #+ 0.05 * cossine_loss
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + tempora_loss #+ 0.05 * cossine_loss
 
               #loss = loss / 20
               loss.backward()
@@ -289,25 +296,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   save_sample_images(x, g, gt, global_step, checkpoint_dir)
 
               global_step += 1
-              
-              # # 在训练循环中添加梯度监控
-              # if global_step % 100 == 0:
-              #     for name, param in model.named_parameters():
-              #         if param.grad is not None:
-              #             grad_norm = param.grad.norm().item()
-              #             if grad_norm > 0.01:  # 梯度爆炸风险
-                              
-              #                 # 自动调低学习率
-              #                 for pg in optimizer.param_groups:
-              #                     if param in pg['params']:
-              #                         pg['lr'] *= 0.8
-              #                         print(f"!High grad: {name[:20]} grad={grad_norm:.3e}, adjusting from {pg['lr']} to {pg['lr'] * 0.8}")
-              #             elif grad_norm < 1e-6:  # 梯度消失
-              #                 # 尝试增大学习率
-              #                 for pg in optimizer.param_groups:
-              #                     if param in pg['params']:
-              #                         pg['lr'] *= 1.2
-              #                         print(f"!Vanishing grad: {name[:20]}, adjusting from {pg['lr']} to {pg['lr'] * 1.2}")
 
               running_img_loss += loss.item()
 
@@ -330,7 +318,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Cos Loss: 0, LR: {current_lr:.7f}")
+              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Trep Loss: {tempora_loss.item()}, LR: {current_lr:.7f}")
               
               
               metrics = {
@@ -338,6 +326,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   "train/avg_l1": avg_l1_loss, 
                   "train/sync_loss": running_sync_loss / (step + 1), 
                   "train/disc_loss": avg_disc_loss,
+                  "train/trepa_loss": tempora_loss.item(),
                   #"train/tempora_loss": tempora_loss.item(),
                   "params/step": global_step,
                   "params/learning_rate": current_lr,
