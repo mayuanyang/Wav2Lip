@@ -71,19 +71,24 @@ use_cuda = torch.cuda.is_available()
 print('use_cuda: {}'.format(use_cuda))
 
 def cosine_similarity_loss(face_embedding, audio_embedding):
-    """
-    Computes the cosine similarity loss between two tensors.
     
-    Parameters:
-    - face_embedding: Tensor of shape [batch_size, channels, height, width]
-    - audio_embedding: Tensor of shape [batch_size, channels, height, width]
+    B, C_video, T, H_video, W_video = face_embedding.shape
     
-    Returns:
-    - average_loss: The average cosine similarity loss over the batch
-    """
+    audio_embedding = F.interpolate(
+        audio_embedding,
+        size=(H_video, W_video),
+        mode='bilinear'  # 或 'bicubic'
+    )  # [B, C_audio, H_video, W_video]
+
+    face_embedding = face_embedding.squeeze(0)          # [1,3,5,384,384] → [3,5,384,384]
+    face_embedding = face_embedding.permute(1, 0, 2, 3) 
+
+    audio_embedding = audio_embedding.mean(dim=1, keepdim=True)  # [B, 1, H_video, W_video]
+    audio_embedding = audio_embedding.expand(-1, C_video, -1, -1)  # [B, C_video, H_video, W_video]
+
     # Flatten the spatial dimensions of both tensors
-    face_flatten = face_embedding.view(face_embedding.size(0), -1)
-    audio_flatten = audio_embedding.view(audio_embedding.size(0), -1)
+    face_flatten = face_embedding.reshape(face_embedding.size(0), -1)
+    audio_flatten = audio_embedding.reshape(audio_embedding.size(0), -1)
     
     # Normalize the tensors
     face_normalized = F.normalize(face_flatten, p=2, dim=1)
@@ -176,21 +181,52 @@ def get_current_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
+
 def trepa_loss(real_frames, generated_frames, audio_features):
-    loss = 0.0
-    
-    for t in range(1, len(real_frames)):
-        # 计算帧之间的差异
-        delta_real = torch.mean(real_frames[t] - real_frames[t-1])
-        delta_gen = torch.mean(generated_frames[t] - generated_frames[t-1])
-        
-        # 应用音频特征
-        delta_real = delta_real * audio_features[t]
-        delta_gen = delta_gen * audio_features[t]
-        
-        # 计算损失
-        loss += torch.abs(delta_real - delta_gen).mean()
-    
+    """
+    参数:
+    - real_frames: shape [B, C, T, H, W] (2, 3, 4, 384, 384)
+    - generated_frames: shape [B, C, T, H, W]
+    - audio_features: shape [B, C_audio, H_audio, W_audio] (2, 128, 12, 12)
+    """
+    B, C_video, T, H_video, W_video = real_frames.shape
+
+    # 1. 计算帧间差异 (沿时间维度 T)
+    # delta_real/delta_gen shape: [B, C_video, T-1, H_video, W_video]
+    delta_real = torch.diff(real_frames, dim=2)  # t+1 - t
+    delta_gen = torch.diff(generated_frames, dim=2)
+
+    # 2. 处理音频特征：
+    # a. 调整音频特征的尺寸以匹配视频的空间尺寸（可选）
+    #    方法1：插值（适用于 H_audio << H_video）
+    audio_features_upsampled = F.interpolate(
+        audio_features,
+        size=(H_video, W_video),
+        mode='bilinear'  # 或 'bicubic'
+    )  # [B, C_audio, H_video, W_video]
+
+    #    方法2：平铺（适用于 H_audio 能整除 H_video）
+    # audio_features_upsampled = audio_features.repeat_interleave(H_video // H_audio, dim=2).repeat_interleave(W_video // W_audio, dim=3)
+
+    # b. 减少音频通道数（从 C_audio=128 → C_video=3）
+    #    方法1：平均池化（简单）
+    audio_reduced = audio_features_upsampled.mean(dim=1, keepdim=True)  # [B, 1, H_video, W_video]
+    audio_reduced = audio_reduced.expand(-1, C_video, -1, -1)  # [B, C_video, H_video, W_video]
+
+    #    方法2：1x1 卷积（更灵活）
+    # audio_reduced = nn.Conv2d(C_audio, C_video, kernel_size=1)(audio_features_upsampled)
+
+    # c. 扩展音频特征到时间维度 (T-1)
+    audio_reduced = audio_reduced.unsqueeze(2)  # [B, C_video, 1, H_video, W_video]
+    audio_reduced = audio_reduced.expand(-1, -1, T-1, -1, -1)  # [B, C_video, T-1, H_video, W_video]
+
+    # 3. 应用音频加权
+    weighted_real = delta_real * audio_reduced
+    weighted_gen = delta_gen * audio_reduced
+
+    # 4. 计算损失（使用 smooth L1 或 MSE）
+    loss = F.smooth_l1_loss(weighted_gen, weighted_real, reduction='mean')
+
     return loss
   
 def train(device, model, train_data_loader, test_data_loader, optimizer, 
@@ -199,7 +235,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     global global_step, global_epoch
     resumed_step = global_step
 
-    patience = 25000
+    patience = 55000
 
     current_lr = get_current_lr(optimizer)
     print('The learning rate is: {0}'.format(current_lr))
@@ -277,13 +313,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
                 l1loss = recon_loss(g, gt)
                 
-                tempora_loss = trepa_loss(gt, g, audio_embedding)
+                #tempora_loss = trepa_loss(gt, g, audio_embedding)
 
                 running_l1_loss += l1loss.item()
                 
-                #cossine_loss = cosine_similarity_loss(face_embedding, audio_embedding)
+                #cossine_loss = cosine_similarity_loss(g, audio_embedding)
                 
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + tempora_loss #+ 0.05 * cossine_loss
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss #+ tempora_loss + 0.05 * cossine_loss
 
               #loss = loss / 20
               loss.backward()
@@ -318,16 +354,16 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Trep Loss: {tempora_loss.item()}, LR: {current_lr:.7f}")
-              
+              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, LR: {current_lr:.7f}")
+              #prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Trep Loss: {tempora_loss.item():.5f}, Cos Loss: {cossine_loss.item():.5f} LR: {current_lr:.7f}")
               
               metrics = {
                   "train/overall_loss": avg_img_loss, 
                   "train/avg_l1": avg_l1_loss, 
                   "train/sync_loss": running_sync_loss / (step + 1), 
                   "train/disc_loss": avg_disc_loss,
-                  "train/trepa_loss": tempora_loss.item(),
-                  #"train/tempora_loss": tempora_loss.item(),
+                  # "train/cos_loss": cossine_loss.item(),
+                  # "train/tempora_loss": tempora_loss.item(),
                   "params/step": global_step,
                   "params/learning_rate": current_lr,
                   "params/l1_wt": hparams.l1_wt,

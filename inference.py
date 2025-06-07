@@ -358,6 +358,10 @@ def load_model(path, lora_path=None):
   model = model.to(device)
   return model.eval()
 
+def check_nan(tensor, name):
+  if torch.isnan(tensor).any():
+    print('NaN problem', f"NaN in {name}") 
+
 def load_esrgan_model(checkpoint_path='checkpoints/RealESRGAN_x4plus.pth', device='cuda' if torch.cuda.is_available() else 'cpu'):
     """
     Loads the pre-trained Real-ESRGAN model for image enhancement.
@@ -504,10 +508,10 @@ def main():
 
       
       with torch.no_grad():
-        print('The img_batch shape', img_batch.shape)
+        print('The img_batch shape', img_batch.shape, mel_batch.shape)
         pred, face_embedding, audio_embedding = model(mel_batch, img_batch, 1)
         
-        pred = pred[:,:3,:,:]
+        check_nan(pred, i)
 
       pred = pred.cpu().numpy().transpose(0, 2, 3, 1) * 255.
       

@@ -117,10 +117,10 @@ class ResUNet384V3(nn.Module):
         self.face_decoder3 = self.construct_decoder_layers(3, 256, 128, 2, True)
         self.fd_conv3 = self.construct_encoder_layers(3, 256, 128, 1, True)
         
-        self.face_decoder2 = self.construct_decoder_layers(3, 256, 128, 2, True)
+        self.face_decoder2 = self.construct_decoder_layers(4, 256, 128, 2, True)
         self.fd_conv2 = self.construct_encoder_layers(3, 384, 128, 1, True)
 
-        self.face_decoder1 = self.construct_decoder_layers(3, 256, 64, 2, True)
+        self.face_decoder1 = self.construct_decoder_layers(4, 256, 64, 2, True)
         self.fd_conv1 = self.construct_encoder_layers(3, 384, 64, 1, True)
         
 
