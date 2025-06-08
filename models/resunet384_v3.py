@@ -54,19 +54,19 @@ class ResUNet384V3(nn.Module):
         self.alphas = 1 - self.betas
         self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
               
-        self.face_encoder1_moe1 = self.construct_encoder_layers(3, 12, 64, 1)
+        self.face_encoder1_moe1 = self.construct_encoder_layers(3, 12, 64, 1, kernel=7)
         self.fe_down1_moe1 = self.construct_encoder_layers(3, 64, 64, 2)
         
-        self.face_encoder1_moe2 = self.construct_encoder_layers(3, 12, 64, 1)
+        self.face_encoder1_moe2 = self.construct_encoder_layers(3, 12, 64, 1, kernel=7)
         self.fe_down1_moe2 = self.construct_encoder_layers(3, 64, 64, 2)
         
-        self.face_encoder1_moe3 = self.construct_encoder_layers(3, 12, 64, 1)
+        self.face_encoder1_moe3 = self.construct_encoder_layers(3, 12, 64, 1, kernel=7)
         self.fe_down1_moe3 = self.construct_encoder_layers(3, 64, 64, 2)
         
-        self.face_encoder1_moe4 = self.construct_encoder_layers(3, 12, 64, 1)
+        self.face_encoder1_moe4 = self.construct_encoder_layers(3, 12, 64, 1, kernel=7)
         self.fe_down1_moe4 = self.construct_encoder_layers(3, 64, 64, 2)
 
-        self.face_encoder1_moe5 = self.construct_encoder_layers(3, 12, 64, 1)
+        self.face_encoder1_moe5 = self.construct_encoder_layers(3, 12, 64, 1, kernel=7)
         self.fe_down1_moe5 = self.construct_encoder_layers(3, 64, 64, 2)
         
         
@@ -132,13 +132,16 @@ class ResUNet384V3(nn.Module):
         self.face_pos_encoder = LearnablePositionalEncoding2D(d_model=128, max_h=12, max_w=12, dropout=0.1)
         self.audio_pos_encoder = LearnablePositionalEncoding2D(d_model=128, max_h=12, max_w=12, dropout=0.1)
         
-    def construct_encoder_layers(self, num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False):
+    def construct_encoder_layers(self, num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3):
         layers = []
+        padding = 1
+        if kernel == 7:
+          padding = 3
         # First layer
-        layers.append(Conv2d(input_channels, output_channels, kernel_size=3, stride=first_layer_stride, padding=1))
+        layers.append(Conv2d(input_channels, output_channels, kernel_size=kernel, stride=first_layer_stride, padding=padding))
         # Subsequent layers
         for _ in range(num_of_layers - 1):
-            layers.append(Conv2d(output_channels, output_channels, kernel_size=3, stride=1, padding=1, residual=True))
+            layers.append(Conv2d(output_channels, output_channels, kernel_size=kernel, stride=1, padding=padding, residual=True))
         # Optional SpatialAttention
         if add_spatial:
             layers.append(SpatialAttention())  # Assumes SpatialAttention is a PyTorch Module
