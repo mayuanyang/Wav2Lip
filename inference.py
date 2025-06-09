@@ -294,7 +294,7 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
       img_masked = img_batch.copy()
 
       # img_masked[:, args.img_size//2:] = 0
-      img_masked = apply_dynamic_blur(img_masked)
+      #img_masked = apply_dynamic_blur(img_masked)
       #print('The image shape 1', img_masked.shape, img_batch.shape)
 
       img_batch = np.concatenate((img_masked, img_batch, ref_batch, ref_batch2), axis=3) / 255.
@@ -311,7 +311,7 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
 
     
     #img_masked[:, args.img_size//2:] = 0
-    img_masked = apply_dynamic_blur(img_masked)
+    #img_masked = apply_dynamic_blur(img_masked)
 
     print('The image shape 2', img_masked.shape)
 
