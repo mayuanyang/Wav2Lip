@@ -11,6 +11,7 @@ import os
 from datetime import datetime
 import os, random, cv2, argparse
 import numpy as np
+from torchvision.transforms import GaussianBlur
     
 def cosine_noise_schedule(num_steps, s=0.008):
 
@@ -26,7 +27,7 @@ def cosine_noise_schedule(num_steps, s=0.008):
     return result
 
 def linear_schedule():
-    return torch.tensor([0.1, 0.5, 0.8, 0.9])
+    return torch.tensor([0.6, 0.5, 0.8, 0.9])
     
 class SpatialAttention(nn.Module):
     def __init__(self, kernel_size=7):
@@ -53,6 +54,12 @@ class ResUNet384V3(nn.Module):
         self.betas = linear_schedule()  # or cosine_noise_schedule()
         self.alphas = 1 - self.betas
         self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
+
+        self.ellipse_params = {
+            'center': (0.0, 0),  # (x,y)中心偏移(归一化坐标)
+            'axes': (1, 0.6),      # (宽,高)比例
+            'blur': 0.03             # 边缘模糊系数(相对于短边)
+        }
               
         self.face_encoder1_moe1 = self.construct_encoder_layers(3, 12, 64, 1, kernel=7)
         self.fe_down1_moe1 = self.construct_encoder_layers(3, 64, 64, 2)
@@ -65,24 +72,20 @@ class ResUNet384V3(nn.Module):
         
         self.face_encoder1_moe4 = self.construct_encoder_layers(3, 12, 64, 1, kernel=7)
         self.fe_down1_moe4 = self.construct_encoder_layers(3, 64, 64, 2)
-
-        self.face_encoder1_moe5 = self.construct_encoder_layers(3, 12, 64, 1, kernel=7)
-        self.fe_down1_moe5 = self.construct_encoder_layers(3, 64, 64, 2)
         
-        
-        self.face_encoder2_moe1 = self.construct_encoder_layers(3, 320, 128, 1, True)
+        self.face_encoder2_moe1 = self.construct_encoder_layers(3, 256, 128, 1)
         self.fe_down2_moe1 = self.construct_encoder_layers(3, 128, 128, 2)
         
-        self.face_encoder2_moe2 = self.construct_encoder_layers(3, 320, 128, 1, True)
+        self.face_encoder2_moe2 = self.construct_encoder_layers(3, 256, 128, 1)
         self.fe_down2_moe2 = self.construct_encoder_layers(3, 128, 128, 2)
 
-        self.face_encoder3 = self.construct_encoder_layers(3, 256, 128, 1, True)
-        self.fe_down3 = self.construct_encoder_layers(3, 128, 128, 2, True)
+        self.face_encoder3 = self.construct_encoder_layers(3, 256, 128, 1)
+        self.fe_down3 = self.construct_encoder_layers(3, 128, 128, 2)
 
-        self.face_encoder4 = self.construct_encoder_layers(3, 128, 128, 1, True)
+        self.face_encoder4 = self.construct_encoder_layers(3, 128, 128, 1)
         self.fe_down4 = self.construct_encoder_layers(3, 128, 128, 2)
         
-        self.face_encoder5 = self.construct_encoder_layers(3, 128, 128, 1, True)
+        self.face_encoder5 = self.construct_encoder_layers(3, 128, 128, 1)
         self.fe_down5 = self.construct_encoder_layers(3, 128, 128, 2)
 
         # --- Audio encoder ---
@@ -108,20 +111,20 @@ class ResUNet384V3(nn.Module):
                 
         
         # Decoders
-        self.face_decoder5 = self.construct_decoder_layers(3, 128, 128, 2, True)
-        self.fd_conv5 = self.construct_encoder_layers(3, 256, 128, 1, True)
+        self.face_decoder5 = self.construct_decoder_layers(3, 128, 128, 2)
+        self.fd_conv5 = self.construct_encoder_layers(3, 256, 128, 1)
         
-        self.face_decoder4 = self.construct_decoder_layers(3, 256, 128, 2, True)
-        self.fd_conv4 = self.construct_encoder_layers(3, 256, 128, 1, True)
+        self.face_decoder4 = self.construct_decoder_layers(3, 256, 128, 2)
+        self.fd_conv4 = self.construct_encoder_layers(3, 256, 128, 1)
         
-        self.face_decoder3 = self.construct_decoder_layers(3, 256, 128, 2, True)
-        self.fd_conv3 = self.construct_encoder_layers(3, 256, 128, 1, True)
+        self.face_decoder3 = self.construct_decoder_layers(3, 256, 128, 2)
+        self.fd_conv3 = self.construct_encoder_layers(3, 256, 128, 1)
         
-        self.face_decoder2 = self.construct_decoder_layers(4, 256, 128, 2, True)
-        self.fd_conv2 = self.construct_encoder_layers(3, 384, 128, 1, True)
+        self.face_decoder2 = self.construct_decoder_layers(4, 256, 128, 2)
+        self.fd_conv2 = self.construct_encoder_layers(3, 384, 128, 1)
 
-        self.face_decoder1 = self.construct_decoder_layers(4, 256, 64, 2, True)
-        self.fd_conv1 = self.construct_encoder_layers(3, 384, 64, 1, True)
+        self.face_decoder1 = self.construct_decoder_layers(4, 256, 64, 2, kernel=7)
+        self.fd_conv1 = self.construct_encoder_layers(3, 320, 64, 1, kernel=7)
         
 
         self.output_block = nn.Sequential(
@@ -148,45 +151,92 @@ class ResUNet384V3(nn.Module):
         
         return nn.Sequential(*layers)
 
-    def construct_decoder_layers(self, num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False):
+    def construct_decoder_layers(self, num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3):
         layers = []
+        padding = 1
+        if kernel == 7:
+          padding = 3
         # First layer
-        layers.append(Conv2dTranspose(input_channels, output_channels, kernel_size=3, stride=first_layer_stride, padding=1, output_padding=1))
+        layers.append(Conv2dTranspose(input_channels, output_channels, kernel_size=kernel, stride=first_layer_stride, padding=padding, output_padding=1))
         # Subsequent layers
         for _ in range(num_of_layers - 1):
-            layers.append(Conv2d(output_channels, output_channels, kernel_size=3, stride=1, padding=1, residual=True))
+            layers.append(Conv2d(output_channels, output_channels, kernel_size=kernel, stride=1, padding=padding, residual=True))
         # Optional SpatialAttention
         if add_spatial:
             layers.append(SpatialAttention())  # Assumes SpatialAttention is a PyTorch Module
         
         return nn.Sequential(*layers)
 
-    def diffuse(self, x, t, channels_to_mask):
+    def generate_ellipse_mask(self, h, w, split_idx, device):
+        """生成下半部分的椭圆遮罩"""
+        # 创建下半部分归一化坐标网格 [-1,1]
+        y_bottom = torch.linspace(0, 1, h - split_idx, device=device) * 2 - 1
+        x_coord = torch.linspace(-1, 1, w, device=device)
+        y_grid, x_grid = torch.meshgrid(y_bottom, x_coord, indexing='ij')
+        
+        # 应用椭圆方程
+        dx, dy = self.ellipse_params['center']
+        a_ratio, b_ratio = self.ellipse_params['axes']
+        
+        # 根据图像宽高比调整x轴比例
+        adjusted_a = a_ratio * (w / h)  
+        
+        ellipse_mask = ((x_grid - dx)/adjusted_a)**2 + \
+                      ((y_grid - dy)/b_ratio)**2 <= 1.0
+        
+        # 边缘模糊处理
+        mask = ellipse_mask.float()
+        if self.ellipse_params['blur'] > 0:
+            kernel_size = int(min(h, w) * self.ellipse_params['blur']) | 1
+            gaussian_blur = GaussianBlur(kernel_size=(kernel_size, kernel_size), sigma=kernel_size/3)
+            mask = gaussian_blur(mask.unsqueeze(0).unsqueeze(0)).squeeze()
+        
+        return mask
+
+    def diffuse(self, x, t, channels_to_mask=3):
+        """
+        带椭圆遮罩的扩散过程
+        
+        参数:
+            x: [B,C,H,W]输入张量
+            t: [B]时间步长 
+            channels_to_mask: 需要处理的通道数
+            
+        返回:
+            扩散后的张量，仅在下半部分椭圆区域内添加噪声
+        """
         b, c, h, w = x.shape
         
-        # Split spatial dimensions (bottom half only)
+        # Split空间维度(仅处理下半部分)
         split_idx = h // 2
-        top_half = x[:, :, :split_idx, :]  # Entire top (all channels)
-        bottom_half = x[:, :, split_idx:, :]  # Bottom to process
+        top_half = x[:, :, :split_idx, :]  # 上半部分(所有通道)
+        bottom_half = x[:, :, split_idx:, :]  # 下半部分待处理
         
         # Split channels
-        rgb_channels = bottom_half[:, :channels_to_mask, :, :]  # First 3 channels (R,G,B)
-        other_channels = bottom_half[:, channels_to_mask:, :, :]  # Other channels (unchanged)
-
-        # t的形状应为 [B]
-        sqrt_alpha_t = torch.sqrt(self.alphas_cumprod[t])          # 自动广播为 [B,1,1,1]
-        sqrt_one_minus_alpha_t = torch.sqrt(1 - self.alphas_cumprod[t])
+        rgb_channels = bottom_half[:, :channels_to_mask, :, :]  # 前3通道(R,G,B)
+        other_channels = bottom_half[:, channels_to_mask:, :, :]  # 其他通道(不变)
+        
+        # 生成椭圆遮罩 [H,W]
+        mask = self.generate_ellipse_mask(h, w, split_idx, x.device)
+        mask = mask.unsqueeze(0).unsqueeze(0).repeat(b, channels_to_mask, 1, 1)  # [B, channels_to_mask, H, W]
+        
+        # DDPM噪声扩散系数 
+        sqrt_alpha_t = torch.sqrt(self.alphas_cumprod[t]).view(b, 1, 1, 1)  # 自动广播为 [B,1,1,1]
+        sqrt_one_minus_alpha_t = torch.sqrt(1 - self.alphas_cumprod[t]).view(b, 1, 1, 1)
         
         # 每个样本独立添加噪声
         epsilon = torch.randn_like(rgb_channels)
-        noisy_rgb = sqrt_alpha_t.view(-1,1,1,1) * rgb_channels + sqrt_one_minus_alpha_t.view(-1,1,1,1) * epsilon
-
-        # Recombine
+        noisy_rgb = sqrt_alpha_t * rgb_channels + sqrt_one_minus_alpha_t * epsilon
+        
+        # Mask-aware噪声混合 (关键修改点!)
+        noisy_rgb = rgb_channels * (1 - mask) + noisy_rgb * mask
+        
+        # Recombine各部分
         noisy_bottom = torch.cat([noisy_rgb, other_channels], dim=1)
         result = torch.cat([top_half, noisy_bottom], dim=2)
 
-
         return result
+
     
     def sample_t(self, expanded_B, probabilities):
         probabilities = probabilities / probabilities.sum()
@@ -251,7 +301,6 @@ class ResUNet384V3(nn.Module):
         face_sequences2 = self.diffuse(face_sequences.float(), t1, 3)
         face_sequences3 = self.diffuse(face_sequences.float(), t2, 3)
         face_sequences4 = self.diffuse(face_sequences.float(), t3, 3)
-        face_sequences5 = face_sequences
         
         # ----The face encoder-----
         face1_moe1 = self.face_encoder1_moe1(face_sequences1)
@@ -266,10 +315,8 @@ class ResUNet384V3(nn.Module):
         face1_moe4 = self.face_encoder1_moe4(face_sequences4)
         fed1_moe4 = self.fe_down1_moe4(face1_moe4)
 
-        face1_moe5 = self.face_encoder1_moe5(face_sequences5)
-        fed1_moe5 = self.fe_down1_moe5(face1_moe5)
         
-        fed1_concatenated = torch.cat([fed1_moe1, fed1_moe2, fed1_moe3, fed1_moe4, fed1_moe5], dim=1)
+        fed1_concatenated = torch.cat([fed1_moe1, fed1_moe2, fed1_moe3, fed1_moe4], dim=1)
         
 
         face2_moe1 = self.face_encoder2_moe1(fed1_concatenated)
@@ -322,12 +369,11 @@ class ResUNet384V3(nn.Module):
         cat2_with_skip = torch.cat([cat2, deface2], dim=1)
         deface1 = self.face_decoder1(cat2_with_skip)
         
-        cat1 = torch.cat([deface1, face1_moe1, face1_moe2, face1_moe3, face1_moe4, face1_moe5], dim=1)
+        cat1 = torch.cat([deface1, face1_moe1, face1_moe2, face1_moe3, face1_moe4], dim=1)
         cat1 = self.fd_conv1(cat1)
         
         if step % 5000 == 0:       
           self.save_sample_images(face_sequences1, f'face_sequences1_{step}')
-          self.save_sample_images(face_sequences5, f'face_sequences5_{step}')
         
           self.save_sample_images(face1_moe1, f'face1_moe1_{step}')
           self.save_sample_images(fed1_moe1, f'fed1_moe1_{step}')
@@ -340,9 +386,6 @@ class ResUNet384V3(nn.Module):
           
           self.save_sample_images(face1_moe4, f'face1_moe4_{step}')
           self.save_sample_images(fed1_moe4, f'fed1_moe4_{step}')
-
-          self.save_sample_images(face1_moe5, f'face1_moe5_{step}')
-          self.save_sample_images(fed1_moe5, f'fed1_moe5_{step}')
           
           self.save_sample_images(face2_moe1, f'face2_moe1_{step}')
           self.save_sample_images(fed2_moe1, f'fed2_moe1_{step}')

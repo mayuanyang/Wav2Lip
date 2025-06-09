@@ -291,11 +291,11 @@ class Dataset(object):
 
                 #window = self.apply_gaussian_blur_to_bottom_half_vectorized(window)
                 use_face_mesh = False
-                if use_face_mesh:
-                  with self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True) as face_mesh:
-                    window = self.apply_dynamic_blur(window, face_mesh, True)
-                else:
-                  window = self.apply_dynamic_blur(window, None, False)
+                # if use_face_mesh:
+                #   with self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True) as face_mesh:
+                #     window = self.apply_dynamic_blur(window, face_mesh, True)
+                # else:
+                #   window = self.apply_dynamic_blur(window, None, False)
 
                 wrong_window = self.prepare_window(wrong_window)
 
@@ -389,11 +389,14 @@ class Dataset(object):
                 
                 ellipse_height = int(h * 0.17)
 
-
+                option = random.choices([0, 1])[0] 
                 # Draw a black-filled ellipse in the bottom half
                 center = (w // 2, split_row // 2)  # Center relative to bottom_half dimensions
                 axes = (w // 2, ellipse_height)    # Semi-major and semi-minor axes
-                cv2.ellipse(bottom_half, center, axes, 0, 0, 360, (0, 0, 0), -1)
+                if option == 0:
+                  cv2.ellipse(bottom_half, center, axes, 0, 0, 360, (0, 0, 0), -1)
+                else:
+                  cv2.ellipse(bottom_half, center, axes, 0, 0, 360, (255, 0, 0), -1)
 
 
                 # Reassemble frame
