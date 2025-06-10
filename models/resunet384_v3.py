@@ -27,7 +27,7 @@ def cosine_noise_schedule(num_steps, s=0.008):
     return result
 
 def linear_schedule():
-    return torch.tensor([0.6, 0.5, 0.8, 0.9])
+    return torch.tensor([0.6, 0.7, 0.8, 0.9])
     
 class SpatialAttention(nn.Module):
     def __init__(self, kernel_size=7):
@@ -57,7 +57,7 @@ class ResUNet384V3(nn.Module):
 
         self.ellipse_params = {
             'center': (0.0, 0),  # (x,y)中心偏移(归一化坐标)
-            'axes': (1, 0.6),      # (宽,高)比例
+            'axes': (1, 0.75),      # (宽,高)比例
             'blur': 0.03             # 边缘模糊系数(相对于短边)
         }
               
@@ -281,10 +281,10 @@ class ResUNet384V3(nn.Module):
         expanded_B = face_sequences.size(0)  # 展平后的 batch size
 
         
-        t0 = self.sample_t(expanded_B, torch.tensor([1, 0, 0, 1], dtype=torch.float32)).to(face_sequences.device)
-        t1 = self.sample_t(expanded_B, torch.tensor([0, 1, 1, 0], dtype=torch.float32)).to(face_sequences.device)
-        t2 = self.sample_t(expanded_B, torch.tensor([1, 1, 0, 0], dtype=torch.float32)).to(face_sequences.device)
-        t3 = self.sample_t(expanded_B, torch.tensor([1, 0, 1, 0], dtype=torch.float32)).to(face_sequences.device)
+        t0 = self.sample_t(expanded_B, torch.tensor([0, 0, 0, 1], dtype=torch.float32)).to(face_sequences.device)
+        t1 = self.sample_t(expanded_B, torch.tensor([0, 0, 1, 0], dtype=torch.float32)).to(face_sequences.device)
+        t2 = self.sample_t(expanded_B, torch.tensor([0, 1, 0, 0], dtype=torch.float32)).to(face_sequences.device)
+        t3 = self.sample_t(expanded_B, torch.tensor([1, 0, 0, 0], dtype=torch.float32)).to(face_sequences.device)
        
         self.alphas_cumprod = self.alphas_cumprod.to(face_sequences.device)
         
