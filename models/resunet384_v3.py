@@ -281,10 +281,10 @@ class ResUNet384V3(nn.Module):
         expanded_B = face_sequences.size(0)  # 展平后的 batch size
 
         
-        t0 = self.sample_t(expanded_B, torch.tensor([0, 0, 0, 1], dtype=torch.float32)).to(face_sequences.device)
-        t1 = self.sample_t(expanded_B, torch.tensor([0, 0, 1, 0], dtype=torch.float32)).to(face_sequences.device)
-        t2 = self.sample_t(expanded_B, torch.tensor([0, 1, 0, 0], dtype=torch.float32)).to(face_sequences.device)
-        t3 = self.sample_t(expanded_B, torch.tensor([1, 0, 0, 0], dtype=torch.float32)).to(face_sequences.device)
+        t0 = self.sample_t(expanded_B, torch.tensor([1, 0, 0, 1], dtype=torch.float32)).to(face_sequences.device)
+        t1 = self.sample_t(expanded_B, torch.tensor([0, 1, 1, 0], dtype=torch.float32)).to(face_sequences.device)
+        t2 = self.sample_t(expanded_B, torch.tensor([1, 1, 0, 0], dtype=torch.float32)).to(face_sequences.device)
+        t3 = self.sample_t(expanded_B, torch.tensor([1, 0, 1, 0], dtype=torch.float32)).to(face_sequences.device)
        
         self.alphas_cumprod = self.alphas_cumprod.to(face_sequences.device)
         
