@@ -121,6 +121,7 @@ class ResUNet384V3(nn.Module):
         self.fd_conv3 = self.construct_encoder_layers(3, 256, 128, 1)
         
         self.face_decoder2 = self.construct_decoder_layers(4, 256, 128, 2)
+        self.face_decoder2_moe1 = self.construct_decoder_layers(4, 256, 128, 2)
         self.fd_conv2 = self.construct_encoder_layers(4, 384, 128, 1)
 
         self.face_decoder1 = self.construct_decoder_layers(4, 256, 64, 2, kernel=7)
@@ -369,8 +370,9 @@ class ResUNet384V3(nn.Module):
 
         cat3_with_skip = torch.cat([cat3, deface3], dim=1)
         deface2 = self.face_decoder2(cat3_with_skip)
+        deface2_moe1 = self.face_decoder2_moe1(cat3_with_skip)
         
-        cat2 = torch.cat([deface2, face2_moe1, face2_moe2], dim=1)
+        cat2 = torch.cat([deface2+deface2_moe1, face2_moe1, face2_moe2], dim=1)
         cat2 = self.fd_conv2(cat2)
         
         cat2_with_skip = torch.cat([cat2, deface2], dim=1)
