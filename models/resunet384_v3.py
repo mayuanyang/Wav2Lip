@@ -61,23 +61,23 @@ class ResUNet384V3(nn.Module):
             'blur': 0.03             # 边缘模糊系数(相对于短边)
         }
               
-        self.face_encoder1_moe1 = self.construct_encoder_layers(3, 12, 64, 1, kernel=7)
-        self.fe_down1_moe1 = self.construct_encoder_layers(3, 64, 64, 2)
+        self.face_encoder1_moe1 = self.construct_encoder_layers(4, 12, 64, 1, kernel=7)
+        self.fe_down1_moe1 = self.construct_encoder_layers(4, 64, 64, 2)
         
-        self.face_encoder1_moe2 = self.construct_encoder_layers(3, 12, 64, 1, kernel=7)
-        self.fe_down1_moe2 = self.construct_encoder_layers(3, 64, 64, 2)
+        self.face_encoder1_moe2 = self.construct_encoder_layers(4, 12, 64, 1, kernel=7)
+        self.fe_down1_moe2 = self.construct_encoder_layers(4, 64, 64, 2)
         
-        self.face_encoder1_moe3 = self.construct_encoder_layers(3, 12, 64, 1, kernel=7)
-        self.fe_down1_moe3 = self.construct_encoder_layers(3, 64, 64, 2)
+        self.face_encoder1_moe3 = self.construct_encoder_layers(4, 12, 64, 1, kernel=7)
+        self.fe_down1_moe3 = self.construct_encoder_layers(4, 64, 64, 2)
         
-        self.face_encoder1_moe4 = self.construct_encoder_layers(3, 12, 64, 1, kernel=7)
-        self.fe_down1_moe4 = self.construct_encoder_layers(3, 64, 64, 2)
+        self.face_encoder1_moe4 = self.construct_encoder_layers(4, 12, 64, 1, kernel=7)
+        self.fe_down1_moe4 = self.construct_encoder_layers(4, 64, 64, 2)
         
-        self.face_encoder2_moe1 = self.construct_encoder_layers(3, 256, 128, 1)
-        self.fe_down2_moe1 = self.construct_encoder_layers(3, 128, 128, 2)
+        self.face_encoder2_moe1 = self.construct_encoder_layers(4, 256, 128, 1)
+        self.fe_down2_moe1 = self.construct_encoder_layers(4, 128, 128, 2)
         
-        self.face_encoder2_moe2 = self.construct_encoder_layers(3, 256, 128, 1)
-        self.fe_down2_moe2 = self.construct_encoder_layers(3, 128, 128, 2)
+        self.face_encoder2_moe2 = self.construct_encoder_layers(4, 256, 128, 1)
+        self.fe_down2_moe2 = self.construct_encoder_layers(4, 128, 128, 2)
 
         self.face_encoder3 = self.construct_encoder_layers(3, 256, 128, 1)
         self.fe_down3 = self.construct_encoder_layers(3, 128, 128, 2)
@@ -121,10 +121,10 @@ class ResUNet384V3(nn.Module):
         self.fd_conv3 = self.construct_encoder_layers(3, 256, 128, 1)
         
         self.face_decoder2 = self.construct_decoder_layers(4, 256, 128, 2)
-        self.fd_conv2 = self.construct_encoder_layers(3, 384, 128, 1)
+        self.fd_conv2 = self.construct_encoder_layers(4, 384, 128, 1)
 
         self.face_decoder1 = self.construct_decoder_layers(4, 256, 64, 2, kernel=7)
-        self.fd_conv1 = self.construct_encoder_layers(3, 320, 64, 1, kernel=7)
+        self.fd_conv1 = self.construct_encoder_layers(4, 320, 64, 1, kernel=7)
         
 
         self.output_block = nn.Sequential(
@@ -135,7 +135,7 @@ class ResUNet384V3(nn.Module):
         self.face_pos_encoder = LearnablePositionalEncoding2D(d_model=128, max_h=12, max_w=12, dropout=0.1)
         self.audio_pos_encoder = LearnablePositionalEncoding2D(d_model=128, max_h=12, max_w=12, dropout=0.1)
         
-    def construct_encoder_layers(self, num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3):
+    def construct_encoder_layers(self, num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3, add_pos_encoding=False, pos_h=0, pos_w=0, pos_d_model=64):
         layers = []
         padding = 1
         if kernel == 7:
@@ -145,13 +145,16 @@ class ResUNet384V3(nn.Module):
         # Subsequent layers
         for _ in range(num_of_layers - 1):
             layers.append(Conv2d(output_channels, output_channels, kernel_size=kernel, stride=1, padding=padding, residual=True))
+            
+        if add_pos_encoding:
+            layers.append(LearnablePositionalEncoding2D(pos_d_model, pos_h, pos_w, 0.1))
         # Optional SpatialAttention
         if add_spatial:
             layers.append(SpatialAttention())  # Assumes SpatialAttention is a PyTorch Module
         
         return nn.Sequential(*layers)
 
-    def construct_decoder_layers(self, num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3):
+    def construct_decoder_layers(self, num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3, add_pos_encoding=False, pos_h=0, pos_w=0, pos_d_model=64):
         layers = []
         padding = 1
         if kernel == 7:
@@ -161,6 +164,10 @@ class ResUNet384V3(nn.Module):
         # Subsequent layers
         for _ in range(num_of_layers - 1):
             layers.append(Conv2d(output_channels, output_channels, kernel_size=kernel, stride=1, padding=padding, residual=True))
+        
+        if add_pos_encoding:
+            layers.append(LearnablePositionalEncoding2D(pos_d_model, pos_h, pos_w, 0.1))
+        
         # Optional SpatialAttention
         if add_spatial:
             layers.append(SpatialAttention())  # Assumes SpatialAttention is a PyTorch Module
@@ -295,7 +302,7 @@ class ResUNet384V3(nn.Module):
 
         # Obtain audio features
         audio_embedding1 = self.audio_encoder1(audio_sequences_normalized)
-        audio_embedding1 = self.audio_pos_encoder(audio_embedding1)        
+        #audio_embedding1 = self.audio_pos_encoder(audio_embedding1)        
           
         face_sequences1 = self.diffuse(face_sequences.float(), t0, 3)
         face_sequences2 = self.diffuse(face_sequences.float(), t1, 3)
@@ -336,7 +343,7 @@ class ResUNet384V3(nn.Module):
         face5 = self.face_encoder5(fed4)
         fed5 = self.fe_down5(fed4 + face5)       
                  
-        fed5 = self.face_pos_encoder(fed5)
+        #fed5 = self.face_pos_encoder(fed5)
         
         combined = torch.cat([fed5, audio_embedding1], dim=1)
         

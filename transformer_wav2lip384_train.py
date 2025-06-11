@@ -323,7 +323,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               #loss = loss / 20
               loss.backward()
-              if (step + 1) % 4 == 0:
+              if (step + 1) % 10 == 0:
                 optimizer.step()
                 optimizer.zero_grad()
                 
@@ -542,7 +542,7 @@ if __name__ == "__main__":
       )
       
     # for name, param in model.named_parameters():
-    #   if 'face_decoder' not in name:
+    #   if 'face_encoder1' not in name or 'fe_down1' not in name or 'face_decoder1' not in name or 'fd_conv1' not in name:
     #     param.requires_grad = False
     #     print('nooooo')
     
