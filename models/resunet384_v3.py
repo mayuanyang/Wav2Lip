@@ -61,23 +61,18 @@ class ResUNet384V3(nn.Module):
             'blur': 0.03             # 边缘模糊系数(相对于短边)
         }
               
-        self.face_encoder1_moe1 = self.construct_encoder_layers(4, 12, 64, 1, kernel=7)
-        self.fe_down1_moe1 = self.construct_encoder_layers(4, 64, 64, 2)
+        self.face_encoder1_full = self.construct_encoder_layers(4, 3, 64, 1, kernel=7)
+        self.fe_down1_full = self.construct_encoder_layers(4, 64, 64, 2)
         
-        self.face_encoder1_moe2 = self.construct_encoder_layers(4, 12, 64, 1, kernel=7)
-        self.fe_down1_moe2 = self.construct_encoder_layers(4, 64, 64, 2)
+        self.face_encoder1_bottom = self.construct_encoder_layers(3, 9, 64, 1, kernel=7)
+        self.fe_down1_bottom = self.construct_encoder_layers(4, 64, 64, 2)
+
+                
+        self.face_encoder2_full = self.construct_encoder_layers(4, 128, 128, 1)
+        self.fe_down2_full = self.construct_encoder_layers(4, 128, 128, 2)
         
-        self.face_encoder1_moe3 = self.construct_encoder_layers(4, 12, 64, 1, kernel=7)
-        self.fe_down1_moe3 = self.construct_encoder_layers(4, 64, 64, 2)
-        
-        self.face_encoder1_moe4 = self.construct_encoder_layers(4, 12, 64, 1, kernel=7)
-        self.fe_down1_moe4 = self.construct_encoder_layers(4, 64, 64, 2)
-        
-        self.face_encoder2_moe1 = self.construct_encoder_layers(4, 256, 128, 1)
-        self.fe_down2_moe1 = self.construct_encoder_layers(4, 128, 128, 2)
-        
-        self.face_encoder2_moe2 = self.construct_encoder_layers(4, 256, 128, 1)
-        self.fe_down2_moe2 = self.construct_encoder_layers(4, 128, 128, 2)
+        self.face_encoder2_bottom = self.construct_encoder_layers(4, 64, 128, 1)
+        self.fe_down2_bottom = self.construct_encoder_layers(4, 128, 128, 2)
 
         self.face_encoder3 = self.construct_encoder_layers(3, 256, 128, 1)
         self.fe_down3 = self.construct_encoder_layers(3, 128, 128, 2)
@@ -125,7 +120,7 @@ class ResUNet384V3(nn.Module):
         self.fd_conv2 = self.construct_encoder_layers(4, 384, 128, 1)
 
         self.face_decoder1 = self.construct_decoder_layers(4, 256, 64, 2, kernel=7)
-        self.fd_conv1 = self.construct_encoder_layers(4, 320, 64, 1, kernel=7)
+        self.fd_conv1 = self.construct_encoder_layers(4, 192, 64, 1, kernel=7)
         
 
         self.output_block = nn.Sequential(
@@ -288,11 +283,7 @@ class ResUNet384V3(nn.Module):
 
         expanded_B = face_sequences.size(0)  # 展平后的 batch size
 
-        
-        t0 = self.sample_t(expanded_B, torch.tensor([0, 0, 0, 1], dtype=torch.float32)).to(face_sequences.device)
-        t1 = self.sample_t(expanded_B, torch.tensor([0, 0, 1, 0], dtype=torch.float32)).to(face_sequences.device)
-        t2 = self.sample_t(expanded_B, torch.tensor([0, 1, 0, 0], dtype=torch.float32)).to(face_sequences.device)
-        t3 = self.sample_t(expanded_B, torch.tensor([1, 0, 0, 0], dtype=torch.float32)).to(face_sequences.device)
+        t0 = self.sample_t(expanded_B, torch.tensor([1, 1, 1, 1], dtype=torch.float32)).to(face_sequences.device)
        
         self.alphas_cumprod = self.alphas_cumprod.to(face_sequences.device)
         
@@ -303,37 +294,37 @@ class ResUNet384V3(nn.Module):
 
         # Obtain audio features
         audio_embedding1 = self.audio_encoder1(audio_sequences_normalized)
-        #audio_embedding1 = self.audio_pos_encoder(audio_embedding1)        
+        #audio_embedding1 = self.audio_pos_encoder(audio_embedding1)  
           
-        face_sequences1 = self.diffuse(face_sequences.float(), t0, 3)
-        face_sequences2 = self.diffuse(face_sequences.float(), t1, 3)
-        face_sequences3 = self.diffuse(face_sequences.float(), t2, 3)
-        face_sequences4 = self.diffuse(face_sequences.float(), t3, 3)
+        first_3_channels = face_sequences[:, :3, :, :] 
+        
+        reference_bottom_half = face_sequences[:, 3:, 192:, :] 
+        
+        face_sequences1 = self.diffuse(first_3_channels.float(), t0, 3)
         
         # ----The face encoder-----
-        face1_moe1 = self.face_encoder1_moe1(face_sequences1)
-        fed1_moe1 = self.fe_down1_moe1(face1_moe1)
+        face1_full = self.face_encoder1_full(face_sequences1)
+        fed1_full = self.fe_down1_full(face1_full)
         
-        face1_moe2 = self.face_encoder1_moe2(face_sequences2)
-        fed1_moe2 = self.fe_down1_moe2(face1_moe2)
+        padding = (0, 0, 192, 0)  # (left, right, top, bottom)
         
-        face1_moe3 = self.face_encoder1_moe3(face_sequences3)
-        fed1_moe3 = self.fe_down1_moe3(face1_moe3)
+        face1_ref_bottom = self.face_encoder1_bottom(reference_bottom_half)
+        face1_ref_bottom_padded = F.pad(face1_ref_bottom, padding, "constant", 0)
         
-        face1_moe4 = self.face_encoder1_moe4(face_sequences4)
-        fed1_moe4 = self.fe_down1_moe4(face1_moe4)
+        fed1_ref_bottom = self.fe_down1_bottom(face1_ref_bottom_padded)
 
-        
-        fed1_concatenated = torch.cat([fed1_moe1, fed1_moe2, fed1_moe3, fed1_moe4], dim=1)
+        fed1_concatenated = torch.cat([fed1_full, fed1_ref_bottom], dim=1)
         
 
-        face2_moe1 = self.face_encoder2_moe1(fed1_concatenated)
-        fed2_moe1 = self.fe_down2_moe1(face2_moe1)
-
-        face2_moe2 = self.face_encoder2_moe2(fed1_concatenated)
-        fed2_moe2 = self.fe_down2_moe2(face2_moe2)
-
-        fed2_concatenated = torch.cat([fed2_moe1, fed2_moe2], dim=1)
+        face2_full = self.face_encoder2_full(fed1_concatenated)
+        fed2_full = self.fe_down2_full(face2_full)
+        
+        
+        face2_ref_bottom = self.face_encoder2_bottom(fed1_ref_bottom)
+        
+        fed2_ref_bottom = self.fe_down2_bottom(face2_ref_bottom)
+        
+        fed2_concatenated = torch.cat([fed2_full, fed2_ref_bottom], dim=1)
 
         face3 = self.face_encoder3(fed2_concatenated)
         fed3 = self.fe_down3(face3)
@@ -350,7 +341,6 @@ class ResUNet384V3(nn.Module):
         
         bottlenet = self.bottlenet(combined)
         
-
         deface5 = self.face_decoder5(bottlenet)
 
         cat5 = torch.cat([deface5, face5], dim=1)
@@ -372,34 +362,29 @@ class ResUNet384V3(nn.Module):
         deface2 = self.face_decoder2(cat3_with_skip)
         deface2_moe1 = self.face_decoder2_moe1(cat3_with_skip)
         
-        cat2 = torch.cat([deface2+deface2_moe1, face2_moe1, face2_moe2], dim=1)
+        cat2 = torch.cat([deface2, face2_full, face2_ref_bottom], dim=1)
         cat2 = self.fd_conv2(cat2)
         
         cat2_with_skip = torch.cat([cat2, deface2], dim=1)
         deface1 = self.face_decoder1(cat2_with_skip)
         
-        cat1 = torch.cat([deface1, face1_moe1, face1_moe2, face1_moe3, face1_moe4], dim=1)
+        cat1 = torch.cat([deface1, face1_full, face1_ref_bottom_padded], dim=1)
         cat1 = self.fd_conv1(cat1)
         
         if step % 5000 == 0:       
           self.save_sample_images(face_sequences1, f'face_sequences1_{step}')
         
-          self.save_sample_images(face1_moe1, f'face1_moe1_{step}')
-          self.save_sample_images(fed1_moe1, f'fed1_moe1_{step}')
+          self.save_sample_images(face1_full, f'face1_full_{step}')
+          self.save_sample_images(fed1_full, f'fed1_full_{step}')
           
-          self.save_sample_images(face1_moe2, f'face1_moe2_{step}')
-          self.save_sample_images(fed1_moe2, f'fed1_moe2_{step}')
+          self.save_sample_images(face1_ref_bottom_padded, f'face1_bottom_{step}')
+          self.save_sample_images(fed1_ref_bottom, f'fed1_bottom_{step}')
           
-          self.save_sample_images(face1_moe3, f'face1_moe3_{step}')
-          self.save_sample_images(fed1_moe3, f'fed1_moe3_{step}')
           
-          self.save_sample_images(face1_moe4, f'face1_moe4_{step}')
-          self.save_sample_images(fed1_moe4, f'fed1_moe4_{step}')
-          
-          self.save_sample_images(face2_moe1, f'face2_moe1_{step}')
-          self.save_sample_images(fed2_moe1, f'fed2_moe1_{step}')
-          self.save_sample_images(face2_moe2, f'face2_moe2_{step}')
-          self.save_sample_images(fed2_moe2, f'fed2_moe2_{step}')
+          self.save_sample_images(face2_full, f'face2_full_{step}')
+          self.save_sample_images(fed2_full, f'fed2_full_{step}')
+          self.save_sample_images(fed2_ref_bottom, f'face2_bottom_{step}')
+          self.save_sample_images(fed2_ref_bottom, f'fed2_bottom_{step}')
           
           self.save_sample_images(face3, f'face3_{step}')
           self.save_sample_images(fed3, f'fed3_{step}')
