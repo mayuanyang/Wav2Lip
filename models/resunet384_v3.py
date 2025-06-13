@@ -61,18 +61,16 @@ class ResUNet384V3(nn.Module):
             'blur': 0.03             # 边缘模糊系数(相对于短边)
         }
               
-        self.face_encoder1_full = self.construct_encoder_layers(4, 3, 64, 1, kernel=7)
+        self.face_encoder1_full = self.construct_encoder_layers(4, 3, 64, 1, kernel=3)
         self.fe_down1_full = self.construct_encoder_layers(4, 64, 64, 2)
         
         self.fe_down1_fusion = self.construct_encoder_layers(4, 128, 64, 1)
         
         self.face_encoder1_bottom = self.construct_encoder_layers(3, 9, 64, 1, kernel=3)
         self.fe_down1_bottom = self.construct_encoder_layers(4, 64, 64, 2)
-        
-        
                 
         self.face_encoder2_full = self.construct_encoder_layers(4, 128, 128, 1)
-        self.fe_down2_full = self.construct_encoder_layers(4, 256, 128, 2)
+        self.fe_down2_full = self.construct_encoder_layers(4, 128, 128, 2)
         
         self.face_encoder2_bottom = self.construct_encoder_layers(4, 64, 128, 1)
         self.fe_down2_bottom = self.construct_encoder_layers(4, 128, 128, 2)
@@ -91,14 +89,11 @@ class ResUNet384V3(nn.Module):
             # Example input shape: (B, 1, H_audio, W_audio)
             Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
             Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
        
-            Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
-            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(32, 64, kernel_size=3, stride=(2, 1), padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
 
-            Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(64, 128, kernel_size=3, stride=(2,1), padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
@@ -106,25 +101,25 @@ class ResUNet384V3(nn.Module):
         self.audio_adapter2 = nn.AdaptiveAvgPool2d((12, 12))
         
 
-        self.bottlenet = self.construct_encoder_layers(2, 256, 128, 1, True)
+        self.bottlenet = self.construct_encoder_layers(2, 128, 128, 1, True)
                 
         
         # Decoders
         self.face_decoder5 = self.construct_decoder_layers(3, 128, 128, 2)
         self.fd_conv5 = self.construct_encoder_layers(3, 256, 128, 1)
         
-        self.face_decoder4 = self.construct_decoder_layers(3, 256, 128, 2)
+        self.face_decoder4 = self.construct_decoder_layers(3, 128, 128, 2)
         self.fd_conv4 = self.construct_encoder_layers(3, 256, 128, 1)
         
-        self.face_decoder3 = self.construct_decoder_layers(3, 256, 128, 2)
+        self.face_decoder3 = self.construct_decoder_layers(3, 128, 128, 2)
         self.fd_conv3 = self.construct_encoder_layers(3, 256, 128, 1)
         
-        self.face_decoder2 = self.construct_decoder_layers(4, 256, 128, 2)
+        self.face_decoder2 = self.construct_decoder_layers(4, 128, 128, 2)
         self.face_decoder2_moe1 = self.construct_decoder_layers(4, 256, 128, 2)
-        self.fd_conv2 = self.construct_encoder_layers(4, 384, 128, 1)
+        self.fd_conv2 = self.construct_encoder_layers(4, 256, 128, 1)
 
-        self.face_decoder1 = self.construct_decoder_layers(4, 256, 64, 2, kernel=7)
-        self.fd_conv1 = self.construct_encoder_layers(4, 192, 64, 1, kernel=7)
+        self.face_decoder1 = self.construct_decoder_layers(4, 128, 64, 2)
+        self.fd_conv1 = self.construct_encoder_layers(4, 128, 64, 1)
         
 
         self.output_block = nn.Sequential(
@@ -292,11 +287,11 @@ class ResUNet384V3(nn.Module):
         self.alphas_cumprod = self.alphas_cumprod.to(face_sequences.device)
 
         # Obtain audio features
-        audio_embedding1 = self.audio_encoder1(audio_sequences)
+        #audio_embedding1 = self.audio_encoder1(audio_sequences)
         
-        audio_adpter1_emb = self.audio_adapter1(audio_embedding1)
+        #audio_adpter1_emb = self.audio_adapter1(audio_embedding1)
         
-        audio_adpter2_emb = self.audio_adapter2(audio_embedding1)
+        #audio_adpter2_emb = self.audio_adapter2(audio_embedding1)
         
         first_3_channels = face_sequences[:, :3, :, :] 
         
@@ -318,10 +313,8 @@ class ResUNet384V3(nn.Module):
         fed1_concatenated = torch.cat([fed1_full, fed1_ref_bottom], dim=1)
 
         face2_full = self.face_encoder2_full(fed1_concatenated)
-        face2_full_fusion = torch.cat([face2_full, audio_adpter1_emb], dim=1)
-        
-        fed2_full = self.fe_down2_full(face2_full_fusion)
-        
+                
+        fed2_full = self.fe_down2_full(face2_full)
         
         face2_ref_bottom = self.face_encoder2_bottom(fed1_ref_bottom)
         
@@ -340,38 +333,37 @@ class ResUNet384V3(nn.Module):
                  
         #fed5 = self.face_pos_encoder(fed5)
         
-        combined = torch.cat([fed5, audio_adpter2_emb], dim=1)
+        #combined = torch.cat([fed5, audio_adpter2_emb], dim=1)
         
-        bottlenet = self.bottlenet(combined)
+        bottlenet = self.bottlenet(fed5)
         
         deface5 = self.face_decoder5(bottlenet)
 
         cat5 = torch.cat([deface5, face5], dim=1)
         cat5 = self.fd_conv5(cat5)
         
-        cat5_with_skip = torch.cat([cat5, deface5], dim=1)
-        deface4 = self.face_decoder4(cat5_with_skip)
+        #cat5_with_skip = torch.cat([cat5, deface5], dim=1)
+        deface4 = self.face_decoder4(cat5)
         
         cat4 = torch.cat([deface4, face4], dim=1)
         cat4 = self.fd_conv4(cat4)
 
-        cat4_with_skip = torch.cat([cat4, deface4], dim=1)
-        deface3 = self.face_decoder3(cat4_with_skip)
+        #cat4_with_skip = torch.cat([cat4, deface4], dim=1)
+        deface3 = self.face_decoder3(cat4)
         
         cat3 = torch.cat([deface3, face3], dim=1)
         cat3 = self.fd_conv3(cat3)
 
-        cat3_with_skip = torch.cat([cat3, deface3], dim=1)
-        deface2 = self.face_decoder2(cat3_with_skip)
-        deface2_moe1 = self.face_decoder2_moe1(cat3_with_skip)
+        #cat3_with_skip = torch.cat([cat3, deface3], dim=1)
+        deface2 = self.face_decoder2(cat3)
         
-        cat2 = torch.cat([deface2, face2_full, face2_ref_bottom], dim=1)
+        cat2 = torch.cat([deface2, face2_full], dim=1)
         cat2 = self.fd_conv2(cat2)
         
-        cat2_with_skip = torch.cat([cat2, deface2], dim=1)
-        deface1 = self.face_decoder1(cat2_with_skip)
+        #cat2_with_skip = torch.cat([cat2, deface2], dim=1)
+        deface1 = self.face_decoder1(cat2)
         
-        cat1 = torch.cat([deface1, face1_full, face1_ref_bottom_padded], dim=1)
+        cat1 = torch.cat([deface1, face1_full], dim=1)
         cat1 = self.fd_conv1(cat1)
         
         if step % 5000 == 0:       
@@ -409,5 +401,5 @@ class ResUNet384V3(nn.Module):
         else:
             outputs = x
             
-        return outputs, deface5, audio_embedding1
+        return outputs, deface5, None
 
