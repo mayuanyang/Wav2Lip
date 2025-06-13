@@ -64,12 +64,15 @@ class ResUNet384V3(nn.Module):
         self.face_encoder1_full = self.construct_encoder_layers(4, 3, 64, 1, kernel=7)
         self.fe_down1_full = self.construct_encoder_layers(4, 64, 64, 2)
         
-        self.face_encoder1_bottom = self.construct_encoder_layers(3, 9, 64, 1, kernel=7)
+        self.fe_down1_fusion = self.construct_encoder_layers(4, 128, 64, 1)
+        
+        self.face_encoder1_bottom = self.construct_encoder_layers(3, 9, 64, 1, kernel=3)
         self.fe_down1_bottom = self.construct_encoder_layers(4, 64, 64, 2)
-
+        
+        
                 
         self.face_encoder2_full = self.construct_encoder_layers(4, 128, 128, 1)
-        self.fe_down2_full = self.construct_encoder_layers(4, 128, 128, 2)
+        self.fe_down2_full = self.construct_encoder_layers(4, 256, 128, 2)
         
         self.face_encoder2_bottom = self.construct_encoder_layers(4, 64, 128, 1)
         self.fe_down2_bottom = self.construct_encoder_layers(4, 128, 128, 2)
@@ -90,16 +93,17 @@ class ResUNet384V3(nn.Module):
             Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
        
-            Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
-       
-            Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+
+            Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-       
-            nn.AdaptiveAvgPool2d((12, 12))
         )
+        
+        self.audio_adapter1 = nn.AdaptiveAvgPool2d((192, 192))
+        self.audio_adapter2 = nn.AdaptiveAvgPool2d((12, 12))
         
 
         self.bottlenet = self.construct_encoder_layers(2, 256, 128, 1, True)
@@ -286,16 +290,14 @@ class ResUNet384V3(nn.Module):
         t0 = self.sample_t(expanded_B, torch.tensor([1, 1, 1, 1], dtype=torch.float32)).to(face_sequences.device)
        
         self.alphas_cumprod = self.alphas_cumprod.to(face_sequences.device)
-        
-        min_val = audio_sequences.min()
-        max_val = audio_sequences.max()
-        audio_sequences_scaled = (audio_sequences - min_val) / (max_val - min_val) * 2 - 1
-        audio_sequences_normalized = (audio_sequences_scaled + 1) / 2
 
         # Obtain audio features
-        audio_embedding1 = self.audio_encoder1(audio_sequences_normalized)
-        #audio_embedding1 = self.audio_pos_encoder(audio_embedding1)  
-          
+        audio_embedding1 = self.audio_encoder1(audio_sequences)
+        
+        audio_adpter1_emb = self.audio_adapter1(audio_embedding1)
+        
+        audio_adpter2_emb = self.audio_adapter2(audio_embedding1)
+        
         first_3_channels = face_sequences[:, :3, :, :] 
         
         reference_bottom_half = face_sequences[:, 3:, 192:, :] 
@@ -314,10 +316,11 @@ class ResUNet384V3(nn.Module):
         fed1_ref_bottom = self.fe_down1_bottom(face1_ref_bottom_padded)
 
         fed1_concatenated = torch.cat([fed1_full, fed1_ref_bottom], dim=1)
-        
 
         face2_full = self.face_encoder2_full(fed1_concatenated)
-        fed2_full = self.fe_down2_full(face2_full)
+        face2_full_fusion = torch.cat([face2_full, audio_adpter1_emb], dim=1)
+        
+        fed2_full = self.fe_down2_full(face2_full_fusion)
         
         
         face2_ref_bottom = self.face_encoder2_bottom(fed1_ref_bottom)
@@ -337,7 +340,7 @@ class ResUNet384V3(nn.Module):
                  
         #fed5 = self.face_pos_encoder(fed5)
         
-        combined = torch.cat([fed5, audio_embedding1], dim=1)
+        combined = torch.cat([fed5, audio_adpter2_emb], dim=1)
         
         bottlenet = self.bottlenet(combined)
         
