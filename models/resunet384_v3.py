@@ -69,8 +69,8 @@ class ResUNet384V3(nn.Module):
         self.face_encoder1_bottom = self.construct_encoder_layers(3, 9, 64, 1, kernel=3)
         self.fe_down1_bottom = self.construct_encoder_layers(4, 64, 64, 2)
                 
-        self.face_encoder2_full = self.construct_encoder_layers(4, 128, 128, 1)
-        self.fe_down2_full = self.construct_encoder_layers(4, 128, 128, 2)
+        self.face_encoder2_full = self.construct_encoder_layers(5, 128, 128, 1)
+        self.fe_down2_full = self.construct_encoder_layers(5, 128, 128, 2)
         
         self.face_encoder2_bottom = self.construct_encoder_layers(4, 64, 128, 1)
         self.fe_down2_bottom = self.construct_encoder_layers(4, 128, 128, 2)
@@ -114,9 +114,8 @@ class ResUNet384V3(nn.Module):
         self.face_decoder3 = self.construct_decoder_layers(3, 128, 128, 2)
         self.fd_conv3 = self.construct_encoder_layers(3, 256, 128, 1)
         
-        self.face_decoder2 = self.construct_decoder_layers(4, 128, 128, 2)
-        self.face_decoder2_moe1 = self.construct_decoder_layers(4, 256, 128, 2)
-        self.fd_conv2 = self.construct_encoder_layers(4, 256, 128, 1)
+        self.face_decoder2 = self.construct_decoder_layers(5, 128, 128, 2)
+        self.fd_conv2 = self.construct_encoder_layers(5, 256, 128, 1)
 
         self.face_decoder1 = self.construct_decoder_layers(4, 128, 64, 2)
         self.fd_conv1 = self.construct_encoder_layers(4, 128, 64, 1)
