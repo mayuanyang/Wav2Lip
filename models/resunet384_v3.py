@@ -66,7 +66,7 @@ class ResUNet384V3(nn.Module):
         
         self.fe_down1_fusion = self.construct_encoder_layers(4, 128, 64, 1)
         
-        self.face_encoder1_bottom = self.construct_encoder_layers(3, 9, 64, 1, kernel=3)
+        self.face_encoder1_bottom = self.construct_encoder_layers(5, 9, 64, 1, kernel=3)
         self.fe_down1_bottom = self.construct_encoder_layers(4, 64, 64, 2)
                 
         self.face_encoder2_full = self.construct_encoder_layers(5, 256, 128, 1)
@@ -119,9 +119,9 @@ class ResUNet384V3(nn.Module):
 
         self.face_decoder1 = self.construct_decoder_layers(4, 128, 128, 2)
         
-        self.face_decoder0 = self.construct_encoder_layers(4, 192, 64, 1)
+        self.face_decoder0 = self.construct_encoder_layers(4, 192, 192, 1)
         
-        self.fd_conv1 = self.construct_encoder_layers(4, 128, 64, 1)
+        self.fd_conv1 = self.construct_encoder_layers(4, 256, 64, 1)
         
 
         self.output_block = nn.Sequential(
