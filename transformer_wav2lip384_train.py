@@ -154,7 +154,6 @@ def get_sync_loss(mel, g):
 
 def bottom_half_masked_mse_loss(pred, target):
     # 创建一个掩码，下半部分为1，上半部分为0
-    print('The shape', pred.shape)
     mask = torch.zeros_like(pred)
     half_height = 192
     mask[:, :, :, half_height:, :] = 1.0
