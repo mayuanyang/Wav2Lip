@@ -69,7 +69,7 @@ class ResUNet384V3(nn.Module):
         self.face_encoder1_bottom = self.construct_encoder_layers(3, 9, 64, 1, kernel=3)
         self.fe_down1_bottom = self.construct_encoder_layers(4, 64, 64, 2)
                 
-        self.face_encoder2_full = self.construct_encoder_layers(5, 128, 128, 1)
+        self.face_encoder2_full = self.construct_encoder_layers(5, 256, 128, 1)
         self.fe_down2_full = self.construct_encoder_layers(5, 128, 128, 2)
         
         self.face_encoder2_bottom = self.construct_encoder_layers(4, 64, 128, 1)
@@ -117,7 +117,10 @@ class ResUNet384V3(nn.Module):
         self.face_decoder2 = self.construct_decoder_layers(5, 128, 128, 2)
         self.fd_conv2 = self.construct_encoder_layers(5, 256, 128, 1)
 
-        self.face_decoder1 = self.construct_decoder_layers(4, 128, 64, 2)
+        self.face_decoder1 = self.construct_decoder_layers(4, 128, 128, 2)
+        
+        self.face_decoder0 = self.construct_encoder_layers(4, 192, 64, 1)
+        
         self.fd_conv1 = self.construct_encoder_layers(4, 128, 64, 1)
         
 
@@ -286,9 +289,9 @@ class ResUNet384V3(nn.Module):
         self.alphas_cumprod = self.alphas_cumprod.to(face_sequences.device)
 
         # Obtain audio features
-        #audio_embedding1 = self.audio_encoder1(audio_sequences)
+        audio_embedding1 = self.audio_encoder1(audio_sequences)
         
-        #audio_adpter1_emb = self.audio_adapter1(audio_embedding1)
+        audio_adpter1_emb = self.audio_adapter1(audio_embedding1)
         
         #audio_adpter2_emb = self.audio_adapter2(audio_embedding1)
         
@@ -309,7 +312,7 @@ class ResUNet384V3(nn.Module):
         
         fed1_ref_bottom = self.fe_down1_bottom(face1_ref_bottom_padded)
 
-        fed1_concatenated = torch.cat([fed1_full, fed1_ref_bottom], dim=1)
+        fed1_concatenated = torch.cat([fed1_full, fed1_ref_bottom, audio_adpter1_emb], dim=1)
 
         face2_full = self.face_encoder2_full(fed1_concatenated)
                 
@@ -359,8 +362,11 @@ class ResUNet384V3(nn.Module):
         cat2 = torch.cat([deface2, face2_full], dim=1)
         cat2 = self.fd_conv2(cat2)
         
-        #cat2_with_skip = torch.cat([cat2, deface2], dim=1)
+        
         deface1 = self.face_decoder1(cat2)
+        
+        cat1 = torch.cat([face1_ref_bottom_padded, deface1], dim=1)
+        deface1 = self.face_decoder0(cat1)
         
         cat1 = torch.cat([deface1, face1_full], dim=1)
         cat1 = self.fd_conv1(cat1)
