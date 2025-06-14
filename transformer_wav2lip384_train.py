@@ -152,6 +152,17 @@ def get_sync_loss(mel, g):
  
     return cross_entropy_loss(output, y)
 
+def bottom_half_masked_mse_loss(pred, target):
+    # 创建一个掩码，下半部分为1，上半部分为0
+    print('The shape', pred.shape)
+    mask = torch.zeros_like(pred)
+    half_height = 192
+    mask[:, :, :, half_height:, :] = 1.0
+
+    # 计算MSE损失
+    mse = nn.MSELoss(reduction='none')(pred, target)
+    masked_mse = mse * mask
+    return masked_mse.mean()
 
 def print_grad_norm(name, module, grad_input, grad_output):
     should_print = global_step % 1000 == 0
@@ -286,13 +297,15 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
                 l1loss = recon_loss(g, gt)
                 
+                bottom_loss = bottom_half_masked_mse_loss(g, gt)
+                
                 tempora_loss = trepa_loss(gt, g)
 
                 running_l1_loss += l1loss.item()
                 
                 #cossine_loss = cosine_similarity_loss(g, audio_embedding)
                 
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + tempora_loss #+ 0.05 * cossine_loss
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + tempora_loss + bottom_loss #+ 0.05 * cossine_loss
 
               #loss = loss / 20
               loss.backward()
@@ -327,7 +340,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, trepa_loss: {tempora_loss:.6f}, LR: {current_lr:.7f}")
+              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, trepa_loss: {tempora_loss:.6f}, bottom: {bottom_loss.item():.6f} LR: {current_lr:.7f}")
               #prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Trep Loss: {tempora_loss.item():.5f}, Cos Loss: {cossine_loss.item():.5f} LR: {current_lr:.7f}")
               
               metrics = {
