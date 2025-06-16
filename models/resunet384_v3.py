@@ -64,25 +64,23 @@ class ResUNet384V3(nn.Module):
         self.face_encoder1_full = self.construct_encoder_layers(4, 3, 64, 1, kernel=3)
         self.fe_down1_full = self.construct_encoder_layers(4, 64, 64, 2)
         
-        self.fe_down1_fusion = self.construct_encoder_layers(4, 128, 64, 1)
-        
         self.face_encoder1_bottom = self.construct_encoder_layers(5, 9, 64, 1, kernel=3)
         self.fe_down1_bottom = self.construct_encoder_layers(4, 64, 64, 2)
                 
-        self.face_encoder2_full = self.construct_encoder_layers(5, 256, 128, 1)
-        self.fe_down2_full = self.construct_encoder_layers(5, 128, 128, 2)
+        self.face_encoder2_full = self.construct_encoder_layers(4, 128, 256, 1)
+        self.fe_down2_full = self.construct_encoder_layers(4, 256, 256, 2)
         
         self.face_encoder2_bottom = self.construct_encoder_layers(4, 64, 128, 1)
         self.fe_down2_bottom = self.construct_encoder_layers(4, 128, 128, 2)
 
-        self.face_encoder3 = self.construct_encoder_layers(3, 256, 128, 1)
-        self.fe_down3 = self.construct_encoder_layers(3, 128, 128, 2)
+        self.face_encoder3 = self.construct_encoder_layers(3, 640, 384, 1)
+        self.fe_down3 = self.construct_encoder_layers(3, 384, 384, 2)
 
-        self.face_encoder4 = self.construct_encoder_layers(3, 128, 128, 1)
-        self.fe_down4 = self.construct_encoder_layers(3, 128, 128, 2)
+        self.face_encoder4 = self.construct_encoder_layers(3, 384, 384, 1)
+        self.fe_down4 = self.construct_encoder_layers(3, 384, 384, 2)
         
-        self.face_encoder5 = self.construct_encoder_layers(3, 128, 128, 1)
-        self.fe_down5 = self.construct_encoder_layers(3, 128, 128, 2)
+        self.face_encoder5 = self.construct_encoder_layers(3, 384, 384, 1)
+        self.fe_down5 = self.construct_encoder_layers(3, 384, 384, 2)
 
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
@@ -95,29 +93,31 @@ class ResUNet384V3(nn.Module):
 
             Conv2d(64, 128, kernel_size=3, stride=(2,1), padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            
+            Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
         )
         
-        self.audio_adapter1 = nn.AdaptiveAvgPool2d((192, 192))
-        self.audio_adapter2 = nn.AdaptiveAvgPool2d((12, 12))
+        self.audio_adapter1 = nn.AdaptiveAvgPool2d((96, 96))
+        #self.audio_adapter2 = nn.AdaptiveAvgPool2d((12, 12))
         
 
-        self.bottlenet = self.construct_encoder_layers(2, 128, 128, 1, True)
+        self.bottlenet = self.construct_encoder_layers(2, 384, 384, 1, True)
                 
         
         # Decoders
-        self.face_decoder5 = self.construct_decoder_layers(3, 128, 128, 2)
-        self.fd_conv5 = self.construct_encoder_layers(3, 256, 128, 1)
+        self.face_decoder5 = self.construct_decoder_layers(3, 384, 384, 2)
+        self.fd_conv5 = self.construct_encoder_layers(3, 768, 384, 1)
         
-        self.face_decoder4 = self.construct_decoder_layers(3, 128, 128, 2)
-        self.fd_conv4 = self.construct_encoder_layers(3, 256, 128, 1)
+        self.face_decoder4 = self.construct_decoder_layers(3, 384, 384, 2)
+        self.fd_conv4 = self.construct_encoder_layers(3, 768, 384, 1)
         
-        self.face_decoder3 = self.construct_decoder_layers(3, 128, 128, 2)
-        self.fd_conv3 = self.construct_encoder_layers(3, 256, 128, 1)
+        self.face_decoder3 = self.construct_decoder_layers(3, 384, 384, 2)
+        self.fd_conv3 = self.construct_encoder_layers(3, 768, 384, 1)
         
-        self.face_decoder2 = self.construct_decoder_layers(5, 128, 128, 2)
-        self.fd_conv2 = self.construct_encoder_layers(5, 256, 128, 1)
+        self.face_decoder2 = self.construct_decoder_layers(4, 384, 384, 2)
+        self.fd_conv2 = self.construct_encoder_layers(4, 640, 320, 1)
 
-        self.face_decoder1 = self.construct_decoder_layers(4, 128, 128, 2)
+        self.face_decoder1 = self.construct_decoder_layers(4, 320, 128, 2)
         
         self.face_decoder0 = self.construct_encoder_layers(4, 192, 192, 1)
         
@@ -312,7 +312,7 @@ class ResUNet384V3(nn.Module):
         
         fed1_ref_bottom = self.fe_down1_bottom(face1_ref_bottom_padded)
 
-        fed1_concatenated = torch.cat([fed1_full, fed1_ref_bottom, audio_adpter1_emb], dim=1)
+        fed1_concatenated = torch.cat([fed1_full, fed1_ref_bottom], dim=1)
 
         face2_full = self.face_encoder2_full(fed1_concatenated)
                 
@@ -322,7 +322,7 @@ class ResUNet384V3(nn.Module):
         
         fed2_ref_bottom = self.fe_down2_bottom(face2_ref_bottom)
         
-        fed2_concatenated = torch.cat([fed2_full, fed2_ref_bottom], dim=1)
+        fed2_concatenated = torch.cat([fed2_full, fed2_ref_bottom, audio_adpter1_emb], dim=1)
 
         face3 = self.face_encoder3(fed2_concatenated)
         fed3 = self.fe_down3(face3)
