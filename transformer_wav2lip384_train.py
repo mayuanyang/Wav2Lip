@@ -70,40 +70,17 @@ use_cuda = torch.cuda.is_available()
 
 print('use_cuda: {}'.format(use_cuda))
 
-def cosine_similarity_loss(face_embedding, audio_embedding):
+def compute_cosine_similarity(audio, frames):
+        
+    # 归一化
+    audio_normalized = F.normalize(audio, p=2, dim=1)   # [B, output_dim]
+    frames_normalized = F.normalize(frames, p=2, dim=1) # [B, output_dim]
     
-    B, C_video, T, H_video, W_video = face_embedding.shape
+    # 计算余弦相似度
+    cosine_sim = torch.sum(audio_normalized * frames_normalized, dim=1)  # [B]
     
-    audio_embedding = F.interpolate(
-        audio_embedding,
-        size=(H_video, W_video),
-        mode='bilinear'  # 或 'bicubic'
-    )  # [B, C_audio, H_video, W_video]
-
-    face_embedding = face_embedding.squeeze(0)          # [1,3,5,384,384] → [3,5,384,384]
-    face_embedding = face_embedding.permute(1, 0, 2, 3) 
-
-    audio_embedding = audio_embedding.mean(dim=1, keepdim=True)  # [B, 1, H_video, W_video]
-    audio_embedding = audio_embedding.expand(-1, C_video, -1, -1)  # [B, C_video, H_video, W_video]
-
-    # Flatten the spatial dimensions of both tensors
-    face_flatten = face_embedding.reshape(face_embedding.size(0), -1)
-    audio_flatten = audio_embedding.reshape(audio_embedding.size(0), -1)
-    
-    # Normalize the tensors
-    face_normalized = F.normalize(face_flatten, p=2, dim=1)
-    audio_normalized = F.normalize(audio_flatten, p=2, dim=1)
-    
-    # Compute the cosine similarity
-    cosine_similarity = F.cosine_similarity(face_normalized, audio_normalized, dim=1)
-    
-    # Compute the cosine similarity loss (1 - cosine_similarity)
-    cosine_similarity_loss = 1 - cosine_similarity
-    
-    # Compute the average loss over the batch
-    average_loss = torch.mean(cosine_similarity_loss)
-    
-    return average_loss
+    loss = 1 - cosine_sim.mean()
+    return loss
 
 def save_sample_images(x, g, gt, global_step, checkpoint_dir):
     '''
@@ -302,9 +279,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
                 running_l1_loss += l1loss.item()
                 
-                #cossine_loss = cosine_similarity_loss(g, audio_embedding)
+                cossine_loss = compute_cosine_similarity(audio_embedding, face_embedding)
                 
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + tempora_loss + bottom_loss #+ 0.05 * cossine_loss
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + tempora_loss + bottom_loss + 0.05 * cossine_loss
 
               #loss = loss / 20
               loss.backward()

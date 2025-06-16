@@ -132,6 +132,9 @@ class ResUNet384V3(nn.Module):
         self.face_pos_encoder = LearnablePositionalEncoding2D(d_model=128, max_h=12, max_w=12, dropout=0.1)
         self.audio_pos_encoder = LearnablePositionalEncoding2D(d_model=128, max_h=12, max_w=12, dropout=0.1)
         
+        self.audio_proj = nn.Linear(256, 256)
+        self.face_proj = nn.Linear(384, 256)
+        
     def construct_encoder_layers(self, num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3, add_pos_encoding=False, pos_h=0, pos_w=0, pos_d_model=64):
         layers = []
         padding = 1
@@ -358,10 +361,9 @@ class ResUNet384V3(nn.Module):
 
         #cat3_with_skip = torch.cat([cat3, deface3], dim=1)
         deface2 = self.face_decoder2(cat3)
-        
+                
         cat2 = torch.cat([deface2, face2_full], dim=1)
         cat2 = self.fd_conv2(cat2)
-        
         
         deface1 = self.face_decoder1(cat2)
         
@@ -405,6 +407,13 @@ class ResUNet384V3(nn.Module):
             outputs = torch.stack(x, dim=2)
         else:
             outputs = x
+        
+        adaptive_pool = nn.AdaptiveAvgPool2d((1, 1))
+        audio_pooled = adaptive_pool(audio_adpter1_emb).view(expanded_B, 256)      # [5, 256]
+        frames_pooled = adaptive_pool(deface3).view(expanded_B, 384)  # [5, 384]
+    
+        audio_projection = self.audio_proj(audio_pooled)
+        face_projection = self.face_proj(frames_pooled)
             
-        return outputs, deface5, None
+        return outputs, face_projection, audio_projection
 
