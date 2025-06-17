@@ -2,7 +2,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 import torchvision.models as models
-from .cross_attention import CrossAttention
+from .transformer_syncnet import LearnablePositionalEncoding2D
+
 
 def modify_efficientnet_conv1(effnet, in_channels):
     """
@@ -54,39 +55,35 @@ class TransformerEfficientNetB3Syncnet(nn.Module):
         super(TransformerEfficientNetB3Syncnet, self).__init__()
         
         # Face Encoder
-        self.face_encoder = models.efficientnet_b3(pretrained=True)
-        self.face_encoder.classifier = nn.Identity()
+        self.face_efficientnet = models.efficientnet_b3(pretrained=True)
+        self.face_encoder = self.face_efficientnet.features
         
         # Audio Encoder
-        self.audio_encoder = models.efficientnet_b3(pretrained=True)
-        self.audio_encoder.features[0][0] = modify_efficientnet_conv1(self.audio_encoder, in_channels=1)
-        self.audio_encoder.classifier = nn.Identity()
+        self.audio_efficientnet = models.efficientnet_b3(pretrained=True)
+        self.audio_efficientnet.features[0][0] = modify_efficientnet_conv1(self.audio_efficientnet, in_channels=1)
+        self.audio_encoder = self.audio_efficientnet.features
         
         # Projection Layers (optional, to match embed_dim)
-        audio_scale_factor = 1000
+        audio_scale_factor = 500
         num_of_frames = 5
         audio_embed_dim = int(audio_scale_factor/num_of_frames)
         
-        self.face_proj = nn.Linear(1536, embed_dim)
-        self.audio_proj = nn.Linear(1536, audio_scale_factor) # Can be divide by 5
+        self.face_proj = nn.Conv2d(1536, 500, 3, 2)
+        self.audio_proj = nn.Conv2d(1536, 500, 1, 1) # Can be divide by 5
+        self.combine_proj = nn.Linear(5300, 512)
+        
+        self.face_pos_encoder = LearnablePositionalEncoding2D(d_model=500, max_h=2, max_w=5, dropout=0.05)
+        self.audio_pos_encoder = LearnablePositionalEncoding2D(d_model=500, max_h=5, max_w=1, dropout=0.05)
+        
+        # 新增：各自模态的 self-attention 层
+        self.face_self_attn = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=512, nhead=num_heads, dropout=0.1, activation='gelu'),
+            num_layers=4
+        )
         
                 
-        # 新增：各自模态的 self-attention 层
-        self.face_self_attn = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads)
-        
-        self.audio_self_attn = nn.MultiheadAttention(embed_dim=audio_embed_dim, num_heads=num_heads)
-        
         self.fuse_proj = nn.Linear(456, embed_dim*2)
         
-        self.cross_attn_layers = nn.ModuleList([
-            nn.MultiheadAttention(embed_dim * 2, num_heads, dropout=dropout) 
-            for _ in range(num_cross_attn_layers)
-        ])
-        
-        self.layer_norms = nn.ModuleList([
-            nn.LayerNorm(embed_dim*2) for _ in range(num_cross_attn_layers)
-        ])
-                
         
         # Final classification head.
         # We pool tokens for each modality separately, then concatenate their global features.
@@ -107,48 +104,29 @@ class TransformerEfficientNetB3Syncnet(nn.Module):
         batch_size = face.shape[0]
         
         # --- Process audio modality ---
-        audio_embedding = self.audio_encoder(audio) # (batch_size, 1536)
+        audio_embedding = self.audio_encoder(audio)
                 
 
         ### ---视觉分支--- ###        
         face_embedding = face.view(batch_size * num_of_frames ,3 ,192 ,384)
-        
+                
         # Encode face and audio
-        face_embedding = self.face_encoder(face_embedding)    # (batch_size, 1536)
+        face_embedding = self.face_encoder(face_embedding) 
+        face_embedding = self.face_proj(face_embedding)
+        face_embedding = self.face_pos_encoder(face_embedding)
         
-        # Project embeddings to common dimension
-        face_proj = self.face_proj(face_embedding)   # (batch_size, embed_dim)
-        audio_proj = self.audio_proj(audio_embedding) # (batch_size, embed_dim)
-        
+        audio_proj = self.audio_proj(audio_embedding)
+        audio_proj = self.audio_pos_encoder(audio_proj)
+        audio_proj = audio_proj.view(batch_size * num_of_frames, 1 ,5, 60)
                 
-        face_seq = face_proj.view(batch_size, num_of_frames, -1).permute(1, 0, 2)
-        audio_seq = audio_proj.view(batch_size, 5, -1).permute(1, 0, 2)
-        
-        face_self_out, _ = self.face_self_attn(
-            query=face_seq,
-            key=face_seq,
-            value=face_seq
-        )
-        
-        # Audio 的 self-attention
-        audio_self_out, _ = self.audio_self_attn(
-            query=audio_seq,
-            key=audio_seq,
-            value=audio_seq
-        )
-
-        # --- 合并特征 ---
-        combined = torch.cat((face_self_out, audio_self_out), dim=2)  # 沿特征维度拼接
+        face_seq = face_embedding.view(batch_size, num_of_frames, -1).permute(1, 0, 2)
+        audio_seq = audio_proj.view(batch_size, num_of_frames, -1).permute(1, 0, 2)
                 
-        combined = self.fuse_proj(combined)
+        concated = torch.cat([face_seq, audio_seq], dim=2)
         
-        attn_output = combined
-        
-        for layer, layer_norm in zip(self.cross_attn_layers, self.layer_norms):
-            # Apply multi-head attention
-            attn_output, _ = layer(attn_output, combined, combined)
-            # Apply LayerNorm after attention
-            attn_output = layer_norm(attn_output + combined)
+        combined = self.combine_proj(concated)
+                
+        attn_output = self.face_self_attn(combined)
         
         attn_output = attn_output.permute(1, 0, 2).reshape(batch_size, -1)
         
