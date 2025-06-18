@@ -279,9 +279,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
                 running_l1_loss += l1loss.item()
                 
-                cossine_loss = compute_cosine_similarity(audio_embedding, face_embedding)
+                #cossine_loss = compute_cosine_similarity(audio_embedding, face_embedding)
                 
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + tempora_loss + bottom_loss + 0.05 * cossine_loss
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss #+ tempora_loss + bottom_loss + 0.05 * cossine_loss
 
               #loss = loss / 20
               loss.backward()
@@ -316,7 +316,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, trepa_loss: {tempora_loss:.6f}, bottom: {bottom_loss.item():.6f}, cosine: {cossine_loss.item():.5f}, LR: {current_lr:.7f}")
+              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, bottom: {bottom_loss.item():.6f}, LR: {current_lr:.7f}")
               #prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Trep Loss: {tempora_loss.item():.5f}, Cos Loss: {cossine_loss.item():.5f} LR: {current_lr:.7f}")
               
               metrics = {
@@ -326,7 +326,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   "train/disc_loss": avg_disc_loss,
                   "train/bottom_loss": bottom_loss.item(),
                   # "train/tempora_loss": tempora_loss.item(),
-                  "train/cosine_loss": cossine_loss.item(),
+                  #"train/cosine_loss": cossine_loss.item(),
                   "params/step": global_step,
                   "params/learning_rate": current_lr,
                   "params/l1_wt": hparams.l1_wt,
