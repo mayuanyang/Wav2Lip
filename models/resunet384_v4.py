@@ -61,127 +61,7 @@ class CrossAttentionBlock(nn.Module):
         return output
 
 class SparseSelfAttentionBlock(nn.Module):
-    def __init__(self, in_channels, num_heads, window_size, dropout=0.1):
-        super().__init__()
-        assert in_channels % num_heads == 0, "in_channels must be divisible by num_heads"
-        self.in_channels = in_channels
-        self.num_heads = num_heads
-        self.head_dim = in_channels // num_heads
-        self.window_size = window_size # For sparse attention, e.g., (8, 8) or (16, 16)
-        
-        self.qkv_proj = nn.Linear(in_channels, in_channels * 3)
-        self.out_proj = nn.Linear(in_channels, in_channels)
-        self.dropout = nn.Dropout(dropout)
-        
-        self.norm1 = nn.LayerNorm(in_channels)
-        self.norm2 = nn.LayerNorm(in_channels)
-        self.ffn = nn.Sequential(
-            nn.Linear(in_channels, in_channels * 4),
-            nn.GELU(),
-            nn.Linear(in_channels * 4, in_channels),
-            nn.Dropout(dropout)
-        )
-
-    def forward(self, x):
-        # x: (B, C, H, W)
-        B, C, H, W = x.shape
-        
-        # Flatten and permute for attention (B, H*W, C)
-        x_flat = x.view(B, C, -1).permute(0, 2, 1) # (B, N, C) where N = H*W
-        
-        # Residual connection
-        residual = x_flat
-        
-        # LayerNorm before QKV projection (common in Pre-LN transformers)
-        x_norm = self.norm1(x_flat)
-
-        # QKV projection
-        qkv = self.qkv_proj(x_norm).chunk(3, dim=-1)
-        q, k, v = map(lambda t: t.view(B, -1, self.num_heads, self.head_dim).transpose(1, 2), qkv)
-        # q, k, v: (B, num_heads, N, head_dim)
-
-        # Apply sparse attention mask
-        # This is a simplified block-wise local attention.
-        # More complex sparse attention patterns (e.g., dilated, strided) would require
-        # more sophisticated mask generation or specialized kernels.
-        # For a simple local attention:
-        # We need to reshape q, k, v into blocks
-        
-        # Reshape to (B * num_heads, H, W, head_dim) for easier windowing
-        q_reshaped = q.transpose(1, 2).reshape(B * self.num_heads, H, W, self.head_dim)
-        k_reshaped = k.transpose(1, 2).reshape(B * self.num_heads, H, W, self.head_dim)
-        v_reshaped = v.transpose(1, 2).reshape(B * self.num_heads, H, W, self.head_dim)
-
-        output_patches = []
-        # Simplified windowing: iterate through non-overlapping windows
-        for i in range(0, H, self.window_size[0]):
-            for j in range(0, W, self.window_size[1]):
-                h_slice = slice(i, min(i + self.window_size[0], H))
-                w_slice = slice(j, min(j + self.window_size[1], W))
-
-                q_patch = q_reshaped[:, h_slice, w_slice, :].reshape(B * self.num_heads, -1, self.head_dim)
-                k_patch = k_reshaped[:, h_slice, w_slice, :].reshape(B * self.num_heads, -1, self.head_dim)
-                v_patch = v_reshaped[:, h_slice, w_slice, :].reshape(B * self.num_heads, -1, self.head_dim)
-                
-                # Perform attention within the window
-                attn_scores = torch.matmul(q_patch, k_patch.transpose(-2, -1)) / math.sqrt(self.head_dim)
-                attn_probs = F.softmax(attn_scores, dim=-1)
-                attn_output_patch = torch.matmul(attn_probs, v_patch)
-                
-                # Reshape back to patch size and append
-                output_patches.append(attn_output_patch.view(B * self.num_heads, h_slice.stop - h_slice.start, w_slice.stop - w_slice.start, self.head_dim))
-        
-        # Reconstruct the full attention output
-        # This part needs careful reconstruction based on how patches were extracted
-        # A more robust implementation would use unfold/fold or a custom kernel.
-        # For simplicity, let's just do a dummy reconstruction assuming perfect tiling for now.
-        # This is just a placeholder and would need a proper `fold` operation.
-        
-        # Let's simplify the sparse attention for this example:
-        # Instead of full windowing, we'll implement a "dilated" or "strided" attention concept
-        # that allows for long-range dependency but is still sparse.
-        # A true sparse attention implementation is complex and often uses specialized libraries
-        # like `xformers` or `flash_attention`.
-        
-        # For demonstration purposes, let's just make it a standard MultiheadAttention
-        # for now and note where a sparse mask would be applied.
-        # You'd need to generate an `attn_mask` for MHA.
-
-        # Reverting to full self-attention for easier demonstration of structure
-        # A sparse mask would be passed to `attn_mask` in self.mha call.
-        attn_output, _ = self.mha(query=q.transpose(1,2).reshape(B, H*W, C), # (B, N, C)
-                                  key=k.transpose(1,2).reshape(B, H*W, C),
-                                  value=v.transpose(1,2).reshape(B, H*W, C))
-        
-        # Instead of the above complex reconstruction, if you want a *simple* sparse
-        # self-attention that's not full windowed, you'd pass a custom mask:
-        # attn_output, _ = self.mha(query=q, key=k, value=v, attn_mask=sparse_mask)
-        # Generating `sparse_mask` is the hard part for efficient sparse attention.
-        
-        # For this example, I'll modify SparseSelfAttentionBlock to be a standard MHA for now,
-        # but the `window_size` parameter implies a sparse strategy.
-        # Let's make it a general SelfAttention and note the sparse modification.
-
-        # Re-implementing with standard MHA and mentioning sparse part:
-        q_kv_flat = x_norm
-        
-        attn_output, _ = self.mha(query=q_kv_flat, key=q_kv_flat, value=q_kv_flat)
-        # To make it sparse self-attention, you would pass an `attn_mask` here.
-        # Example: `attn_mask = generate_sparse_mask(H*W, H*W, window_size)`
-        # `generate_sparse_mask` is non-trivial and depends on the sparsity pattern.
-
-        output = self.dropout(self.out_proj(attn_output))
-        
-        # Add residual connection
-        output = self.norm2(output + residual)
-        
-        # FFN
-        output = self.ffn(output) + output # Another residual connection
-
-        # Reshape back to (B, C, H, W)
-        output = output.permute(0, 2, 1).view(B, C, H, W)
-        return output
-
+    
     # MultiheadAttention for SparseSelfAttentionBlock (will be used internally)
     # This is a bit redundant with the above, but illustrates the pattern.
     # In a real implementation, you'd just use a custom attention function or library.
@@ -197,15 +77,70 @@ class SparseSelfAttentionBlock(nn.Module):
         self.norm1 = nn.LayerNorm(in_channels)
         self.norm2 = nn.LayerNorm(in_channels)
         self.ffn = nn.Sequential(
-            nn.Linear(in_channels, in_channels * 4),
+            nn.Linear(in_channels, in_channels * 2),
             nn.GELU(),
-            nn.Linear(in_channels * 4, in_channels),
+            nn.Linear(in_channels * 2, in_channels),
             nn.Dropout(dropout)
         )
         self.qkv_proj = nn.Linear(in_channels, in_channels * 3) # Combined QKV projection
         self.out_proj = nn.Linear(in_channels, in_channels) # Output projection
         self.dropout_layer = nn.Dropout(dropout)
 
+    def generate_dilated_attention_mask(self, H, W, window_size, dilation, device, mask_value=float('-inf')):
+        """
+        Generates a 2D dilated attention mask for a flattened feature map.
+
+        Args:
+            H (int): Height of the feature map.
+            W (int): Width of the feature map.
+            window_size (tuple): (win_h, win_w) for the local attention window.
+                                win_h and win_w should be odd integers.
+            dilation (int): The dilation rate for sparse attention.
+            device (torch.device): The device to create the mask on.
+            mask_value (float or bool): The value to use for masked (disallowed) connections.
+                                        -float('inf') for additive attention (e.g., softmax(scores + mask))
+                                        -True for boolean mask (e.g., MultiheadAttention(attn_mask=True))
+
+        Returns:
+            torch.Tensor: A (H*W) x (H*W) attention mask.
+                          If mask_value is -inf, 0 allows attention.
+                          If mask_value is True, False allows attention.
+        """
+        
+        N = H * W
+        mask = torch.full((N, N), mask_value, device=device, dtype=torch.float32) # Or torch.bool if mask_value is True/False
+
+        half_win_h = window_size[0] // 2
+        half_win_w = window_size[1] // 2
+
+        for q_idx in range(N):
+            qh, qw = divmod(q_idx, W) # Query (row, col)
+
+            # 1. Local Window Attention
+            for kh in range(max(0, qh - half_win_h), min(H, qh + half_win_h + 1)):
+                for kw in range(max(0, qw - half_win_w), min(W, qw + half_win_w + 1)):
+                    k_idx = kh * W + kw
+                    mask[q_idx, k_idx] = 0.0 # Allow attention
+
+            # 2. Dilated Attention (Example: simple row and column dilation)
+            # Dilated rows
+            for k_offset in range(-H + 1, H): # Iterate over possible row offsets
+                kh = qh + k_offset
+                if 0 <= kh < H and abs(k_offset) % dilation == 0 and k_offset != 0: # Ensure within bounds and on dilated step
+                    kw = qw # Same column
+                    k_idx = kh * W + kw
+                    mask[q_idx, k_idx] = 0.0
+
+            # Dilated columns
+            for k_offset in range(-W + 1, W): # Iterate over possible col offsets
+                kw = qw + k_offset
+                if 0 <= kw < W and abs(k_offset) % dilation == 0 and k_offset != 0: # Ensure within bounds and on dilated step
+                    kh = qh # Same row
+                    k_idx = kh * W + kw
+                    mask[q_idx, k_idx] = 0.0
+
+        return mask
+  
     def forward(self, x):
         # x: (B, C, H, W)
         B, C, H, W = x.shape
@@ -246,9 +181,10 @@ class SparseSelfAttentionBlock(nn.Module):
         # would inject its logic here.
         
         # Placeholder for sparse_mask (needs actual implementation based on desired sparsity)
-        sparse_mask = None # Replace with actual sparse mask generation if needed
+        #sparse_mask = self.generate_dilated_attention_mask(H, W, self.window_size, 2, x.device) # Replace with actual sparse mask generation if needed
                            # e.g., for local attention within a window_size, this mask would be block-diagonal.
 
+        sparse_mask = None
         attn_output, _ = self.mha(query=q, key=k, value=v, attn_mask=sparse_mask)
         
         output = self.dropout_layer(self.out_proj(attn_output))
@@ -281,13 +217,13 @@ class ResUNet384V4(nn.Module):
         }
         
         # --- Face Encoder ---
-        self.face_encoder1_full = self.construct_encoder_layers(2, 12, 64, 1, kernel=3)
+        self.face_encoder1_full = self.construct_encoder_layers(3, 12, 64, 1, kernel=3)
         self.face_pos_encoder1 = LearnablePositionalEncoding2D(d_model=64, max_h=384, max_w=384, dropout=0.1)
-        self.fe_down1_full = self.construct_encoder_layers(2, 64, 64, 2)
+        self.fe_down1_full = self.construct_encoder_layers(3, 64, 64, 2)
         
-        self.face_encoder2_full = self.construct_encoder_layers(2, 64, 128, 1)
+        self.face_encoder2_full = self.construct_encoder_layers(3, 64, 128, 1)
         self.face_pos_encoder2 = LearnablePositionalEncoding2D(d_model=128, max_h=192, max_w=192, dropout=0.1) # After downsample
-        self.fe_down2_full = self.construct_encoder_layers(2, 128, 128, 2)
+        self.fe_down2_full = self.construct_encoder_layers(3, 128, 128, 2)
 
         # Cross-Attention & Sparse Self-Attention for Feature Fusion
         # Dimensions for fed2 (face) and audio_emb
@@ -320,16 +256,16 @@ class ResUNet384V4(nn.Module):
         )
         self.face_pos_encoder3 = LearnablePositionalEncoding2D(d_model=256, max_h=96, max_w=96, dropout=0.1) # After fe_down3 (384/8 = 48)
 
-        self.face_encoder3 = self.construct_encoder_layers(2, 384, 256, 1) # Input channels still 384
-        self.fe_down3 = self.construct_encoder_layers(2, 256, 256, 2)
+        self.face_encoder3 = self.construct_encoder_layers(3, 384, 256, 1) # Input channels still 384
+        self.fe_down3 = self.construct_encoder_layers(3, 256, 256, 2)
 
-        self.face_encoder4 = self.construct_encoder_layers(2, 256, 512, 1)
+        self.face_encoder4 = self.construct_encoder_layers(3, 256, 512, 1)
         self.face_pos_encoder4 = LearnablePositionalEncoding2D(d_model=512, max_h=48, max_w=48, dropout=0.1) # After fe_down4 (384/16 = 24)
-        self.fe_down4 = self.construct_encoder_layers(2, 512, 512, 2)
+        self.fe_down4 = self.construct_encoder_layers(3, 512, 512, 2)
         
-        self.face_encoder5 = self.construct_encoder_layers(2, 512, 512, 1)
+        self.face_encoder5 = self.construct_encoder_layers(3, 512, 512, 1)
         self.face_pos_encoder5 = LearnablePositionalEncoding2D(d_model=512, max_h=24, max_w=24, dropout=0.1) # After fe_down5 (384/32 = 12)
-        self.fe_down5 = self.construct_encoder_layers(2, 512, 512, 2)
+        self.fe_down5 = self.construct_encoder_layers(3, 512, 512, 2)
 
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
@@ -348,26 +284,26 @@ class ResUNet384V4(nn.Module):
         self.audio_pos_encoder_ca = LearnablePositionalEncoding2D(d_model=256, max_h=96, max_w=96, dropout=0.1)
 
 
-        self.bottlenet = self.construct_encoder_layers(2, 512, 512, 1, True)
+        self.bottlenet = self.construct_encoder_layers(3, 512, 512, 1, True)
         self.bottleneck_pos_encoder = LearnablePositionalEncoding2D(d_model=512, max_h=12, max_w=12, dropout=0.1) # 384/64 = 6
         
         # Decoders (channels adjusted for skip connections if needed)
-        self.face_decoder5 = self.construct_decoder_layers(2, 512, 256, 2)
-        self.fd_conv5 = self.construct_encoder_layers(2, 768, 256, 1) # 256 (deface5) + 512 (face5) = 768
+        self.face_decoder5 = self.construct_decoder_layers(3, 512, 256, 2)
+        self.fd_conv5 = self.construct_encoder_layers(3, 768, 256, 1) # 256 (deface5) + 512 (face5) = 768
         
-        self.face_decoder4 = self.construct_decoder_layers(2, 256, 128, 2)
-        self.fd_conv4 = self.construct_encoder_layers(2, 640, 320, 1) # 128 (deface4) + 512 (face4) = 640
+        self.face_decoder4 = self.construct_decoder_layers(3, 256, 128, 2)
+        self.fd_conv4 = self.construct_encoder_layers(3, 640, 320, 1) # 128 (deface4) + 512 (face4) = 640
         
-        self.face_decoder3 = self.construct_decoder_layers(2, 320, 160, 2)
-        self.fd_conv3 = self.construct_encoder_layers(2, 416, 256, 1) # 160 (deface3) + 256 (face3) = 416
+        self.face_decoder3 = self.construct_decoder_layers(3, 320, 160, 2)
+        self.fd_conv3 = self.construct_encoder_layers(3, 416, 256, 1) # 160 (deface3) + 256 (face3) = 416
         
-        self.face_decoder2 = self.construct_decoder_layers(2, 256, 128, 2)
-        self.fd_conv2 = self.construct_encoder_layers(2, 256, 128, 1) # 128 (deface2) + 128 (face2) = 256
+        self.face_decoder2 = self.construct_decoder_layers(3, 256, 128, 2)
+        self.fd_conv2 = self.construct_encoder_layers(3, 256, 128, 1) # 128 (deface2) + 128 (face2) = 256
 
-        self.face_decoder1 = self.construct_decoder_layers(2, 128, 128, 2)
-        self.face_decoder0 = self.construct_encoder_layers(2, 128, 128, 1) # This seems like an extra layer, no skip connection here
+        self.face_decoder1 = self.construct_decoder_layers(3, 128, 128, 2)
+        self.face_decoder0 = self.construct_encoder_layers(3, 128, 128, 1) # This seems like an extra layer, no skip connection here
         
-        self.fd_conv1 = self.construct_encoder_layers(2, 192, 64, 1) # 128 (deface1 from prev_decoder0) + 64 (face1) = 192
+        self.fd_conv1 = self.construct_encoder_layers(3, 192, 64, 1) # 128 (deface1 from prev_decoder0) + 64 (face1) = 192
 
         self.output_block = nn.Sequential(
             nn.Conv2d(64, 3, kernel_size=1, stride=1, padding=0),
