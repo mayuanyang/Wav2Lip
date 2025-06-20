@@ -201,7 +201,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     print('The learning rate is: {0}'.format(current_lr))
 
     # Added by eddy
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=patience, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=patience)
 
     # Initialize LPIPS model
     lpips_loss = lpips.LPIPS(net='vgg').to(device)  # You can choose 'alex', 'vgg', or 'squeeze'
