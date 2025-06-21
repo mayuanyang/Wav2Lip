@@ -207,6 +207,30 @@ class SparseSelfAttentionBlock(nn.Module):
 def linear_schedule():
     return torch.tensor([0.6, 0.7, 0.8, 0.9])
 
+def construct_encoder_layers(num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3):
+    layers = []
+    padding = 1
+    if kernel == 7:
+      padding = 3
+    # First layer
+    layers.append(Conv2d(input_channels, output_channels, kernel_size=kernel, stride=first_layer_stride, padding=padding))
+    # Subsequent layers
+    for _ in range(num_of_layers - 1):
+        layers.append(Conv2d(output_channels, output_channels, kernel_size=kernel, stride=1, padding=padding, residual=True))
+    return nn.Sequential(*layers)
+  
+def construct_decoder_layers(num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3):
+    layers = []
+    padding = 1
+    if kernel == 7:
+      padding = 3
+    # First layer
+    layers.append(Conv2dTranspose(input_channels, output_channels, kernel_size=kernel, stride=first_layer_stride, padding=padding, output_padding=1))
+    # Subsequent layers
+    for _ in range(num_of_layers - 1):
+        layers.append(Conv2d(output_channels, output_channels, kernel_size=kernel, stride=1, padding=padding, residual=True))
+    return nn.Sequential(*layers)
+  
 class ResUNet384V4(nn.Module):
     def __init__(self):
         super(ResUNet384V4, self).__init__()
@@ -222,13 +246,13 @@ class ResUNet384V4(nn.Module):
         }
         
         # --- Face Encoder ---
-        self.face_encoder1_full = self.construct_encoder_layers(3, 12, 64, 1, kernel=3)
+        self.face_encoder1_full = construct_encoder_layers(3, 12, 64, 1, kernel=3)
         self.face_pos_encoder1 = LearnablePositionalEncoding2D(d_model=64, max_h=384, max_w=384, dropout=0.1)
-        self.fe_down1_full = self.construct_encoder_layers(3, 64, 64, 2)
+        self.fe_down1_full = construct_encoder_layers(3, 64, 64, 2)
         
-        self.face_encoder2_full = self.construct_encoder_layers(3, 64, 128, 1)
+        self.face_encoder2_full = construct_encoder_layers(3, 64, 128, 1)
         self.face_pos_encoder2 = LearnablePositionalEncoding2D(d_model=128, max_h=192, max_w=192, dropout=0.1) # After downsample
-        self.fe_down2_full = self.construct_encoder_layers(3, 128, 128, 2)
+        self.fe_down2_full = construct_encoder_layers(3, 128, 128, 2)
 
         # Cross-Attention & Sparse Self-Attention for Feature Fusion
         # Dimensions for fed2 (face) and audio_emb
@@ -271,16 +295,16 @@ class ResUNet384V4(nn.Module):
         
         self.face_pos_encoder3 = LearnablePositionalEncoding2D(d_model=256, max_h=96, max_w=96, dropout=0.1) # After fe_down3 (384/8 = 48)
 
-        self.face_encoder3 = self.construct_encoder_layers(3, 384, 256, 1) # Input channels still 384
-        self.fe_down3 = self.construct_encoder_layers(3, 256, 256, 2)
+        self.face_encoder3 = construct_encoder_layers(3, 384, 256, 1) # Input channels still 384
+        self.fe_down3 = construct_encoder_layers(3, 256, 256, 2)
 
-        self.face_encoder4 = self.construct_encoder_layers(3, 256, 512, 1)
+        self.face_encoder4 = construct_encoder_layers(3, 256, 512, 1)
         self.face_pos_encoder4 = LearnablePositionalEncoding2D(d_model=512, max_h=48, max_w=48, dropout=0.1) # After fe_down4 (384/16 = 24)
-        self.fe_down4 = self.construct_encoder_layers(3, 512, 512, 2)
+        self.fe_down4 = construct_encoder_layers(3, 512, 512, 2)
         
-        self.face_encoder5 = self.construct_encoder_layers(3, 512, 512, 1)
+        self.face_encoder5 = construct_encoder_layers(3, 512, 512, 1)
         self.face_pos_encoder5 = LearnablePositionalEncoding2D(d_model=512, max_h=24, max_w=24, dropout=0.1) # After fe_down5 (384/32 = 12)
-        self.fe_down5 = self.construct_encoder_layers(3, 512, 512, 2)
+        self.fe_down5 = construct_encoder_layers(3, 512, 512, 2)
 
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
@@ -299,59 +323,34 @@ class ResUNet384V4(nn.Module):
         self.audio_pos_encoder_ca = LearnablePositionalEncoding2D(d_model=256, max_h=96, max_w=96, dropout=0.1)
 
 
-        self.bottlenet = self.construct_encoder_layers(3, 512, 512, 1, True)
+        self.bottlenet = construct_encoder_layers(3, 512, 512, 1, True)
         self.bottleneck_pos_encoder = LearnablePositionalEncoding2D(d_model=512, max_h=12, max_w=12, dropout=0.1) # 384/64 = 6
         
         # Decoders (channels adjusted for skip connections if needed)
-        self.face_decoder5 = self.construct_decoder_layers(3, 512, 256, 2)
-        self.fd_conv5 = self.construct_encoder_layers(3, 768, 256, 1) # 256 (deface5) + 512 (face5) = 768
+        self.face_decoder5 = construct_decoder_layers(3, 512, 256, 2)
+        self.fd_conv5 = construct_encoder_layers(3, 768, 256, 1) # 256 (deface5) + 512 (face5) = 768
         
-        self.face_decoder4 = self.construct_decoder_layers(3, 256, 128, 2)
-        self.fd_conv4 = self.construct_encoder_layers(3, 640, 320, 1) # 128 (deface4) + 512 (face4) = 640
+        self.face_decoder4 = construct_decoder_layers(3, 256, 128, 2)
+        self.fd_conv4 = construct_encoder_layers(3, 640, 320, 1) # 128 (deface4) + 512 (face4) = 640
         
-        self.face_decoder3 = self.construct_decoder_layers(3, 320, 160, 2)
-        self.fd_conv3 = self.construct_encoder_layers(3, 416, 256, 1) # 160 (deface3) + 256 (face3) = 416
+        self.face_decoder3 = construct_decoder_layers(3, 320, 160, 2)
+        self.fd_conv3 = construct_encoder_layers(3, 416, 256, 1) # 160 (deface3) + 256 (face3) = 416
         
-        self.face_decoder2 = self.construct_decoder_layers(3, 256, 128, 2)
-        self.fd_conv2 = self.construct_encoder_layers(3, 256, 128, 1) # 128 (deface2) + 128 (face2) = 256
+        self.face_decoder2 = construct_decoder_layers(3, 256, 128, 2)
+        self.fd_conv2 = construct_encoder_layers(3, 256, 128, 1) # 128 (deface2) + 128 (face2) = 256
 
-        self.face_decoder1 = self.construct_decoder_layers(3, 128, 128, 2)
-        self.face_decoder0 = self.construct_encoder_layers(3, 128, 128, 1) # This seems like an extra layer, no skip connection here
+        self.face_decoder1 = construct_decoder_layers(3, 128, 128, 2)
+        self.face_decoder0 = construct_encoder_layers(3, 128, 128, 1) # This seems like an extra layer, no skip connection here
         
-        self.fd_conv1 = self.construct_encoder_layers(3, 192, 64, 1) # 128 (deface1 from prev_decoder0) + 64 (face1) = 192
+        self.fd_conv1 = construct_encoder_layers(3, 192, 64, 1) # 128 (deface1 from prev_decoder0) + 64 (face1) = 192
 
         self.output_block = nn.Sequential(
             nn.Conv2d(64, 3, kernel_size=1, stride=1, padding=0),
             nn.Sigmoid()
         )
         
-        # Removed redundant positional encoders
-        # self.face_pos_encoder = LearnablePositionalEncoding2D(d_model=128, max_h=12, max_w=12, dropout=0.1)
-        # self.audio_pos_encoder = LearnablePositionalEncoding2D(d_model=128, max_h=12, max_w=12, dropout=0.1)
+        self.face_enhancer = FaceEnhencer()
         
-    def construct_encoder_layers(self, num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3):
-        layers = []
-        padding = 1
-        if kernel == 7:
-          padding = 3
-        # First layer
-        layers.append(Conv2d(input_channels, output_channels, kernel_size=kernel, stride=first_layer_stride, padding=padding))
-        # Subsequent layers
-        for _ in range(num_of_layers - 1):
-            layers.append(Conv2d(output_channels, output_channels, kernel_size=kernel, stride=1, padding=padding, residual=True))
-        return nn.Sequential(*layers)
-
-    def construct_decoder_layers(self, num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3):
-        layers = []
-        padding = 1
-        if kernel == 7:
-          padding = 3
-        # First layer
-        layers.append(Conv2dTranspose(input_channels, output_channels, kernel_size=kernel, stride=first_layer_stride, padding=padding, output_padding=1))
-        # Subsequent layers
-        for _ in range(num_of_layers - 1):
-            layers.append(Conv2d(output_channels, output_channels, kernel_size=kernel, stride=1, padding=padding, residual=True))
-        return nn.Sequential(*layers)
     
     def generate_ellipse_mask(self, h, w, split_idx, device):
         """生成下半部分的椭圆遮罩"""
@@ -408,7 +407,7 @@ class ResUNet384V4(nn.Module):
         t = torch.multinomial(probabilities, expanded_B, replacement=True)
         return t
                 
-    def forward(self, audio_sequences, face_sequences, step=None):
+    def forward(self, audio_sequences, face_sequences, step=None, train_face_enhancer=False):
         input_dim_size = len(face_sequences.size())
         B = audio_sequences.size(0)       
         
@@ -500,12 +499,156 @@ class ResUNet384V4(nn.Module):
 
         x = self.output_block(cat1)                     # [B*T, 3, 384, 384]
         
+        if train_face_enhancer:
+          outputs = self.face_enhancer(outputs, audio_emb)
+        
         if input_dim_size > 4:
             x = torch.split(x, B, dim=0)
             outputs = torch.stack(x, dim=2)
         else:
             outputs = x
             
+            
         return outputs, None, None # Returning None for the projections as they are not used in the original forward.
+
+
+class FaceEnhencer(nn.Module):
+    def __init__(self):
+        super(FaceEnhencer, self).__init__()
+        
+        
+        # --- Face Encoder ---
+        self.face_encoder1_full = construct_encoder_layers(3, 3, 32, 1, kernel=3)
+        self.face_pos_encoder1 = LearnablePositionalEncoding2D(d_model=64, max_h=384, max_w=384, dropout=0.1)
+        self.fe_down1_full = construct_encoder_layers(3, 32, 64, 2)
+        
+        self.face_encoder2_full = construct_encoder_layers(3, 64, 128, 1)
+        self.face_pos_encoder2 = LearnablePositionalEncoding2D(d_model=128, max_h=192, max_w=192, dropout=0.1) # After downsample
+        self.fe_down2_full = construct_encoder_layers(3, 128, 128, 2)
+
+        self.face_audio_cross_attention = CrossAttentionBlock(
+            query_dim=128, key_dim=256, value_dim=256, num_heads=8, dropout=0.1
+        )
+        
+        self.sparse_self_attention_block = SparseSelfAttentionBlock(
+            in_channels=256, num_heads=8, window_size=(8, 8), dropout=0.1 # Example window size
+        )
+        
+        self.sparse_self_attention_deface3_block = SparseSelfAttentionBlock(
+            in_channels=320, num_heads=8, window_size=(8, 8), dropout=0.1 # Example window size
+        )
+        
+        self.face_pos_encoder3 = LearnablePositionalEncoding2D(d_model=256, max_h=96, max_w=96, dropout=0.1) # After fe_down3 (384/8 = 48)
+
+        self.face_encoder3 = construct_encoder_layers(3, 384, 256, 1) # Input channels still 384
+        self.fe_down3 = construct_encoder_layers(3, 256, 256, 2)
+
+        self.face_encoder4 = construct_encoder_layers(3, 256, 256, 1)
+        self.face_pos_encoder4 = LearnablePositionalEncoding2D(d_model=256, max_h=48, max_w=48, dropout=0.1) # After fe_down4 (384/16 = 24)
+        self.fe_down4 = construct_encoder_layers(3, 256, 256, 2)
+        
+        self.face_encoder5 = construct_encoder_layers(3, 256, 256, 1)
+        self.face_pos_encoder5 = LearnablePositionalEncoding2D(d_model=256, max_h=24, max_w=24, dropout=0.1) # After fe_down5 (384/32 = 12)
+        self.fe_down5 = construct_encoder_layers(3, 256, 256, 2)
+
+
+        self.bottlenet = construct_encoder_layers(3, 256, 256, 1, True)
+        self.bottleneck_pos_encoder = LearnablePositionalEncoding2D(d_model=256, max_h=12, max_w=12, dropout=0.1) # 384/64 = 6
+        
+        # Decoders (channels adjusted for skip connections if needed)
+        self.face_decoder5 = construct_decoder_layers(3, 256, 256, 2)
+        self.fd_conv5 = construct_encoder_layers(3, 512, 256, 1) # 256 (deface5) + 512 (face5) = 768
+        
+        self.face_decoder4 = construct_decoder_layers(3, 256, 128, 2)
+        self.fd_conv4 = construct_encoder_layers(3, 640, 320, 1) # 128 (deface4) + 512 (face4) = 640
+        
+        self.face_decoder3 = construct_decoder_layers(3, 320, 160, 2)
+        self.fd_conv3 = construct_encoder_layers(3, 416, 256, 1) # 160 (deface3) + 256 (face3) = 416
+        
+        self.face_decoder2 = construct_decoder_layers(3, 256, 128, 2)
+        self.fd_conv2 = construct_encoder_layers(3, 256, 128, 1) # 128 (deface2) + 128 (face2) = 256
+
+        self.face_decoder1 = construct_decoder_layers(3, 128, 128, 2)
+        self.face_decoder0 = construct_encoder_layers(3, 128, 128, 1) # This seems like an extra layer, no skip connection here
+        
+        self.fd_conv1 = construct_encoder_layers(3, 192, 64, 1) # 128 (deface1 from prev_decoder0) + 64 (face1) = 192
+
+        self.output_block = nn.Sequential(
+            nn.Conv2d(64, 3, kernel_size=1, stride=1, padding=0),
+            nn.Sigmoid()
+        )
+    
+    
+                
+    def forward(self, audio_sequences, face_sequences, step=None):
+        input_dim_size = len(face_sequences.size())
+        B = audio_sequences.size(0)       
+        
+        if input_dim_size > 4:
+            audio_sequences = torch.cat([audio_sequences[:, i] for i in range(audio_sequences.size(1))], dim=0)
+            face_sequences = torch.cat([face_sequences[:, :, i] for i in range(face_sequences.size(2))], dim=0)
+
+        # --- Face encoding ---
+        face1 = self.face_encoder1_full(face_sequences) # [B*T, 64, 384, 384]
+        face1 = self.face_pos_encoder1(face1)           # Positional encoding
+        fed1 = self.fe_down1_full(face1)                # [B*T, 64, 192, 192]
+        
+        
+        face2 = self.face_encoder2_full(fed1)           # [B*T, 128, 192, 192]
+        face2 = self.face_pos_encoder2(face2)           # Positional encoding
+        fed2 = self.fe_down2_full(face2)                # [B*T, 128, 96, 96]
+
+        
+        fed2_cat = torch.cat([fed2, audio_sequences], dim=1) # [B*T, 128+256=384, 96, 96]
+
+        face3 = self.face_encoder3(fed2_cat)            # [B*T, 256, 96, 96]
+        face3 = self.face_pos_encoder3(face3)           # Positional encoding
+        fed3 = self.fe_down3(face3)                     # [B*T, 256, 48, 48]
+
+        # --- Sparse Self-Attention ---
+        # Apply sparse self-attention on the combined features at this level
+        fed3_attended = self.sparse_self_attention_block(fed3) # [B*T, 256, 48, 48]
+        # You can add a residual connection here if sparse_self_attention_block doesn't handle it internally
+        fed3 = fed3 + fed3_attended
+
+        face4 = self.face_encoder4(fed3)       # [B*T, 512, 48, 48]
+        face4 = self.face_pos_encoder4(face4)           # Positional encoding
+        fed4 = self.fe_down4(face4)                     # [B*T, 512, 24, 24]
+
+        face5 = self.face_encoder5(fed4)                # [B*T, 512, 24, 24]
+        face5 = self.face_pos_encoder5(face5)           # Positional encoding
+        fed5 = self.fe_down5(face5)                     # [B*T, 512, 12, 12]
+
+        bottleneck_feat = self.bottlenet(fed5)          # [B*T, 512, 12, 12]
+        bottleneck_feat = self.bottleneck_pos_encoder(bottleneck_feat) # Positional encoding
+
+        # === Decoder ===
+        deface5 = self.face_decoder5(bottleneck_feat)   # [B*T, 256, 24, 24]
+        cat5 = torch.cat([deface5, face5], dim=1)       # [B*T, 256+512=768, 24, 24]
+        cat5 = self.fd_conv5(cat5)                      # [B*T, 256, 24, 24]
+
+        deface4 = self.face_decoder4(cat5)              # [B*T, 128, 48, 48]
+        cat4 = torch.cat([deface4, face4], dim=1)       # [B*T, 128+512=640, 48, 48]
+        cat4 = self.fd_conv4(cat4)                      # [B*T, 320, 48, 48]
+        
+        cat4_attended = self.sparse_self_attention_deface3_block(cat4)
+
+        deface3 = self.face_decoder3(cat4 + cat4_attended)              # [B*T, 160, 96, 96]
+        cat3 = torch.cat([deface3, face3], dim=1)       # [B*T, 160+256=416, 96, 96]
+        cat3 = self.fd_conv3(cat3)                      # [B*T, 256, 96, 96]
+
+        deface2 = self.face_decoder2(cat3)              # [B*T, 128, 192, 192]
+        cat2 = torch.cat([deface2, face2], dim=1)       # [B*T, 128+128=256, 192, 192]
+        cat2 = self.fd_conv2(cat2)                      # [B*T, 128, 192, 192]
+
+        deface1 = self.face_decoder1(cat2)              # [B*T, 128, 384, 384]
+        deface1 = self.face_decoder0(deface1)           # [B*T, 128, 384, 384] (no skip here, just further processing)
+        cat1 = torch.cat([deface1, face1], dim=1)       # [B*T, 128+64=192, 384, 384]
+        cat1 = self.fd_conv1(cat1)                      # [B*T, 64, 384, 384]
+
+        x = self.output_block(cat1)                     # [B*T, 3, 384, 384]
+        
+            
+        return x
 
 
