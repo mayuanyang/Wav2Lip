@@ -349,7 +349,7 @@ class ResUNet384V4(nn.Module):
             nn.Sigmoid()
         )
         
-        self.face_enhancer = FaceEnhencer()
+        #self.face_enhancer = FaceEnhencer()
         
     
     def generate_ellipse_mask(self, h, w, split_idx, device):
@@ -499,14 +499,14 @@ class ResUNet384V4(nn.Module):
 
         x = self.output_block(cat1)                     # [B*T, 3, 384, 384]
         
-        if train_face_enhancer:
-          outputs = self.face_enhancer(outputs, audio_emb)
+        # if train_face_enhancer:
+        #   ref_channels = face_sequences[:, 3:, :, :]
+        #   concated = torch.cat([x, ref_channels], dim=1)
+        #   outputs = self.face_enhancer(audio_emb, concated, fed2, fed3, deface2, deface1)
         
         if input_dim_size > 4:
-            x = torch.split(x, B, dim=0)
-            outputs = torch.stack(x, dim=2)
-        else:
-            outputs = x
+            outputs = torch.split(x, B, dim=0)
+            outputs = torch.stack(outputs, dim=2)
             
             
         return outputs, None, None # Returning None for the projections as they are not used in the original forward.
@@ -518,8 +518,8 @@ class FaceEnhencer(nn.Module):
         
         
         # --- Face Encoder ---
-        self.face_encoder1_full = construct_encoder_layers(3, 3, 32, 1, kernel=3)
-        self.face_pos_encoder1 = LearnablePositionalEncoding2D(d_model=64, max_h=384, max_w=384, dropout=0.1)
+        self.face_encoder1_full = construct_encoder_layers(3, 12, 32, 1, kernel=3)
+        self.face_pos_encoder1 = LearnablePositionalEncoding2D(d_model=32, max_h=384, max_w=384, dropout=0.1)
         self.fe_down1_full = construct_encoder_layers(3, 32, 64, 2)
         
         self.face_encoder2_full = construct_encoder_layers(3, 64, 128, 1)
@@ -535,7 +535,7 @@ class FaceEnhencer(nn.Module):
         )
         
         self.sparse_self_attention_deface3_block = SparseSelfAttentionBlock(
-            in_channels=320, num_heads=8, window_size=(8, 8), dropout=0.1 # Example window size
+            in_channels=192, num_heads=8, window_size=(8, 8), dropout=0.1 # Example window size
         )
         
         self.face_pos_encoder3 = LearnablePositionalEncoding2D(d_model=256, max_h=96, max_w=96, dropout=0.1) # After fe_down3 (384/8 = 48)
@@ -560,10 +560,10 @@ class FaceEnhencer(nn.Module):
         self.fd_conv5 = construct_encoder_layers(3, 512, 256, 1) # 256 (deface5) + 512 (face5) = 768
         
         self.face_decoder4 = construct_decoder_layers(3, 256, 128, 2)
-        self.fd_conv4 = construct_encoder_layers(3, 640, 320, 1) # 128 (deface4) + 512 (face4) = 640
+        self.fd_conv4 = construct_encoder_layers(3, 384, 192, 1) # 128 (deface4) + 512 (face4) = 640
         
-        self.face_decoder3 = construct_decoder_layers(3, 320, 160, 2)
-        self.fd_conv3 = construct_encoder_layers(3, 416, 256, 1) # 160 (deface3) + 256 (face3) = 416
+        self.face_decoder3 = construct_decoder_layers(3, 192, 96, 2)
+        self.fd_conv3 = construct_encoder_layers(3, 352, 256, 1) # 160 (deface3) + 256 (face3) = 416
         
         self.face_decoder2 = construct_decoder_layers(3, 256, 128, 2)
         self.fd_conv2 = construct_encoder_layers(3, 256, 128, 1) # 128 (deface2) + 128 (face2) = 256
@@ -571,7 +571,7 @@ class FaceEnhencer(nn.Module):
         self.face_decoder1 = construct_decoder_layers(3, 128, 128, 2)
         self.face_decoder0 = construct_encoder_layers(3, 128, 128, 1) # This seems like an extra layer, no skip connection here
         
-        self.fd_conv1 = construct_encoder_layers(3, 192, 64, 1) # 128 (deface1 from prev_decoder0) + 64 (face1) = 192
+        self.fd_conv1 = construct_encoder_layers(3, 160, 64, 1) # 128 (deface1 from prev_decoder0) + 64 (face1) = 192
 
         self.output_block = nn.Sequential(
             nn.Conv2d(64, 3, kernel_size=1, stride=1, padding=0),
@@ -580,7 +580,7 @@ class FaceEnhencer(nn.Module):
     
     
                 
-    def forward(self, audio_sequences, face_sequences, step=None):
+    def forward(self, audio_sequences, face_sequences, prev_fed2, prev_fed3, prev_deface2, prev_deface1):
         input_dim_size = len(face_sequences.size())
         B = audio_sequences.size(0)       
         
@@ -597,6 +597,7 @@ class FaceEnhencer(nn.Module):
         face2 = self.face_encoder2_full(fed1)           # [B*T, 128, 192, 192]
         face2 = self.face_pos_encoder2(face2)           # Positional encoding
         fed2 = self.fe_down2_full(face2)                # [B*T, 128, 96, 96]
+        fed2 = fed2 + prev_fed2
 
         
         fed2_cat = torch.cat([fed2, audio_sequences], dim=1) # [B*T, 128+256=384, 96, 96]
@@ -604,6 +605,7 @@ class FaceEnhencer(nn.Module):
         face3 = self.face_encoder3(fed2_cat)            # [B*T, 256, 96, 96]
         face3 = self.face_pos_encoder3(face3)           # Positional encoding
         fed3 = self.fe_down3(face3)                     # [B*T, 256, 48, 48]
+        fed3 = fed3 + prev_fed3
 
         # --- Sparse Self-Attention ---
         # Apply sparse self-attention on the combined features at this level
@@ -638,10 +640,12 @@ class FaceEnhencer(nn.Module):
         cat3 = self.fd_conv3(cat3)                      # [B*T, 256, 96, 96]
 
         deface2 = self.face_decoder2(cat3)              # [B*T, 128, 192, 192]
+        deface2 = deface2 + prev_deface2
         cat2 = torch.cat([deface2, face2], dim=1)       # [B*T, 128+128=256, 192, 192]
         cat2 = self.fd_conv2(cat2)                      # [B*T, 128, 192, 192]
 
         deface1 = self.face_decoder1(cat2)              # [B*T, 128, 384, 384]
+        deface1 = deface1 + prev_deface1
         deface1 = self.face_decoder0(deface1)           # [B*T, 128, 384, 384] (no skip here, just further processing)
         cat1 = torch.cat([deface1, face1], dim=1)       # [B*T, 128+64=192, 384, 384]
         cat1 = self.fd_conv1(cat1)                      # [B*T, 64, 384, 384]
