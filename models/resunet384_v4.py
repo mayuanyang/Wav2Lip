@@ -217,6 +217,9 @@ def construct_encoder_layers(num_of_layers, input_channels, output_channels, fir
     # Subsequent layers
     for _ in range(num_of_layers - 1):
         layers.append(Conv2d(output_channels, output_channels, kernel_size=kernel, stride=1, padding=padding, residual=True))
+    
+    if add_spatial:
+        layers.append(SpatialAttention())
     return nn.Sequential(*layers)
   
 def construct_decoder_layers(num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3):
@@ -231,6 +234,22 @@ def construct_decoder_layers(num_of_layers, input_channels, output_channels, fir
         layers.append(Conv2d(output_channels, output_channels, kernel_size=kernel, stride=1, padding=padding, residual=True))
     return nn.Sequential(*layers)
   
+class SpatialAttention(nn.Module):
+    def __init__(self, kernel_size=7):
+        super(SpatialAttention, self).__init__()
+        assert kernel_size in (3, 7), 'kernel size must be 3 or 7'
+        padding = 3 if kernel_size == 7 else 1
+        self.conv1 = nn.Conv2d(2, 1, kernel_size, padding=padding, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        x_att = torch.cat([avg_out, max_out], dim=1)
+        x_att = self.conv1(x_att)
+        x_att = self.sigmoid(x_att)
+        return x + x_att
+      
 class ResUNet384V4(nn.Module):
     def __init__(self):
         super(ResUNet384V4, self).__init__()
@@ -246,13 +265,13 @@ class ResUNet384V4(nn.Module):
         }
         
         # --- Face Encoder ---
-        self.face_encoder1_full = construct_encoder_layers(3, 12, 64, 1, kernel=3)
+        self.face_encoder1_full = construct_encoder_layers(3, 12, 64, 1, kernel=3, add_spatial=True)
         self.face_pos_encoder1 = LearnablePositionalEncoding2D(d_model=64, max_h=384, max_w=384, dropout=0.1)
-        self.fe_down1_full = construct_encoder_layers(3, 64, 64, 2)
+        self.fe_down1_full = construct_encoder_layers(3, 64, 64, 2, add_spatial=True)
         
-        self.face_encoder2_full = construct_encoder_layers(3, 64, 128, 1)
+        self.face_encoder2_full = construct_encoder_layers(3, 64, 128, 1, add_spatial=True)
         self.face_pos_encoder2 = LearnablePositionalEncoding2D(d_model=128, max_h=192, max_w=192, dropout=0.1) # After downsample
-        self.fe_down2_full = construct_encoder_layers(3, 128, 128, 2)
+        self.fe_down2_full = construct_encoder_layers(3, 128, 128, 2, add_spatial=True)
 
         # Cross-Attention & Sparse Self-Attention for Feature Fusion
         # Dimensions for fed2 (face) and audio_emb
@@ -295,8 +314,8 @@ class ResUNet384V4(nn.Module):
         
         self.face_pos_encoder3 = LearnablePositionalEncoding2D(d_model=256, max_h=96, max_w=96, dropout=0.1) # After fe_down3 (384/8 = 48)
 
-        self.face_encoder3 = construct_encoder_layers(3, 384, 256, 1) # Input channels still 384
-        self.fe_down3 = construct_encoder_layers(3, 256, 256, 2)
+        self.face_encoder3 = construct_encoder_layers(3, 384, 256, 1, add_spatial=True) # Input channels still 384
+        self.fe_down3 = construct_encoder_layers(3, 256, 256, 2, add_spatial=True)
 
         self.face_encoder4 = construct_encoder_layers(3, 256, 512, 1)
         self.face_pos_encoder4 = LearnablePositionalEncoding2D(d_model=512, max_h=48, max_w=48, dropout=0.1) # After fe_down4 (384/16 = 24)
@@ -333,14 +352,14 @@ class ResUNet384V4(nn.Module):
         self.face_decoder4 = construct_decoder_layers(3, 256, 128, 2)
         self.fd_conv4 = construct_encoder_layers(3, 640, 320, 1) # 128 (deface4) + 512 (face4) = 640
         
-        self.face_decoder3 = construct_decoder_layers(3, 320, 160, 2)
-        self.fd_conv3 = construct_encoder_layers(3, 416, 256, 1) # 160 (deface3) + 256 (face3) = 416
+        self.face_decoder3 = construct_decoder_layers(3, 320, 160, 2, add_spatial=True)
+        self.fd_conv3 = construct_encoder_layers(3, 416, 256, 1, add_spatial=True) # 160 (deface3) + 256 (face3) = 416
         
-        self.face_decoder2 = construct_decoder_layers(3, 256, 128, 2)
-        self.fd_conv2 = construct_encoder_layers(3, 256, 128, 1) # 128 (deface2) + 128 (face2) = 256
+        self.face_decoder2 = construct_decoder_layers(3, 256, 128, 2, add_spatial=True)
+        self.fd_conv2 = construct_encoder_layers(3, 256, 128, 1, add_spatial=True) # 128 (deface2) + 128 (face2) = 256
 
-        self.face_decoder1 = construct_decoder_layers(3, 128, 128, 2)
-        self.face_decoder0 = construct_encoder_layers(3, 128, 128, 1) # This seems like an extra layer, no skip connection here
+        self.face_decoder1 = construct_decoder_layers(3, 128, 128, 2, add_spatial=True)
+        self.face_decoder0 = construct_encoder_layers(3, 128, 128, 1, add_spatial=True) # This seems like an extra layer, no skip connection here
         
         self.fd_conv1 = construct_encoder_layers(3, 192, 64, 1) # 128 (deface1 from prev_decoder0) + 64 (face1) = 192
 
