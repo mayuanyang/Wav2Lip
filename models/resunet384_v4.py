@@ -526,6 +526,8 @@ class ResUNet384V4(nn.Module):
         if input_dim_size > 4:
             outputs = torch.split(x, B, dim=0)
             outputs = torch.stack(outputs, dim=2)
+        else:
+            outputs = x
             
             
         return outputs, None, None # Returning None for the projections as they are not used in the original forward.
