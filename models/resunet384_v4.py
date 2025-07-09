@@ -265,13 +265,13 @@ class ResUNet384V4(nn.Module):
         }
         
         # --- Face Encoder ---
-        self.face_encoder1_full = construct_encoder_layers(3, 12, 64, 1, kernel=3, add_spatial=True)
+        self.face_encoder1_full = construct_encoder_layers(4, 12, 64, 1, kernel=3, add_spatial=True)
         self.face_pos_encoder1 = LearnablePositionalEncoding2D(d_model=64, max_h=384, max_w=384, dropout=0.1)
-        self.fe_down1_full = construct_encoder_layers(3, 64, 64, 2, add_spatial=True)
+        self.fe_down1_full = construct_encoder_layers(4, 64, 64, 2, add_spatial=True)
         
-        self.face_encoder2_full = construct_encoder_layers(3, 64, 128, 1, add_spatial=True)
+        self.face_encoder2_full = construct_encoder_layers(4, 64, 128, 1, add_spatial=True)
         self.face_pos_encoder2 = LearnablePositionalEncoding2D(d_model=128, max_h=192, max_w=192, dropout=0.1) # After downsample
-        self.fe_down2_full = construct_encoder_layers(3, 128, 128, 2, add_spatial=True)
+        self.fe_down2_full = construct_encoder_layers(4, 128, 128, 2, add_spatial=True)
 
         # Cross-Attention & Sparse Self-Attention for Feature Fusion
         # Dimensions for fed2 (face) and audio_emb
@@ -317,11 +317,11 @@ class ResUNet384V4(nn.Module):
         self.face_encoder3 = construct_encoder_layers(3, 384, 256, 1, add_spatial=True) # Input channels still 384
         self.fe_down3 = construct_encoder_layers(3, 256, 256, 2, add_spatial=True)
 
-        self.face_encoder4 = construct_encoder_layers(3, 256, 512, 1)
+        self.face_encoder4 = construct_encoder_layers(3, 256, 512, 1, add_spatial=True)
         self.face_pos_encoder4 = LearnablePositionalEncoding2D(d_model=512, max_h=48, max_w=48, dropout=0.1) # After fe_down4 (384/16 = 24)
         self.fe_down4 = construct_encoder_layers(3, 512, 512, 2)
         
-        self.face_encoder5 = construct_encoder_layers(3, 512, 512, 1)
+        self.face_encoder5 = construct_encoder_layers(3, 512, 512, 1, add_spatial=True)
         self.face_pos_encoder5 = LearnablePositionalEncoding2D(d_model=512, max_h=24, max_w=24, dropout=0.1) # After fe_down5 (384/32 = 12)
         self.fe_down5 = construct_encoder_layers(3, 512, 512, 2)
 
@@ -346,11 +346,11 @@ class ResUNet384V4(nn.Module):
         self.bottleneck_pos_encoder = LearnablePositionalEncoding2D(d_model=512, max_h=12, max_w=12, dropout=0.1) # 384/64 = 6
         
         # Decoders (channels adjusted for skip connections if needed)
-        self.face_decoder5 = construct_decoder_layers(3, 512, 256, 2)
-        self.fd_conv5 = construct_encoder_layers(3, 768, 256, 1) # 256 (deface5) + 512 (face5) = 768
+        self.face_decoder5 = construct_decoder_layers(3, 512, 256, 2, add_spatial=True)
+        self.fd_conv5 = construct_encoder_layers(3, 768, 256, 1, add_spatial=True) # 256 (deface5) + 512 (face5) = 768
         
-        self.face_decoder4 = construct_decoder_layers(3, 256, 128, 2)
-        self.fd_conv4 = construct_encoder_layers(3, 640, 320, 1) # 128 (deface4) + 512 (face4) = 640
+        self.face_decoder4 = construct_decoder_layers(3, 256, 128, 2, add_spatial=True)
+        self.fd_conv4 = construct_encoder_layers(3, 640, 320, 1, add_spatial=True) # 128 (deface4) + 512 (face4) = 640
         
         self.face_decoder3 = construct_decoder_layers(3, 320, 160, 2, add_spatial=True)
         self.fd_conv3 = construct_encoder_layers(3, 416, 256, 1, add_spatial=True) # 160 (deface3) + 256 (face3) = 416
