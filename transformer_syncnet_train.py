@@ -143,7 +143,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     patience = 10000
 
     # Added by eddy
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=patience, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=patience)
     
     if should_print_grad_norm:
       for name, module in model.named_modules():

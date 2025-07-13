@@ -48,6 +48,7 @@ class TransformerSyncnet(nn.Module):
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
+        self.face_pos_encoder1 = LearnablePositionalEncoding2D(d_model=128, max_h=96, max_w=192, dropout=0.1)
         
         self.face_encoder2 = nn.Sequential(
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1),  # Downsample
@@ -55,11 +56,15 @@ class TransformerSyncnet(nn.Module):
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
+        self.face_pos_encoder2 = LearnablePositionalEncoding2D(d_model=256, max_h=48, max_w=96, dropout=0.1)
+        
         self.face_encoder3 = nn.Sequential(
             Conv2d(256, 256, kernel_size=3, stride=2, padding=1),  # Downsample width
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
+        
+        self.face_pos_encoder3 = LearnablePositionalEncoding2D(d_model=256, max_h=24, max_w=48, dropout=0.1)
         
         self.face_encoder4 = nn.Sequential(
             Conv2d(256, 256, kernel_size=3, stride=2, padding=1),  # Downsample
@@ -90,6 +95,8 @@ class TransformerSyncnet(nn.Module):
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
+        
+        self.audio_pos_encoder1 = LearnablePositionalEncoding2D(d_model=64, max_h=40, max_w=8, dropout=0.1)
 
         self.audio_encoder2 = nn.Sequential(
             Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
@@ -98,12 +105,16 @@ class TransformerSyncnet(nn.Module):
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
+        self.audio_pos_encoder2 = LearnablePositionalEncoding2D(d_model=128, max_h=20, max_w=4, dropout=0.1)
+        
         self.audio_encoder3 = nn.Sequential(
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
+        
+        self.audio_pos_encoder3 = LearnablePositionalEncoding2D(d_model=256, max_h=10, max_w=2, dropout=0.1)
         
         self.audio_encoder4 = nn.Sequential(
             Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
@@ -169,14 +180,16 @@ class TransformerSyncnet(nn.Module):
         batch_size = face_embedding.shape[0]
         
         # --- Process audio modality ---
-        audio_features1 = self.audio_encoder1(audio_embedding)  # (B, 512, H_a, W_a)        
+        audio_features1 = self.audio_encoder1(audio_embedding)  # (B, 512, H_a, W_a)
+        audio_features1 = self.audio_pos_encoder1(audio_features1)
         
         audio_features2 = self.audio_encoder2(audio_features1)
+        audio_features2 = self.audio_pos_encoder2(audio_features2)
         
         audio_features3 = self.audio_encoder3(audio_features2)
+        audio_features3 = self.audio_pos_encoder3(audio_features3)
         
         audio_features4 = self.audio_encoder4(audio_features3)
-        
         audio_features4 = self.audio_pos_encoder(audio_features4)
         
         a_seq=audio_features4.view(batch_size, num_of_frames ,-1).permute(1, 0, 2) 
@@ -185,8 +198,14 @@ class TransformerSyncnet(nn.Module):
         face_embedding = face_embedding.view(batch_size * num_of_frames ,3 ,192 ,384)
         
         face1 = self.face_encoder1(face_embedding)
+        face1 = self.face_pos_encoder1(face1)
+        
         face2 = self.face_encoder2(face1)
+        face2 = self.face_pos_encoder2(face2)
+        
         face3 = self.face_encoder3(face2)
+        face3 = self.face_pos_encoder3(face3)
+        
         face4 = self.face_encoder4(face3)
         face4 = self.face_pos_encoder(face4)
         #print('The face4', face4.shape)
