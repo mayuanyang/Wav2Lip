@@ -3,6 +3,7 @@ from torch import nn, resize_as_
 from torch.nn import functional as F
 from .conv import Conv2d
 from .self_attention import AttentionBlock
+from .spatial_attention import SpatialAttention
 from .cross_modal_attention import CrossModalAttention2d
 import torch.nn.init as init
 import numpy as np
@@ -47,6 +48,7 @@ class TransformerSyncnet(nn.Module):
             Conv2d(3, 128, kernel_size=3, stride=2, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
         )
         self.face_pos_encoder1 = LearnablePositionalEncoding2D(d_model=128, max_h=96, max_w=192, dropout=0.1)
         
@@ -54,6 +56,7 @@ class TransformerSyncnet(nn.Module):
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
         )
         
         self.face_pos_encoder2 = LearnablePositionalEncoding2D(d_model=256, max_h=48, max_w=96, dropout=0.1)
@@ -62,6 +65,7 @@ class TransformerSyncnet(nn.Module):
             Conv2d(256, 256, kernel_size=3, stride=2, padding=1),  # Downsample width
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
         )
         
         self.face_pos_encoder3 = LearnablePositionalEncoding2D(d_model=256, max_h=24, max_w=48, dropout=0.1)
@@ -70,21 +74,26 @@ class TransformerSyncnet(nn.Module):
             Conv2d(256, 256, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
             
             Conv2d(256, 256, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
             
             Conv2d(256, 256, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
             
             Conv2d(256, 512, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(512, 512, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention(),
             
             Conv2d(512, 256, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
+            SpatialAttention()
         )    
                 
         # --- Audio encoder ---
