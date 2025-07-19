@@ -22,7 +22,7 @@ def initialize_weights(module):
             #print('Init')
 
 class LearnablePositionalEncoding2D(nn.Module):
-    def __init__(self, d_model: int, max_h: int, max_w: int, dropout: float = 0.1):
+    def __init__(self, d_model: int, max_h: int, max_w: int, dropout: float = 0.01):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
         # 初始化一个可学习的位置编码参数，形状为 (1, d_model, max_h, max_w)
@@ -182,6 +182,7 @@ class TransformerSyncnet(nn.Module):
         face_embedding: tensor of shape (B, 15, H, W) -> 5 images concatenated (each 3 channels)
         audio_embedding: tensor of shape (B, 1, H_audio, W_audio)
         """
+        
         num_of_frames = 5
         
         save_every_s_steps = 1000
