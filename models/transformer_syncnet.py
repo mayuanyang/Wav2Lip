@@ -156,11 +156,13 @@ class TransformerSyncnet(nn.Module):
         # Final classification head.
         # We pool tokens for each modality separately, then concatenate their global features.
         self.classifier = nn.Sequential(
-            # nn.Linear(1536, 512), for 192
-            nn.Linear(3840, 256), 
-            nn.LeakyReLU(0.2, inplace=False),
+            nn.Linear(3840, 1024),
+            nn.ReLU(),
             nn.Dropout(p=0.1),
-            nn.Linear(256, 1)  # binary classification output
+            nn.Linear(1024, 512),
+            nn.ReLU(),
+            nn.Dropout(p=0.1),
+            nn.Linear(512, 1)  # binary classification output
         )
       
         self.face_encoder1.apply(initialize_weights)
@@ -208,13 +210,13 @@ class TransformerSyncnet(nn.Module):
         face_embedding = face_embedding.view(batch_size * num_of_frames ,3 ,192 ,384)
         
         face1 = self.face_encoder1(face_embedding)
-        face1 = self.face_pos_encoder1(face1)
+        #face1 = self.face_pos_encoder1(face1)
         
         face2 = self.face_encoder2(face1)
-        face2 = self.face_pos_encoder2(face2)
+        #face2 = self.face_pos_encoder2(face2)
         
         face3 = self.face_encoder3(face2)
-        face3 = self.face_pos_encoder3(face3)
+        #face3 = self.face_pos_encoder3(face3)
         
         face4 = self.face_encoder4(face3)
         face4 = self.face_pos_encoder(face4)
