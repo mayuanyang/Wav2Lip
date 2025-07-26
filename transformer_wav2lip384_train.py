@@ -140,6 +140,31 @@ def bottom_half_masked_mse_loss(pred, target):
     masked_mse = mse * mask
     return masked_mse.mean()
 
+
+def mouth_region_loss(pred, target):
+    """
+    计算嘴部区域的损失，更加关注牙齿细节
+    """
+    # 定义嘴部区域的坐标 (根据图像尺寸调整)
+    # 假设图像尺寸为 (384, 384)，嘴部区域大约在下半部分的中心区域
+    mouth_region_height_start = 250  # 嘴部区域起始高度
+    mouth_region_height_end = 350    # 嘴部区域结束高度
+    mouth_region_width_start = 150   # 嘴部区域起始宽度
+    mouth_region_width_end = 230     # 嘴部区域结束宽度
+    
+    # 创建嘴部区域掩码
+    mask = torch.zeros_like(pred)
+    mask[:, :, :, mouth_region_height_start:mouth_region_height_end, 
+         mouth_region_width_start:mouth_region_width_end] = 1.0
+    
+    # 计算嘴部区域的MSE损失
+    mse = nn.MSELoss(reduction='none')(pred, target)
+    mouth_mse = mse * mask
+    
+    # 可以添加额外的权重来更关注牙齿细节
+    # 例如，可以使用边缘检测来突出牙齿边界
+    return mouth_mse.mean()
+
 def print_grad_norm(name, module, grad_input, grad_output):
     should_print = global_step % 1000 == 0
     if should_print:
@@ -275,13 +300,18 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 
                 bottom_loss = bottom_half_masked_mse_loss(g, gt)
                 
+                # 计算嘴部区域损失
+                mouth_loss = mouth_region_loss(g, gt)
+                
                 tempora_loss = trepa_loss(gt, g)
 
                 running_l1_loss += l1loss.item()
                 
                 #cossine_loss = compute_cosine_similarity(audio_embedding, face_embedding)
                 
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss #+ tempora_loss + bottom_loss + 0.05 * cossine_loss
+                # 在总损失中包含嘴部区域损失和下半部分损失
+                # 可以通过调整 hparams.bottom_l1_wt 和 hparams.mouth_wt 来控制这些损失的权重
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_l1_wt * bottom_loss + hparams.mouth_wt * mouth_loss #+ tempora_loss + 0.05 * cossine_loss
 
               #loss = loss / 20
               loss.backward()
@@ -316,7 +346,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, bottom: {bottom_loss.item():.6f}, LR: {current_lr:.7f}")
+              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, bottom: {bottom_loss.item():.6f}, mouth: {mouth_loss.item():.6f}, LR: {current_lr:.7f}")
               #prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Trep Loss: {tempora_loss.item():.5f}, Cos Loss: {cossine_loss.item():.5f} LR: {current_lr:.7f}")
               
               metrics = {
@@ -325,11 +355,14 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   "train/sync_loss": running_sync_loss / (step + 1), 
                   "train/disc_loss": avg_disc_loss,
                   "train/bottom_loss": bottom_loss.item(),
+                  "train/mouth_loss": mouth_loss.item(),
                   # "train/tempora_loss": tempora_loss.item(),
                   #"train/cosine_loss": cossine_loss.item(),
                   "params/step": global_step,
                   "params/learning_rate": current_lr,
                   "params/l1_wt": hparams.l1_wt,
+                  "params/bottom_l1_wt": hparams.bottom_l1_wt,
+                  "params/mouth_wt": hparams.mouth_wt,
                   "params/syncnet_wt": hparams.syncnet_wt,
                   "params/disc_wt": hparams.disc_wt,
                   }

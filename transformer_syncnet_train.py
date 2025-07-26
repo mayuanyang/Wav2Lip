@@ -1,28 +1,24 @@
 from os.path import join
 from tqdm import tqdm
-
-from models import TransformerSyncnet as TransformerSyncnet
-import audio
-import torch.nn.functional as F
-
+import os, argparse
+import numpy as np
 import torch
+import torch.nn.functional as F
+import torch.backends.cudnn as cudnn
 from torch import nn
 from torch import optim
-import torch.backends.cudnn as cudnn
-from torch.utils import data as data_utils
-import numpy as np
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-
-from glob import glob
-
-import os, argparse
-from hparams import hparams
-from models.conv import Conv2d, Conv2dTranspose
-from syncnet_dataset import Dataset, samples
 from torch.cuda.amp import GradScaler
 from torch.amp import autocast
-
+from torch.utils import data as data_utils
+from glob import glob
+from hparams import hparams
+from models import TransformerSyncnet as TransformerSyncnet
+from models.conv import Conv2d, Conv2dTranspose
+from syncnet_dataset import Dataset, samples
+import audio
 import wandb
+
 
 
 def str2bool(v):
@@ -170,7 +166,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             mel = mel.to(device)
 
             with autocast('cuda'):
-              output, face_embedding, audio_embedding = model(x, mel, global_step)
+              output, face1_embedding, audio_embedding = model(x, mel, global_step)
               regression_y = regression_y.unsqueeze(1).float()
               regression_y = regression_y.to(device)
               

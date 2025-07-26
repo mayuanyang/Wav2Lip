@@ -206,7 +206,7 @@ class SparseSelfAttentionBlock(nn.Module):
         return output
 
 def linear_schedule():
-    return torch.tensor([0.6, 0.7, 0.8, 0.9])
+    return torch.tensor([0.3, 0.7, 0.8, 0.9])
 
 def construct_encoder_layers(num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3):
     layers = []
@@ -219,8 +219,7 @@ def construct_encoder_layers(num_of_layers, input_channels, output_channels, fir
     for _ in range(num_of_layers - 1):
         layers.append(Conv2d(output_channels, output_channels, kernel_size=kernel, stride=1, padding=padding, residual=True))
     
-    if add_spatial:
-        layers.append(SpatialAttention())
+    
     return nn.Sequential(*layers)
   
 def construct_decoder_layers(num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3):
@@ -233,6 +232,10 @@ def construct_decoder_layers(num_of_layers, input_channels, output_channels, fir
     # Subsequent layers
     for _ in range(num_of_layers - 1):
         layers.append(Conv2d(output_channels, output_channels, kernel_size=kernel, stride=1, padding=padding, residual=True))
+    
+    if add_spatial:
+      layers.append(SpatialAttention())
+      
     return nn.Sequential(*layers)
   
 
@@ -333,22 +336,22 @@ class ResUNet384V4(nn.Module):
         self.bottleneck_pos_encoder = LearnablePositionalEncoding2D(d_model=512, max_h=12, max_w=12, dropout=0.1) # 384/64 = 6
         
         # Decoders (channels adjusted for skip connections if needed)
-        self.face_decoder5 = construct_decoder_layers(3, 512, 256, 2, add_spatial=True)
-        self.fd_conv5 = construct_encoder_layers(3, 768, 256, 1, add_spatial=True) # 256 (deface5) + 512 (face5) = 768
+        self.face_decoder5 = construct_decoder_layers(3, 512, 256, 2)
+        self.fd_conv5 = construct_encoder_layers(3, 768, 256, 1) # 256 (deface5) + 512 (face5) = 768
         
-        self.face_decoder4 = construct_decoder_layers(3, 256, 128, 2, add_spatial=True)
-        self.fd_conv4 = construct_encoder_layers(3, 640, 320, 1, add_spatial=True) # 128 (deface4) + 512 (face4) = 640
+        self.face_decoder4 = construct_decoder_layers(3, 256, 128, 2)
+        self.fd_conv4 = construct_encoder_layers(3, 640, 320, 1) # 128 (deface4) + 512 (face4) = 640
         
-        self.face_decoder3 = construct_decoder_layers(3, 320, 160, 2, add_spatial=True)
-        self.fd_conv3 = construct_encoder_layers(3, 416, 256, 1, add_spatial=True) # 160 (deface3) + 256 (face3) = 416
+        self.face_decoder3 = construct_decoder_layers(3, 320, 160, 2)
+        self.fd_conv3 = construct_encoder_layers(3, 416, 256, 1) # 160 (deface3) + 256 (face3) = 416
         
-        self.face_decoder2 = construct_decoder_layers(3, 256, 128, 2, add_spatial=True)
-        self.fd_conv2 = construct_encoder_layers(3, 256, 128, 1, add_spatial=True) # 128 (deface2) + 128 (face2) = 256
+        self.face_decoder2 = construct_decoder_layers(4, 256, 128, 2, add_spatial=True)
+        self.fd_conv2 = construct_encoder_layers(4, 256, 128, 1, add_spatial=True) # 128 (deface2) + 128 (face2) = 256
 
-        self.face_decoder1 = construct_decoder_layers(3, 128, 128, 2, add_spatial=True)
-        self.face_decoder0 = construct_encoder_layers(3, 128, 128, 1, add_spatial=True) # This seems like an extra layer, no skip connection here
+        self.face_decoder1 = construct_decoder_layers(4, 128, 128, 2, add_spatial=True)
+        self.face_decoder0 = construct_encoder_layers(4, 128, 128, 1, add_spatial=True) # This seems like an extra layer, no skip connection here
         
-        self.fd_conv1 = construct_encoder_layers(3, 192, 64, 1) # 128 (deface1 from prev_decoder0) + 64 (face1) = 192
+        self.fd_conv1 = construct_encoder_layers(4, 192, 64, 1) # 128 (deface1 from prev_decoder0) + 64 (face1) = 192
 
         self.output_block = nn.Sequential(
             nn.Conv2d(64, 3, kernel_size=1, stride=1, padding=0),
@@ -422,7 +425,7 @@ class ResUNet384V4(nn.Module):
             face_sequences = torch.cat([face_sequences[:, :, i] for i in range(face_sequences.size(2))], dim=0)
 
         expanded_B = face_sequences.size(0)
-        t0 = self.sample_t(expanded_B, torch.tensor([0, 0, 0, 1], dtype=torch.float32)).to(face_sequences.device)
+        t0 = self.sample_t(expanded_B, torch.tensor([1, 0, 0, 1], dtype=torch.float32)).to(face_sequences.device)
         self.alphas_cumprod = self.alphas_cumprod.to(face_sequences.device)
         face_sequences = self.diffuse(face_sequences.float(), t0, 3)
         
