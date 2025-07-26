@@ -309,9 +309,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 
                 #cossine_loss = compute_cosine_similarity(audio_embedding, face_embedding)
                 
-                # 在总损失中包含嘴部区域损失和下半部分损失
-                # 可以通过调整 hparams.bottom_l1_wt 和 hparams.mouth_wt 来控制这些损失的权重
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + hparams.bottom_l1_wt * bottom_loss + hparams.mouth_wt * mouth_loss #+ tempora_loss + 0.05 * cossine_loss
+                # 在总损失中包含嘴部区域损失
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + 5 * mouth_loss #+ tempora_loss + bottom_loss + 0.05 * cossine_loss
 
               #loss = loss / 20
               loss.backward()
