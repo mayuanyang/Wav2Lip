@@ -532,6 +532,5 @@ class FaceEnhancer(nn.Module):
             nn.LeakyReLU(0.2),
             nn.Conv2d(32, 3, 3, padding=1))
     def forward(self, x):
-        print('xxx')
         detail = x - self.gaussian_blur(x)
         return x + 0.3 * self.detail_extract(detail)
