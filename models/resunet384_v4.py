@@ -253,7 +253,7 @@ class ResUNet384V4(nn.Module):
         self.ellipse_params = {
             'center': (0.0, 0),  # (x,y)中心偏移(归一化坐标)
             'axes': (1, 0.75),      # (宽,高)比例
-            'blur': 0.03             # 边缘模糊系数(相对于短边)
+            'blur': 0.0             # 边缘模糊系数(相对于短边)
         }
         
         # --- Face Encoder ---
