@@ -13,60 +13,6 @@ from torchvision.transforms import GaussianBlur
 
 
 
-class CrossAttentionBlock(nn.Module):
-    def __init__(self, query_dim, key_dim, value_dim, num_heads, dropout=0.1):
-        super().__init__()
-        assert query_dim % num_heads == 0, "query_dim must be divisible by num_heads"
-        
-        half_query = query_dim // 2
-        self.to_q = nn.Linear(query_dim, half_query)
-        self.to_k = nn.Linear(key_dim, half_query)
-        self.to_v = nn.Linear(value_dim, half_query)
-
-        self.mha = nn.MultiheadAttention(embed_dim=half_query, num_heads=num_heads, dropout=dropout, batch_first=True)
-        self.norm1 = nn.LayerNorm(query_dim)
-        self.norm2 = nn.LayerNorm(query_dim)
-        self.ffn = nn.Sequential(
-            nn.Linear(half_query, query_dim * 4),
-            nn.GELU(),
-            nn.Linear(query_dim * 4, query_dim),
-            nn.Dropout(dropout)
-        )
-
-    def forward(self, query_features, key_value_features):
-        B_q, C_q, H_q, W_q = query_features.shape
-        B_kv, C_kv, H_kv, W_kv = key_value_features.shape
-
-        # Flatten spatial dimensions to sequence length
-        query = query_features.view(B_q, C_q, -1).permute(0, 2, 1) # (B, H_q*W_q, C_q)
-        key_value = key_value_features.view(B_kv, C_kv, -1).permute(0, 2, 1) # (B, H_kv*W_kv, C_kv)
-
-        # Split query into top and bottom halves
-        split_idx = H_q // 2
-        top_half = query[:, :split_idx * W_q]
-        bottom_half = query[:, split_idx * W_q:]
-
-        # Apply linear projections for Q, K, V
-        q = self.to_q(bottom_half)
-        k = self.to_k(key_value)
-        v = self.to_v(key_value)
-
-        # Cross-attention
-        attn_output, _ = self.mha(query=q, key=k, value=v)
-
-        # Add and Norm
-        attn_output = self.norm1(attn_output + q) # Residual connection
-
-        # Feed-forward network
-        output = self.ffn(attn_output)
-        output = self.norm2(output + attn_output) # Residual connection
-
-        # Combine the processed bottom half with the unchanged top half
-        output = torch.cat([top_half, output], dim=1)
-
-        # Reshape back to image format (B, C, H, W)
-        output = output.permute(0, 2, 1).view(B_q, C_q, H_q, W_q)
-        return output
 
 class SparseSelfAttentionBlock(nn.Module):
     
@@ -261,29 +207,27 @@ class ResUNet384V5(nn.Module):
         
         # --- Face Encoder ---
         self.face_encoder1_full = construct_encoder_layers(3, 12, 64, 1, kernel=3, add_spatial=True)
-        self.face_pos_encoder1 = LearnablePositionalEncoding2D(d_model=64, max_h=384, max_w=384, dropout=0.1)
         self.fe_down1_full = construct_encoder_layers(3, 64, 64, 2, add_spatial=True)
         
         self.face_encoder2_full = construct_encoder_layers(3, 64, 128, 1, add_spatial=True)
-        self.face_pos_encoder2 = LearnablePositionalEncoding2D(d_model=128, max_h=192, max_w=192, dropout=0.1) # After downsample
         self.fe_down2_full = construct_encoder_layers(3, 128, 128, 2, add_spatial=True)
         
         self.sparse_self_attention_block = SparseSelfAttentionBlock(
-            in_channels=256, num_heads=8, window_size=(8, 8), dropout=0.1 # Example window size
+            in_channels=256, num_heads=8, window_size=(4, 4), dropout=0.1 # Example window size
         )
         
         self.sparse_self_attention_deface3_block = SparseSelfAttentionBlock(
-            in_channels=320, num_heads=8, window_size=(8, 8), dropout=0.1 # Example window size
+            in_channels=320, num_heads=8, window_size=(4, 4), dropout=0.1 # Example window size
         )
         
-        self.face_pos_encoder3 = LearnablePositionalEncoding2D(d_model=256, max_h=96, max_w=96, dropout=0.1) # After fe_down3 (384/8 = 48)
+        
 
         self.face_encoder3 = construct_encoder_layers(3, 384, 256, 1, add_spatial=True) # Input channels still 384
         self.fe_down3 = construct_encoder_layers(3, 256, 256, 2, add_spatial=True)
 
-        self.face_encoder4 = construct_encoder_layers(3, 256, 512, 1, add_spatial=True)
+        self.face_encoder4 = construct_encoder_layers(2, 256, 512, 1, add_spatial=True)
         self.face_pos_encoder4 = LearnablePositionalEncoding2D(d_model=512, max_h=48, max_w=48, dropout=0.1) # After fe_down4 (384/16 = 24)
-        self.fe_down4 = construct_encoder_layers(3, 512, 512, 2)
+        self.fe_down4 = construct_encoder_layers(2, 512, 512, 2)
         
         self.face_encoder5 = construct_encoder_layers(2, 512, 512, 1, add_spatial=True)
         self.face_pos_encoder5 = LearnablePositionalEncoding2D(d_model=512, max_h=24, max_w=24, dropout=0.1) # After fe_down5 (384/32 = 12)
@@ -407,12 +351,10 @@ class ResUNet384V5(nn.Module):
         
         # --- Face encoding ---
         face1 = self.face_encoder1_full(face_sequences) # [B*T, 64, 384, 384]
-        face1 = self.face_pos_encoder1(face1)           # Positional encoding
         fed1 = self.fe_down1_full(face1)                # [B*T, 64, 192, 192]
         
         
         face2 = self.face_encoder2_full(fed1)           # [B*T, 128, 192, 192]
-        face2 = self.face_pos_encoder2(face2)           # Positional encoding
         fed2 = self.fe_down2_full(face2)                # [B*T, 128, 96, 96]
 
         
@@ -421,14 +363,13 @@ class ResUNet384V5(nn.Module):
         fed2_cat = torch.cat([fed2, audio_emb], dim=1) # [B*T, 128+256=384, 96, 96]
 
         face3 = self.face_encoder3(fed2_cat)            # [B*T, 256, 96, 96]
-        face3 = self.face_pos_encoder3(face3)           # Positional encoding
         fed3 = self.fe_down3(face3)                     # [B*T, 256, 48, 48]
 
         # --- Sparse Self-Attention ---
         # Apply sparse self-attention on the combined features at this level
-        fed3_attended = self.sparse_self_attention_block(fed3) # [B*T, 256, 48, 48]
+        #fed3_attended = self.sparse_self_attention_block(fed3) # [B*T, 256, 48, 48]
         # You can add a residual connection here if sparse_self_attention_block doesn't handle it internally
-        fed3 = fed3 + fed3_attended
+        #fed3 = fed3 + fed3_attended
 
         face4 = self.face_encoder4(fed3)       # [B*T, 512, 48, 48]
         face4 = self.face_pos_encoder4(face4)           # Positional encoding
@@ -450,9 +391,9 @@ class ResUNet384V5(nn.Module):
         cat4 = torch.cat([deface4, face4], dim=1)       # [B*T, 128+512=640, 48, 48]
         cat4 = self.fd_conv4(cat4)                      # [B*T, 320, 48, 48]
         
-        cat4_attended = self.sparse_self_attention_deface3_block(cat4)
+        #cat4_attended = self.sparse_self_attention_deface3_block(cat4)
 
-        deface3 = self.face_decoder3(cat4 + cat4_attended)              # [B*T, 160, 96, 96]
+        deface3 = self.face_decoder3(cat4)              # [B*T, 160, 96, 96]
         cat3 = torch.cat([deface3, face3], dim=1)       # [B*T, 160+256=416, 96, 96]
         cat3 = self.fd_conv3(cat3)                      # [B*T, 256, 96, 96]
 
