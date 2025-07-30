@@ -6,7 +6,7 @@ import json, subprocess, random, string
 from tqdm import tqdm
 from glob import glob
 import torch, face_detection
-from models import ResUNet384V2, ResUNet384V3, ResUNet384V4, cosine_noise_schedule
+from models import ResUNet384V2, ResUNet384V3, ResUNet384V4, ResUNet384V5, cosine_noise_schedule
 from realesrgan import RealESRGANer
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from PIL import Image
@@ -342,6 +342,8 @@ def load_model(path, lora_path=None):
     model = ResUNet384V3()
   elif args.version == 'V4':
     model = ResUNet384V4()
+  elif args.version == 'V5':
+    model = ResUNet384V5()
   else:
     model = ResUNet384V2()
   print("Load checkpoint from: {}".format(path))
@@ -511,7 +513,11 @@ def main():
       
       with torch.no_grad():
         print('The img_batch shape', img_batch.shape, mel_batch.shape)
-        pred, face_embedding, audio_embedding = model(mel_batch, img_batch, 1)
+        # For V5 model, we don't need the step parameter for inference
+        if args.version == 'V5':
+            pred, _, _ = model(mel_batch, img_batch, 1)
+        else:
+            pred, face_embedding, audio_embedding = model(mel_batch, img_batch, 1)
         
         check_nan(pred, i)
 

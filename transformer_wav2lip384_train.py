@@ -2,7 +2,7 @@ from os.path import dirname, join, basename, isfile
 from tqdm import tqdm
 
 from models import TransformerSyncnet
-from models import ResUNet384, ResUNet384V2, ResUNet384V3, ResUNet384V4
+from models import ResUNet384, ResUNet384V2, ResUNet384V3, ResUNet384V4, ResUNet384V5
 import torch
 
 import wandb
@@ -263,7 +263,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               gt = gt.to(device)
 
               with autocast():
-                g, face_embedding, audio_embedding = model(indiv_mels, x, global_step)
+                g, face_embedding, audio_embedding = model(indiv_mels, x, None)
                 
                 # Compare two images
                 '''
@@ -509,6 +509,9 @@ if __name__ == "__main__":
     elif version == 'v4':
       print('Using v4')
       model = ResUNet384V4().to(device)
+    elif version == 'v5':
+      print('Using v5')
+      model = ResUNet384V5().to(device)
 
     
 
@@ -540,7 +543,7 @@ if __name__ == "__main__":
       )
       
     # for name, param in model.named_parameters():
-    #   if 'face_encoder1' not in name or 'fe_down1' not in name or 'face_decoder1' not in name or 'fd_conv1' not in name:
+    #   if 'face_enhancer' not in name:
     #     param.requires_grad = False
     #     print('nooooo')
     
