@@ -298,7 +298,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
                 l1loss = recon_loss(g, gt)
                 
-                bottom_loss = bottom_half_masked_mse_loss(g, gt)
+                #bottom_loss = bottom_half_masked_mse_loss(g, gt)
                 
                 # 计算嘴部区域损失
                 mouth_loss = mouth_region_loss(g, gt)
@@ -310,7 +310,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 #cossine_loss = compute_cosine_similarity(audio_embedding, face_embedding)
                 
                 # 在总损失中包含嘴部区域损失
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + 5 * mouth_loss #+ tempora_loss + bottom_loss + 0.05 * cossine_loss
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + mouth_loss #+ tempora_loss + bottom_loss + 0.05 * cossine_loss
 
               #loss = loss / 20
               loss.backward()
@@ -345,7 +345,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, bottom: {bottom_loss.item():.6f}, mouth: {mouth_loss.item():.6f}, LR: {current_lr:.7f}")
+              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, mouth: {mouth_loss.item():.6f}, LR: {current_lr:.7f}")
               #prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Trep Loss: {tempora_loss.item():.5f}, Cos Loss: {cossine_loss.item():.5f} LR: {current_lr:.7f}")
               
               metrics = {
@@ -353,7 +353,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   "train/avg_l1": avg_l1_loss, 
                   "train/sync_loss": running_sync_loss / (step + 1), 
                   "train/disc_loss": avg_disc_loss,
-                  "train/bottom_loss": bottom_loss.item(),
                   "train/mouth_loss": mouth_loss.item(),
                   # "train/tempora_loss": tempora_loss.item(),
                   #"train/cosine_loss": cossine_loss.item(),
