@@ -191,7 +191,7 @@ def construct_decoder_layers(num_of_layers, input_channels, output_channels, fir
 
       
 class ResUNet384V5(nn.Module):
-    def __init__(self, diffusion_steps=20):
+    def __init__(self, diffusion_steps=200):
         super(ResUNet384V5, self).__init__()
         
         self.diffusion_steps = diffusion_steps

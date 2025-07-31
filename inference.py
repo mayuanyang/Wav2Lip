@@ -82,6 +82,8 @@ parser.add_argument('--iteration', type=int, help='Number of iteration to infere
 
 parser.add_argument('--version', type=str, help='The version of the model', default='V4')
 
+parser.add_argument('--diffusion_step', type=int, help='Number of diffusion steps for gradual denoising', default=1)
+
 args = parser.parse_args()
 args.img_size = 384
 
@@ -512,12 +514,12 @@ def main():
 
       
       with torch.no_grad():
-        print('The img_batch shape', img_batch.shape, mel_batch.shape)
+        print('The img_batch shape', img_batch.shape, mel_batch.shape, args.diffusion_step)
         # For V5 model, we don't need the step parameter for inference
         if args.version == 'V5':
-            pred, _, _ = model(mel_batch, img_batch, 1)
+            pred, _, _ = model(mel_batch, img_batch, args.diffusion_step)
         else:
-            pred, face_embedding, audio_embedding = model(mel_batch, img_batch, 1)
+            pred, face_embedding, audio_embedding = model(mel_batch, img_batch, args.diffusion_step)
         
         check_nan(pred, i)
 

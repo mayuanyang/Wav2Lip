@@ -414,24 +414,23 @@ def gradual_denoising(model, audio_sequences, face_sequences, diffusion_steps=20
     """
     实现逐步去噪过程
     """
-    # 初始化：对输入图像添加最大噪声
+    # 初始化：使用输入图像作为初始状态
     x = face_sequences.clone()
-    B = x.size(0)
     
-    # 添加最大噪声（step diffusion_steps-1）
-    t_max = torch.full((B,), diffusion_steps-1, dtype=torch.long, device=x.device)
-    x = model.diffuse(x, t_max, 3)
-    
-    # 逐步去噪，从step 0到step diffusion_steps-1
-    for step in range(diffusion_steps):
+    # 逐步去噪，从step diffusion_steps-1到0
+    for step in reversed(range(diffusion_steps)):
         # 使用当前step进行去噪
         with torch.no_grad():
+            # 确保模型在推理时不添加额外噪声
+            # 使用模型的forward方法进行推理，传入固定的step值
             denoised, _, _ = model(audio_sequences, x, step)
+            
+            # 更新x为去噪后的结果，作为下一步的输入
+            if step > 0:  # 不是最后一步时，需要重新组合12通道
+                x = torch.cat([denoised, face_sequences[:, 3:, :, :]], dim=1)
         
-        # 更新x为去噪后的结果，作为下一步的输入
-        x = denoised
     
-    return x
+    return denoised
 
 def main():
   print('use gan', args.use_esrgan, args.use_ref_img)
