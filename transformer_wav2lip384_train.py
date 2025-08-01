@@ -2,7 +2,7 @@ from os.path import dirname, join, basename, isfile
 from tqdm import tqdm
 
 from models import TransformerSyncnet
-from models import ResUNet384, ResUNet384V2, ResUNet384V3, ResUNet384V4, ResUNet384V5
+from models import ResUNet384, ResUNet384V2, ResUNet384V3, ResUNet384V4, ResUNet384V5, ResUNet384V6
 import torch
 
 import wandb
@@ -511,6 +511,9 @@ if __name__ == "__main__":
     elif version == 'v5':
       print('Using v5')
       model = ResUNet384V5().to(device)
+    elif version == 'v6':
+      print('Using v6')
+      model = ResUNet384V6(args.num_of_unet_layers).to(device)
 
     
 

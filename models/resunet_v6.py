@@ -5,9 +5,9 @@ from torch.nn import functional as F
 
 from .conv import Conv2dTranspose, Conv2d, nonorm_Conv2d
 
-class ResUNet384(nn.Module):
+class ResUNet384V6(nn.Module):
     def __init__(self, num_of_blocks=2):
-        super(ResUNet384, self).__init__()
+        super(ResUNet384V6, self).__init__()
         self.blocks = nn.ModuleList()
 
         for i in range(num_of_blocks):
