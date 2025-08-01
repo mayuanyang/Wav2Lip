@@ -1,0 +1,574 @@
+from os.path import dirname, join, basename, isfile
+from tqdm import tqdm
+
+from models import TransformerSyncnet
+from models import ResUNet384, ResUNet384V2, ResUNet384V3, ResUNet384V4
+from models.gan_resunet_v5 import Wav2LipGAN, Discriminator
+
+import torch
+from torch import nn
+from torch import optim
+import torch.backends.cudnn as cudnn
+from torch.utils import data as data_utils
+import numpy as np
+import torchvision.models as models
+import lpips
+
+from glob import glob
+
+import os, cv2, argparse
+from hparams import hparams, get_image_list
+
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from models.conv import Conv2d, Conv2dTranspose
+from wav2lip_dataset import Dataset, syncnet_T
+from syncnet_dataset import apply_lip_mask_single, blackout_non_lip
+
+import torch.nn.functional as F
+from pytorch_msssim import ms_ssim
+from torch.cuda.amp import autocast, GradScaler
+import mediapipe as mp
+from PIL import Image
+import mediapipe as mp
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+parser = argparse.ArgumentParser(description='Code to train the Wav2Lip GAN model')
+
+parser.add_argument("--data_root", help="Root folder of the preprocessed LRS2 dataset", required=True, type=str)
+
+parser.add_argument('--checkpoint_dir', help='Save checkpoints to this directory', required=True, type=str)
+parser.add_argument('--syncnet_checkpoint_path', help='Load the pre-trained Expert discriminator', required=True, type=str)
+
+parser.add_argument('--checkpoint_path', help='Resume from this checkpoint', default=None, type=str)
+parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
+parser.add_argument('--wandb_run_id', help='The run ID for wandb', required=False, type=str)
+parser.add_argument('--use_augmentation', help='Whether to use data augmentation', default=True, type=str2bool)
+parser.add_argument('--train_root', help='the folder that contains train.txt and val.txt', default='filelists', type=str)
+parser.add_argument('--version', help='The train.txt and val.txt directory', default='v1', type=str)
+args = parser.parse_args()
+
+
+global_step = 0
+global_epoch = 0
+use_wandb=True
+use_augmentation= True
+version = 'v1'
+use_cuda = torch.cuda.is_available()
+
+print('use_cuda: {}'.format(use_cuda))
+
+def compute_cosine_similarity(audio, frames):
+    # 归一化
+    audio_normalized = F.normalize(audio, p=2, dim=1)   # [B, output_dim]
+    frames_normalized = F.normalize(frames, p=2, dim=1) # [B, output_dim]
+    
+    # 计算余弦相似度
+    cosine_sim = torch.sum(audio_normalized * frames_normalized, dim=1)  # [B]
+    
+    loss = 1 - cosine_sim.mean()
+    return loss
+
+def save_sample_images(x, g, gt, global_step, checkpoint_dir):
+    '''
+    refs: Reference images (extracted from the input x with channels 3 onward).
+    inps: Input images (extracted from the input x with the first 3 channels).
+    g: Generated images by the model.
+    gt: Ground truth images.
+    '''
+    x = (x.detach().cpu().numpy().transpose(0, 2, 3, 4, 1) * 255.).astype(np.uint8)
+    g = (g.detach().cpu().numpy().transpose(0, 2, 3, 4, 1) * 255.).astype(np.uint8)
+    gt = (gt.detach().cpu().numpy().transpose(0, 2, 3, 4, 1) * 255.).astype(np.uint8)
+
+    refs, inps = x[..., 9:], x[..., :3]
+    folder = join(checkpoint_dir, "samples_step{:09d}".format(global_step))
+    if not os.path.exists(folder): os.mkdir(folder)
+    collage = np.concatenate((refs, inps, g, gt), axis=-2)
+    for batch_idx, c in enumerate(collage):
+        for t in range(len(c)):
+            cv2.imwrite('{}/{}_{}.jpg'.format(folder, batch_idx, t), c[t])
+
+device = torch.device("cuda" if use_cuda else "cpu")
+syncnet = TransformerSyncnet(num_heads=8, num_encoder_layers=6).to(device)
+for p in syncnet.parameters():
+    p.requires_grad = False
+
+# Loss functions
+cross_entropy_loss = nn.BCEWithLogitsLoss()
+recon_loss = nn.L1Loss()
+mse_loss = nn.MSELoss()
+bce_loss = nn.BCELoss()
+
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
+
+def get_sync_loss(mel, g):
+    g = g[:, :, :, g.size(3)//2:]
+    g = torch.cat([g[:, :, i] for i in range(syncnet_T)], dim=1)
+    output, _, _ = syncnet(g, mel, 10)
+    y = torch.ones(g.size(0), dtype=torch.float).unsqueeze(1).to(device)
+    return cross_entropy_loss(output, y)
+
+def bottom_half_masked_mse_loss(pred, target):
+    # 创建一个掩码，下半部分为1，上半部分为0
+    mask = torch.zeros_like(pred)
+    half_height = 192
+    mask[:, :, :, half_height:, :] = 1.0
+
+    # 计算MSE损失
+    mse = nn.MSELoss(reduction='none')(pred, target)
+    masked_mse = mse * mask
+    return masked_mse.mean()
+
+def mouth_region_loss(pred, target):
+    """
+    计算嘴部区域的损失，更加关注牙齿细节
+    """
+    # 定义嘴部区域的坐标 (根据图像尺寸调整)
+    # 假设图像尺寸为 (384, 384)，嘴部区域大约在下半部分的中心区域
+    mouth_region_height_start = 250  # 嘴部区域起始高度
+    mouth_region_height_end = 350    # 嘴部区域结束高度
+    mouth_region_width_start = 150   # 嘴部区域起始宽度
+    mouth_region_width_end = 230     # 嘴部区域结束宽度
+    
+    # 创建嘴部区域掩码
+    mask = torch.zeros_like(pred)
+    mask[:, :, :, mouth_region_height_start:mouth_region_height_end, 
+         mouth_region_width_start:mouth_region_width_end] = 1.0
+    
+    # 计算嘴部区域的MSE损失
+    mse = nn.MSELoss(reduction='none')(pred, target)
+    mouth_mse = mse * mask
+    
+    # 可以添加额外的权重来更关注牙齿细节
+    # 例如，可以使用边缘检测来突出牙齿边界
+    return mouth_mse.mean()
+
+def print_grad_norm(name, module, grad_input, grad_output):
+    should_print = global_step % 1000 == 0
+    if should_print:
+        print()
+        print(f"Module: {module.__class__.__name__}", name)
+        if isinstance(module, torch.nn.Conv2d):
+            print(f"Input Channels: {module.in_channels}, Output Channels: {module.out_channels}")
+        
+        # 检查梯度是否为 None
+        grad_input_norm = grad_input[0].norm().item() if grad_input[0] is not None else 0
+        grad_output_norm = grad_output[0].norm().item() if grad_output[0] is not None else 0
+        
+        print(f"Grad Input Norm: {grad_input_norm:.6f}")
+        print(f"Grad Output Norm: {grad_output_norm:.6f}")
+        
+        # 验证梯度是否合理
+        if grad_input_norm < 1e-6 and grad_output_norm > 1e-6:
+            print("!!!!---Potential vanishing gradient detected---!!!!")
+        print()
+
+# Added by eddy
+def get_current_lr(optimizer):
+    # Assuming there is only one parameter group
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
+
+def trepa_loss(real_frames, generated_frames):
+    """
+    参数:
+    - real_frames: shape [B, C, T, H, W] (2, 3, 4, 384, 384)
+    - generated_frames: shape [B, C, T, H, W]
+    - audio_features: shape [B, C_audio, H_audio, W_audio] (2, 128, 12, 12)
+    """
+    B, C_video, T, H_video, W_video = real_frames.shape
+
+    # 1. 计算帧间差异 (沿时间维度 T)
+    # delta_real/delta_gen shape: [B, C_video, T-1, H_video, W_video]
+    delta_real = torch.diff(real_frames, dim=2)  # t+1 - t
+    delta_gen = torch.diff(generated_frames, dim=2)
+
+    # 4. 计算损失（使用 smooth L1 或 MSE）
+    loss = F.smooth_l1_loss(delta_gen, delta_real, reduction='mean')
+
+    return loss
+
+def train(device, model, train_data_loader, test_data_loader, optimizer_G, optimizer_D,
+          checkpoint_dir=None, checkpoint_interval=None, nepochs=None, should_print_grad_norm=False):
+
+    global global_step, global_epoch
+    resumed_step = global_step
+
+    patience = 55000
+
+    current_lr_G = get_current_lr(optimizer_G)
+    current_lr_D = get_current_lr(optimizer_D)
+    print('The learning rate for Generator is: {0}'.format(current_lr_G))
+    print('The learning rate for Discriminator is: {0}'.format(current_lr_D))
+
+    # Added by eddy
+    scheduler_G = ReduceLROnPlateau(optimizer_G, mode='min', factor=0.9, patience=patience)
+    scheduler_D = ReduceLROnPlateau(optimizer_D, mode='min', factor=0.9, patience=patience)
+
+    # Initialize LPIPS model
+    lpips_loss = lpips.LPIPS(net='vgg').to(device)  # You can choose 'alex', 'vgg', or 'squeeze'
+
+    eval_loss = 0.0
+
+    syncnet_wt = hparams.syncnet_wt
+    sync_loss = 0.
+
+    # Labels for adversarial training
+    real_label = 1.0
+    fake_label = 0.0
+
+    model.train()
+
+    while global_epoch < nepochs:
+        current_lr_G = get_current_lr(optimizer_G)
+        current_lr_D = get_current_lr(optimizer_D)
+                
+        #print('Starting Epoch: {}'.format(global_epoch))
+        running_sync_loss, running_l1_loss = 0., 0.
+        prog_bar = tqdm(enumerate(train_data_loader))
+        running_img_loss = 0.0
+        running_disc_loss = 0.0
+        running_gen_loss = 0.0
+        running_adv_loss = 0.0
+                
+        for step, (x, indiv_mels, mel, gt) in prog_bar:
+            #print("The x shape", x.shape)
+            if x.shape[0] == hparams.batch_size:
+                # Move data to CUDA device
+                x = x.to(device)
+                
+                if hparams.syncnet_wt > 0.:
+                    # This is only being used by the sync loss
+                    mel = mel.to(device)
+                    
+                indiv_mels = indiv_mels.to(device)
+                gt = gt.to(device)
+
+                # Create labels
+                real_labels = torch.full((gt.size(0),), real_label, dtype=torch.float, device=device)
+                fake_labels = torch.full((gt.size(0),), fake_label, dtype=torch.float, device=device)
+
+                # ------------------
+                #  Train Discriminator
+                # ------------------
+                optimizer_D.zero_grad()
+
+                # Real images
+                real_output = model.discriminator(mel, gt)
+                real_loss = bce_loss(real_output.view(-1), real_labels)
+                
+                # Fake images
+                with torch.no_grad():  # No need to compute gradients for generator here
+                    fake_gt, _, _ = model.generator(indiv_mels, x, None)
+                
+                fake_output = model.discriminator(mel, fake_gt.detach())
+                fake_loss = bce_loss(fake_output.view(-1), fake_labels)
+                
+                # Total discriminator loss
+                d_loss = (real_loss + fake_loss) / 2
+                d_loss.backward()
+                optimizer_D.step()
+
+                # ------------------
+                #  Train Generator
+                # ------------------
+                optimizer_G.zero_grad()
+
+                with autocast():
+                    g, face_embedding, audio_embedding = model.generator(indiv_mels, x, None)
+                    
+                    # Compare two images
+                    '''
+                    The g and gt shape is torch.Size([2, 3, 5, 192, 192]), and vgg is expecting [batch, channels, h, w]
+                    the 5 here represent the number of frames, so we either need to loop through them or combine them
+                    we choose to collapse
+                    '''
+                    num_of_frames = g.shape[2]
+                    full_losses = []
+                    
+                    full_disc_loss = 0
+
+                    if hparams.disc_wt > 0:
+                        for i in range(num_of_frames):
+                            # Extract the i-th frame from gen_image and gt_image
+                            gen_frame = g[:, :, i, :, :]  # Shape: [batch_size, 3, 192, 192]
+                            gt_frame = gt[:, :, i, :, :]    # Shape: [batch_size, 3, 192, 192]
+
+                            full_frame_loss = lpips_loss(gen_frame, gt_frame)
+                            full_losses.append(full_frame_loss)
+                        
+                        # Average the loss over all frames
+                        full_disc_loss = torch.mean(torch.stack(full_losses))
+                        running_disc_loss += full_disc_loss.item()
+
+                    if hparams.syncnet_wt > 0.:
+                        sync_loss = get_sync_loss(mel, g)
+                    else:
+                        sync_loss = 0.
+
+                    l1loss = recon_loss(g, gt)
+                    
+                    # 计算嘴部区域损失
+                    mouth_loss = mouth_region_loss(g, gt)
+                    
+                    tempora_loss = trepa_loss(gt, g)
+
+                    # Adversarial loss (Generator tries to fool discriminator)
+                    adv_output = model.discriminator(mel, g)
+                    adv_loss = bce_loss(adv_output.view(-1), real_labels)  # Generator wants discriminator to think fakes are real
+
+                    running_l1_loss += l1loss.item()
+                    running_adv_loss += adv_loss.item()
+                    
+                    # Total generator loss
+                    g_loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + mouth_loss + 0.1 * adv_loss
+
+                g_loss.backward()
+                optimizer_G.step()
+
+                if global_step % checkpoint_interval == 0:
+                    save_sample_images(x, g, gt, global_step, checkpoint_dir)
+
+                global_step += 1
+
+                running_img_loss += g_loss.item()
+                running_gen_loss += g_loss.item()
+
+                if hparams.syncnet_wt > 0.:
+                    running_sync_loss += sync_loss.item()
+                else:
+                    running_sync_loss += 0.
+
+                if global_step == 1 or global_step % checkpoint_interval == 0:
+                    save_checkpoint(
+                        model, optimizer_G, optimizer_D, global_step, checkpoint_dir, global_epoch)
+
+                avg_img_loss = (running_img_loss) / (step + 1)
+                avg_l1_loss = running_l1_loss / (step + 1)
+                avg_disc_loss = running_disc_loss / (step + 1)
+                avg_gen_loss = running_gen_loss / (step + 1)
+                avg_adv_loss = running_adv_loss / (step + 1)
+                
+                if global_step % hparams.eval_interval == 0:
+                    with torch.no_grad():
+                        eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler_G, 20)
+
+                prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Adv: {avg_adv_loss:.5f}, mouth: {mouth_loss.item():.6f}, LR_G: {current_lr_G:.7f}, LR_D: {current_lr_D:.7f}")
+                
+                metrics = {
+                    "train/overall_loss": avg_img_loss, 
+                    "train/avg_l1": avg_l1_loss, 
+                    "train/sync_loss": running_sync_loss / (step + 1), 
+                    "train/disc_loss": avg_disc_loss,
+                    "train/gen_loss": avg_gen_loss,
+                    "train/adv_loss": avg_adv_loss,
+                    "train/mouth_loss": mouth_loss.item(),
+                    "params/step": global_step,
+                    "params/learning_rate_G": current_lr_G,
+                    "params/learning_rate_D": current_lr_D,
+                    "params/l1_wt": hparams.l1_wt,
+                    "params/bottom_l1_wt": hparams.bottom_l1_wt,
+                    "params/mouth_wt": hparams.mouth_wt,
+                    "params/syncnet_wt": hparams.syncnet_wt,
+                    "params/disc_wt": hparams.disc_wt,
+                }
+                if use_wandb: 
+                    wandb.log({**metrics})
+
+        global_epoch += 1
+
+def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, eval_steps = 100):
+    print('Evaluating for {} steps'.format(eval_steps))
+    sync_losses, recon_losses = [], []
+    step = 0
+    while 1:
+        for x, indiv_mels, mel, gt in test_data_loader:
+            if x.shape[0] == hparams.batch_size:
+                step += 1
+                model.eval()
+
+                # Move data to CUDA device
+                x = x.to(device)
+                gt = gt.to(device)
+                indiv_mels = indiv_mels.to(device)
+                mel = mel.to(device)
+
+                g, _, _ = model.generator(indiv_mels, x)
+
+                sync_loss = get_sync_loss(mel, g)
+                
+                l1loss = recon_loss(g, gt)
+
+                sync_losses.append(sync_loss.item())
+                recon_losses.append(l1loss.item())
+
+                averaged_sync_loss = sum(sync_losses) / len(sync_losses)
+                averaged_recon_loss = sum(recon_losses) / len(recon_losses)
+
+                print('Eval Loss, L1: {}, Sync loss: {}'.format(averaged_recon_loss, averaged_sync_loss))
+
+                metrics = {"val/l1_loss": averaged_recon_loss, 
+                        "val/sync_loss": averaged_sync_loss, 
+                        "val/epoch": global_epoch,
+                        }
+                if use_wandb:
+                    wandb.log({**metrics})
+
+                scheduler.step(averaged_sync_loss + averaged_recon_loss)
+
+                if step > eval_steps: 
+                    return averaged_sync_loss
+
+def save_checkpoint(model, optimizer_G, optimizer_D, step, checkpoint_dir, epoch):
+    checkpoint_path = join(
+        checkpoint_dir, "checkpoint_step{:09d}.pth".format(global_step))
+    torch.save({
+        "state_dict": model.state_dict(),
+        "optimizer_G": optimizer_G.state_dict(),
+        "optimizer_D": optimizer_D.state_dict(),
+        "global_step": step,
+        "global_epoch": epoch,
+    }, checkpoint_path)
+    print("Saved checkpoint:", checkpoint_path)
+
+def _load(checkpoint_path):
+    if use_cuda:
+        checkpoint = torch.load(checkpoint_path)
+    else:
+        checkpoint = torch.load(checkpoint_path,
+                                map_location=lambda storage, loc: storage)
+    return checkpoint
+
+def load_checkpoint(path, model, optimizer_G, optimizer_D, reset_optimizer=False, overwrite_global_states=True):
+    global global_step
+    global global_epoch
+
+    print("Load checkpoint from: {}".format(path))
+    checkpoint = _load(path)
+    s = checkpoint["state_dict"]
+    new_s = {}
+    
+    # Check if the checkpoint is from the GAN model or the original model
+    is_gan_checkpoint = any(k.startswith("generator.") for k in s.keys())
+    
+    if is_gan_checkpoint:
+        # Checkpoint is from the GAN model
+        for k, v in s.items():
+            if k in model.state_dict() and v.size() == model.state_dict()[k].size():
+                new_s[k.replace('module.', '')] = v
+        model.load_state_dict(new_s, strict=False)
+    else:
+        # Checkpoint is from the original model, load weights to the generator
+        for k, v in s.items():
+            # Add "generator." prefix to load into the generator part of GAN
+            gan_key = "generator." + k
+            if gan_key in model.state_dict() and v.size() == model.state_dict()[gan_key].size():
+                new_s[gan_key] = v
+        model.load_state_dict(new_s, strict=False)
+    
+    if not reset_optimizer:
+        if "optimizer_G" in checkpoint:
+            print("Load optimizer_G state from {}".format(path))
+            optimizer_G.load_state_dict(checkpoint["optimizer_G"])
+        if "optimizer_D" in checkpoint:
+            print("Load optimizer_D state from {}".format(path))
+            optimizer_D.load_state_dict(checkpoint["optimizer_D"])
+        # If loading from original model, optimizer states won't be available
+        # In that case, we just continue with newly initialized optimizers
+            
+    if overwrite_global_states:
+        global_step = checkpoint["global_step"] if "global_step" in checkpoint else 0
+        global_epoch = checkpoint["global_epoch"] if "global_epoch" in checkpoint else 0
+
+    # Set learning rates
+    if optimizer_G != None:
+        for param_group in optimizer_G.param_groups:
+            param_group['lr'] = 0.00001
+    if optimizer_D != None:
+        for param_group in optimizer_D.param_groups:
+            param_group['lr'] = 0.00001
+
+    return model
+
+if __name__ == "__main__":
+    checkpoint_dir = args.checkpoint_dir
+    use_wandb = args.use_wandb
+    use_augmentation = args.use_augmentation
+    version = args.version
+
+    # Dataset and Dataloader setup
+    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation, img_size_factor=2, use_face_mesh=False)
+    test_dataset = Dataset('val', args.data_root, args.train_root, False, img_size_factor=2, use_face_mesh=False)
+
+    if hparams.resunet_num_workers == 0:
+        train_dataset.face_mesh = mp.solutions.face_mesh.FaceMesh(
+            static_image_mode=False, 
+            max_num_faces=1, 
+            refine_landmarks=True
+        )
+        
+    train_data_loader = data_utils.DataLoader(
+        train_dataset, batch_size=hparams.batch_size, shuffle=True,
+        num_workers=hparams.resunet_num_workers)
+        
+    test_data_loader = data_utils.DataLoader(
+        test_dataset, batch_size=hparams.batch_size,
+        num_workers=4)
+
+    device = torch.device("cuda" if use_cuda else "cpu")
+
+    # Model
+    print('Using GAN model with ResUNet384V5 generator')
+    model = Wav2LipGAN().to(device)
+
+    # Optimizers
+    optimizer_G = optim.Adam([p for p in model.generator.parameters() if p.requires_grad],
+                             lr=hparams.initial_learning_rate)
+    optimizer_D = optim.Adam([p for p in model.discriminator.parameters() if p.requires_grad],
+                             lr=hparams.initial_learning_rate/2)  # Discriminator might need a lower learning rate
+
+    if args.checkpoint_path is not None:
+        load_checkpoint(args.checkpoint_path, model, optimizer_G, optimizer_D, reset_optimizer=True)
+        
+    load_checkpoint(args.syncnet_checkpoint_path, syncnet, None, None, reset_optimizer=True, overwrite_global_states=False)
+
+    if not os.path.exists(checkpoint_dir):
+        os.mkdir(checkpoint_dir)
+
+    if use_wandb:
+        wandb.init(
+            # set the wandb project where this run will be logged
+            project="my-wav2lip-gan",
+            id=args.wandb_run_id, 
+            resume="allow",
+            # track hyperparameters and run metadata
+            config={
+                "learning_rate_G": hparams.initial_learning_rate,
+                "learning_rate_D": hparams.initial_learning_rate/2,
+                "architecture": "Wav2lip-GAN",
+                "dataset": "MyOwn",
+                "epochs": 2000000,
+            }
+        )
+        
+    for name, module in model.named_modules():
+        if isinstance(module, (Conv2d, Conv2dTranspose, nn.Linear, nn.Conv2d, nn.TransformerEncoderLayer)):
+            module.register_backward_hook(lambda module, grad_input, grad_output, name=name: print_grad_norm(name, module, grad_input, grad_output))
+
+    print('total trainable params for generator {}'.format(sum(p.numel() for p in model.generator.parameters() if p.requires_grad)))
+    print('total trainable params for discriminator {}'.format(sum(p.numel() for p in model.discriminator.parameters() if p.requires_grad)))
+    
+    # Train!
+    train(device, model, train_data_loader, test_data_loader, optimizer_G, optimizer_D,
+          checkpoint_dir=checkpoint_dir,
+          checkpoint_interval=hparams.checkpoint_interval,
+          nepochs=hparams.nepochs)
