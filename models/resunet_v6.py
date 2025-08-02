@@ -40,7 +40,6 @@ class ResUNet384V6(nn.Module):
 
         self.leaky_relu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
         
-        self.output_block = ProcessBlock384(3)
         
     def freeze_blocks(self, num_blocks_to_freeze):
         """
@@ -135,7 +134,6 @@ class ResUNet384V6(nn.Module):
     def forward(self, audio_sequences, face_sequences, place = None, step=None):
         temp_output = None
         
-        activation = "RELU"
         input_dim_size = len(face_sequences.size())
         B = audio_sequences.size(0)       
         
@@ -166,33 +164,17 @@ class ResUNet384V6(nn.Module):
                 face_input = new_input
             else:
                 face_input = noisy_face_sequences  # 第一个块处理噪声图像
-            if len(self.blocks) > 1 and i < len(self.blocks) - 1:
-                activation = "RELU"
-            else:
-                activation = "NONE"
-            temp_output = self.forward_impl(audio_sequences, face_input, block.face_encoder_blocks, block.audio_encoder, block.face_decoder_blocks, block.output_block, 12, activation)
+
+            temp_output = self.forward_impl(audio_sequences, face_input, block.face_encoder_blocks, block.audio_encoder, block.face_decoder_blocks, block.output_block)
         
-        activation = "NONE"
-        if temp_output is not None:
-          final_input = torch.cat([temp_output, face_sequences[:, 3:, :, :]], dim=1) 
-          h = final_input.size(2)  # 获取高度
-          half_h = h // 2  # 计算上半部分的高度
-          final_input[:, :3, :half_h, :] = face_sequences[:, :3, :half_h, :]  # 替换上半部分
-          
-          step2_face_sequences = final_input
-        else:
-          step2_face_sequences = noisy_face_sequences
-        outputs = self.forward_impl(audio_sequences, step2_face_sequences, self.output_block.face_encoder_blocks, self.output_block.audio_encoder, self.output_block.face_decoder_blocks, self.output_block.output_block, 3, activation)
         
         if input_dim_size > 4:
-            outputs = torch.split(outputs, B, dim=0) # [(B, C, H, W)]
+            outputs = torch.split(temp_output, B, dim=0) # [(B, C, H, W)]
             outputs = torch.stack(outputs, dim=2) # (B, C, T, H, W)
-
-        outputs = torch.sigmoid(outputs)
       
         return outputs, None, None
 
-    def forward_impl(self, audio_sequences, face_sequences, face_encoder_blocks, audio_encoder, face_decoder_blocks, output_block, output_channels, activation):
+    def forward_impl(self, audio_sequences, face_sequences, face_encoder_blocks, audio_encoder, face_decoder_blocks, output_block):
         # audio_sequences = (B, T, 1, 80, 16)
         B = audio_sequences.size(0)
 
@@ -219,11 +201,7 @@ class ResUNet384V6(nn.Module):
                 x = torch.cat((x, skip), dim=1)
 
         x = output_block(x)
-        if output_channels == 12:
-          if activation == "RELU":
-            x = self.leaky_relu(self.bn12(x))
-          elif activation == "SIGMOID":
-            x = torch.sigmoid(self.bn12(x))
+        x = torch.sigmoid(self.bn3(x))
 
             
         return x
