@@ -51,6 +51,7 @@ class ResUNet384V6(nn.Module):
         for i in range(min(num_blocks_to_freeze, len(self.blocks))):
             for param in self.blocks[i].parameters():
                 param.requires_grad = False
+                print('freezeing')
                 
     def unfreeze_blocks(self, num_blocks_to_unfreeze=None):
         """
@@ -157,10 +158,6 @@ class ResUNet384V6(nn.Module):
         for i, block in enumerate(self.blocks):
             if temp_output is not None:
                 new_input = torch.cat([temp_output, face_sequences[:, 3:, :, :]], dim=1)  # 第二个及后续块处理前一个块的输出
-                # 将new_input的前3个通道的上半部分替换为face_sequences的前3个通道的上半部分
-                h = new_input.size(2)  # 获取高度
-                half_h = h // 2  # 计算上半部分的高度
-                new_input[:, :3, :half_h, :] = face_sequences[:, :3, :half_h, :]  # 替换上半部分
                 face_input = new_input
             else:
                 face_input = noisy_face_sequences  # 第一个块处理噪声图像
