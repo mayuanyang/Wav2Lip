@@ -201,9 +201,7 @@ class ResUNet384V6(nn.Module):
                 x = torch.cat((x, skip), dim=1)
 
         x = output_block(x)
-        x = torch.sigmoid(self.bn3(x))
-
-            
+                    
         return x
 
 
@@ -311,4 +309,6 @@ class ProcessBlock384(nn.Module):
             )
             ]) 
 
-        self.output_block = nn.Sequential(nn.Conv2d(176, output_block_channels, kernel_size=1, stride=1, padding=0))
+        self.output_block = nn.Sequential(
+          nn.Conv2d(176, output_block_channels, kernel_size=1, stride=1, padding=0),
+          nn.Sigmoid())
