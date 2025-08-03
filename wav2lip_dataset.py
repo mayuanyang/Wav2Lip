@@ -59,7 +59,7 @@ class Dataset(object):
     
 
 
-    def read_window(self, window_fnames, is_gt):
+    def read_window(self, window_fnames, augment_option):
         if window_fnames is None: return None
         window = []
         for fname in window_fnames:
@@ -87,32 +87,31 @@ class Dataset(object):
                     2 for brightness
                     3 for contrast
                     '''
-                    if self.use_augmentation and not is_gt:
-                      option = random.choices([0, 0, 0, 0, 0, 0, 1, 2, 3, 4])[0] 
-                      
-                      if option == 1:
-                          img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                          img = cv2.merge([img_gray, img_gray, img_gray])
-                      elif option == 2:
-                          brightness_factor = np.random.uniform(0.7, 1.3)
-                          img = cv2.convertScaleAbs(img, alpha=brightness_factor, beta=0)
-                      elif option == 3:
-                          contrast_factor = np.random.uniform(0.7, 1.3)
-                          img = cv2.convertScaleAbs(img, alpha=contrast_factor, beta=0)
-                      elif option == 4:
-                          angle = np.random.uniform(-15, 15)  # Random angle between -15 and 15 degrees
+                    
+                    
+                    if augment_option == 1:
+                        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                        img = cv2.merge([img_gray, img_gray, img_gray])
+                    elif augment_option == 2:
+                        brightness_factor = np.random.uniform(0.7, 1.3)
+                        img = cv2.convertScaleAbs(img, alpha=brightness_factor, beta=0)
+                    elif augment_option == 3:
+                        contrast_factor = np.random.uniform(0.7, 1.3)
+                        img = cv2.convertScaleAbs(img, alpha=contrast_factor, beta=0)
+                    elif augment_option == 4:
+                        angle = np.random.uniform(-15, 15)  # Random angle between -15 and 15 degrees
 
-                          # Get the image dimensions
-                          (h, w) = img.shape[:2]
+                        # Get the image dimensions
+                        (h, w) = img.shape[:2]
 
-                          # Calculate the center of the image
-                          center = (w // 2, h // 2)
+                        # Calculate the center of the image
+                        center = (w // 2, h // 2)
 
-                          # Get the rotation matrix
-                          rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+                        # Get the rotation matrix
+                        rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
 
-                          # Perform the rotation
-                          img = cv2.warpAffine(img, rotation_matrix, (w, h))
+                        # Perform the rotation
+                        img = cv2.warpAffine(img, rotation_matrix, (w, h))
 
                 window.append(img)
 
@@ -226,13 +225,18 @@ class Dataset(object):
             if window_fnames is None or wrong_window_fnames is None:
                 should_load_diff_video = True
                 continue
+            
+            if self.use_augmentation:
+              augment_option = random.choices([0, 0, 0, 0, 0, 0, 1, 2, 3, 4])[0] 
+            else:
+              augment_option = 0
 
-            window = self.read_window(window_fnames, True)
+            window = self.read_window(window_fnames, 0)
             if window is None:
                 should_load_diff_video = True
                 continue
 
-            wrong_window = self.read_window(wrong_window_fnames, False)
+            wrong_window = self.read_window(wrong_window_fnames, augment_option)
             if wrong_window is None:
                 should_load_diff_video = True
                 continue
@@ -246,12 +250,12 @@ class Dataset(object):
             forbidden_images = set(window_fnames).union(set(wrong_window_fnames)).union(set(ref1_window_fnames))
             ref2_window_fnames = self.get_ref_images(forbidden_images, img_names)
             
-            ref1_window = self.read_window(ref1_window_fnames, False)
+            ref1_window = self.read_window(ref1_window_fnames, augment_option)
             if ref1_window is None:
                 should_load_diff_video = True
                 continue
 
-            ref2_window = self.read_window(ref2_window_fnames, False)
+            ref2_window = self.read_window(ref2_window_fnames, augment_option)
             if ref2_window is None:
                 should_load_diff_video = True
                 continue
