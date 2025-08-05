@@ -9,10 +9,10 @@ from .conv import Conv2dTranspose, Conv2d, nonorm_Conv2d
 def linear_schedule(steps=200):
     """Generate a linear schedule for diffusion steps"""
     # Create a linear schedule from 0.0001 to 0.02 for 20 steps
-    return torch.linspace(0.0001, 0.9, steps)
+    return torch.linspace(0.02, 0.02, steps)
   
 class ResUNet384V6(nn.Module):
-    def __init__(self, num_of_blocks=2, diffusion_steps=200):
+    def __init__(self, num_of_blocks=2, diffusion_steps=1):
         super(ResUNet384V6, self).__init__()
         
         self.diffusion_steps = diffusion_steps
@@ -164,7 +164,7 @@ class ResUNet384V6(nn.Module):
 
             temp_output = self.forward_impl(audio_sequences, face_input, block.face_encoder_blocks, block.audio_encoder, block.face_decoder_blocks, block.output_block)
         
-        
+        outputs = temp_output
         if input_dim_size > 4:
             outputs = torch.split(temp_output, B, dim=0) # [(B, C, H, W)]
             outputs = torch.stack(outputs, dim=2) # (B, C, T, H, W)
