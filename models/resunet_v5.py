@@ -153,10 +153,10 @@ class SparseSelfAttentionBlock(nn.Module):
         output = output.permute(0, 2, 1).view(B, C, H, W)
         return output
 
-def linear_schedule(steps=20):
+def linear_schedule(steps=2):
     """Generate a linear schedule for diffusion steps"""
     # Create a linear schedule from 0.0001 to 0.02 for 20 steps
-    return torch.linspace(0.0001, 0.9, steps)
+    return torch.linspace(0.1, 0.1, steps)
 
 def construct_encoder_layers(num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3):
     layers = []
@@ -191,7 +191,7 @@ def construct_decoder_layers(num_of_layers, input_channels, output_channels, fir
 
       
 class ResUNet384V5(nn.Module):
-    def __init__(self, diffusion_steps=200):
+    def __init__(self, diffusion_steps=2):
         super(ResUNet384V5, self).__init__()
         
         self.diffusion_steps = diffusion_steps

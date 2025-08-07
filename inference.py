@@ -347,7 +347,7 @@ def load_model(path, lora_path=None):
   elif args.version == 'V5':
     model = ResUNet384V5()
   elif args.version == 'V6':
-    model = ResUNet384V6(args.model_layers)
+    model = ResUNet384V6(args.model_layers, 2)
   else:
     model = ResUNet384V2()
   print("Load checkpoint from: {}".format(path))
