@@ -9,7 +9,7 @@ from .conv import Conv2dTranspose, Conv2d, nonorm_Conv2d
 def linear_schedule(steps=200):
     """Generate a linear schedule for diffusion steps"""
     # Create a linear schedule from 0.0001 to 0.02 for 20 steps
-    return torch.linspace(0.02, 0.02, steps)
+    return torch.linspace(0.1, 0.1, steps)
   
 class ResUNet384V6(nn.Module):
     def __init__(self, num_of_blocks=2, diffusion_steps=1):

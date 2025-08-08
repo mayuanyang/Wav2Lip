@@ -237,14 +237,18 @@ class ResUNet384V5(nn.Module):
         self.audio_encoder1 = nn.Sequential(
             Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
             Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(32, 32, kernel_size=3, stride=1, padding=1, residual=True),
        
             Conv2d(32, 64, kernel_size=3, stride=(2, 1), padding=1),
+            Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
 
             Conv2d(64, 128, kernel_size=3, stride=(2,1), padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
+            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             
             Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
         self.audio_adapter1 = nn.AdaptiveAvgPool2d((96, 96)) # Target size for cross-attention
         self.audio_pos_encoder_ca = LearnablePositionalEncoding2D(d_model=256, max_h=96, max_w=96, dropout=0.1)
