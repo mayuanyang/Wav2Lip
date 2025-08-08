@@ -13,6 +13,7 @@ import traceback
 import torch.nn.functional as F
 from scipy.ndimage import gaussian_filter
 import mediapipe as mp
+import librosa
 
 image_cache = {} #multiprocessing.Manager().dict()
 orig_mel_cache = {} #multiprocessing.Manager().dict()
@@ -33,9 +34,10 @@ LIPS_LANDMARKS = [
 ]
 
 class Dataset(object):
-    def __init__(self, split, data_root, train_root, use_augmentation, img_size_factor=1, use_face_mesh=True):
+    def __init__(self, split, data_root, train_root, use_augmentation, use_audio_augmentation=False, img_size_factor=1, use_face_mesh=True):
         self.all_videos = get_image_list(data_root, split, train_root)
         self.use_augmentation = use_augmentation
+        self.use_audio_augmentation = use_audio_augmentation
         self.img_size_factor = img_size_factor
         if use_face_mesh:
           self.mp_face_mesh = mp.solutions.face_mesh
@@ -227,7 +229,7 @@ class Dataset(object):
                 continue
             
             if self.use_augmentation:
-              augment_option = random.choices([0, 0, 0, 0, 0, 0, 1, 2, 3, 4])[0] 
+              augment_option = random.choices([0, 0, 0, 0, 0, 0, 1, 2, 3, 4])[0]
             else:
               augment_option = 0
 
@@ -268,6 +270,12 @@ class Dataset(object):
                     #print('The audio cache hit ', wavpath)
                 else:
                     wav = audio.load_wav(wavpath, hparams.sample_rate)
+                    # Apply audio augmentation if enabled
+                    if self.use_audio_augmentation:  # Apply pitch shift when audio augmentation is enabled
+                        # Pitch shift by a random number of semitones between -2 and 2
+                        n_steps = np.random.uniform(-2, 2)
+                        # Use librosa's pitch_shift with preserve_length=True to maintain audio duration
+                        wav = librosa.effects.pitch_shift(wav, sr=hparams.sample_rate, n_steps=n_steps, preserve_length=True)
                     orig_mel = audio.melspectrogram(wav).T
                     if len(orig_mel_cache) < hparams.audio_cache_size:
                       orig_mel_cache[wavpath] = orig_mel
@@ -411,4 +419,3 @@ class Dataset(object):
         result = np.stack(blurred_frames, axis=0)  # shape: (T, H, W, C)
         result = np.transpose(result, (3, 0, 1, 2))  # shape: (C, T, H, W)
         return result
-    

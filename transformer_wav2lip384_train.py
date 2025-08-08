@@ -53,6 +53,7 @@ parser.add_argument('--checkpoint_path', help='Resume from this checkpoint', def
 parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
 parser.add_argument('--wandb_run_id', help='The run ID for wandb', required=False, type=str)
 parser.add_argument('--use_augmentation', help='Whether to use data augmentation', default=True, type=str2bool)
+parser.add_argument('--use_audio_augmentation', help='Whether to use audio data augmentation', default=False, type=str2bool)
 parser.add_argument('--train_root', help='the folder that contains train.txt and val.txt', default='filelists', type=str)
 parser.add_argument('--num_of_unet_layers', help='The num of layers for resunet', default=2, type=int)
 parser.add_argument('--version', help='The train.txt and val.txt directory', default='v1', type=str)
@@ -435,7 +436,7 @@ def _load(checkpoint_path):
                                 map_location=lambda storage, loc: storage)
     return checkpoint
 
-def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_global_states=True):
+def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_global_states=True, strick=False):
     global global_step
     global global_epoch
 
@@ -446,7 +447,8 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
     for k, v in s.items():
       if k in model.state_dict() and v.size() == model.state_dict()[k].size():
         new_s[k.replace('module.', '')] = v
-    model.load_state_dict(new_s, strict=False)
+        
+    model.load_state_dict(new_s, strict=strick)
     if not reset_optimizer:
         optimizer_state = checkpoint["optimizer"]
         if optimizer_state is not None:
@@ -472,11 +474,12 @@ if __name__ == "__main__":
     checkpoint_dir = args.checkpoint_dir
     use_wandb = args.use_wandb
     use_augmentation = args.use_augmentation
+    use_audio_augmentation = args.use_audio_augmentation
     version = args.version
 
     # Dataset and Dataloader setup
-    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation, img_size_factor=2, use_face_mesh=False)
-    test_dataset = Dataset('val', args.data_root, args.train_root, False, img_size_factor=2, use_face_mesh=False)
+    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation, use_audio_augmentation, img_size_factor=2, use_face_mesh=False)
+    test_dataset = Dataset('val', args.data_root, args.train_root, False, False, img_size_factor=2, use_face_mesh=False)
 
     if hparams.resunet_num_workers == 0:
       train_dataset.face_mesh = mp.solutions.face_mesh.FaceMesh(
@@ -521,7 +524,7 @@ if __name__ == "__main__":
                            lr=hparams.initial_learning_rate)
 
     if args.checkpoint_path is not None:
-        load_checkpoint(args.checkpoint_path, model, optimizer, reset_optimizer=True)
+        load_checkpoint(args.checkpoint_path, model, optimizer, reset_optimizer=True, strick=True)
         
     load_checkpoint(args.syncnet_checkpoint_path, syncnet, None, reset_optimizer=True, overwrite_global_states=False)
 
