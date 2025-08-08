@@ -68,6 +68,8 @@ class Dataset(object):
     def crop_audio_window(self, spec, start_frame):
         # num_frames = (T x hop_size * fps) / sample_rate
         start_frame_num = self.get_frame_id(start_frame)
+        offset = random.choice([-1,0,1]) #随机左右移动一个frame作为数据增强
+        start_frame += offset
 
         """
         80. is a scaling factor used to convert the time in seconds to the index in the audio spectrogram.
