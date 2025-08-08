@@ -9,6 +9,7 @@ import torch
 import matplotlib.pyplot as plt
 from PIL import Image
 import mediapipe as mp
+import librosa
 
 face_image_cache = {} #multiprocessing.Manager().dict()
 file_exist_cache = {} #multiprocessing.Manager().dict()
@@ -33,10 +34,11 @@ LIPS_LANDMARKS = [
 
 class Dataset(object):
     
-    def __init__(self, split, data_root, train_root, use_augmentation, img_size_factor=1):
+    def __init__(self, split, data_root, train_root, use_augmentation, use_audio_augmentation=True, img_size_factor=1):
         print('-----')
         self.all_videos = get_image_list(data_root, split, train_root)
         self.use_augmentation = use_augmentation
+        self.use_audio_augmentation = use_audio_augmentation
         self.img_size_factor = img_size_factor
         self.mp_face_mesh = mp.solutions.face_mesh
         #self.face_mesh = self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
@@ -263,6 +265,12 @@ class Dataset(object):
                     #print('The audio cache hit ', wavpath)
                 else:
                     wav = audio.load_wav(wavpath, hparams.sample_rate)
+                    # Apply audio augmentation if enabled
+                    if self.use_audio_augmentation:  # Apply pitch shift when audio augmentation is enabled
+                        # Pitch shift by a random number of semitones between -2 and 2
+                        n_steps = np.random.uniform(-2, 2)
+                        # Use librosa's pitch_shift to change pitch
+                        wav = librosa.effects.pitch_shift(wav, sr=hparams.sample_rate, n_steps=n_steps)
                     orig_mel = audio.melspectrogram(wav).T
                     if len(orig_mel_cache) < hparams.syncnet_audio_cache_size:
                       orig_mel_cache[wavpath] = orig_mel
@@ -368,4 +376,3 @@ def save_sample_images(x):
     for idx, img in enumerate(x):
       # Save the concatenated image
       cv2.imwrite('img_{0}_concatenated.jpg'.format(idx), img)
-    

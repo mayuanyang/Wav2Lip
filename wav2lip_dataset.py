@@ -274,8 +274,8 @@ class Dataset(object):
                     if self.use_audio_augmentation:  # Apply pitch shift when audio augmentation is enabled
                         # Pitch shift by a random number of semitones between -2 and 2
                         n_steps = np.random.uniform(-2, 2)
-                        # Use librosa's pitch_shift with preserve_length=True to maintain audio duration
-                        wav = librosa.effects.pitch_shift(wav, sr=hparams.sample_rate, n_steps=n_steps, preserve_length=True)
+                        # Use librosa's pitch_shift to change pitch
+                        wav = librosa.effects.pitch_shift(wav, sr=hparams.sample_rate, n_steps=n_steps)
                     orig_mel = audio.melspectrogram(wav).T
                     if len(orig_mel_cache) < hparams.audio_cache_size:
                       orig_mel_cache[wavpath] = orig_mel
