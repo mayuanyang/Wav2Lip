@@ -249,7 +249,7 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, sch
     prog_bar = tqdm(enumerate(test_data_loader))
     losses = []
     while 1:
-        for step, (x, mel, y) in enumerate(test_data_loader):
+        for step, (x, mel, regression_y, classification_y) in enumerate(test_data_loader):
 
             model.eval()
 
@@ -258,8 +258,9 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, sch
 
             mel = mel.to(device)
 
-            output, audio_embedding, face_embedding = model(x, mel)
-            y = y.to(device)                
+            output, audio_embedding, face_embedding = model(x, mel, step)
+            classification_y = classification_y.unsqueeze(1).float()
+            y = classification_y.to(device)                
 
             loss = cross_entropy_loss(output, y) #if (global_epoch // 50) % 2 == 0 else contrastive_loss2(a, v, y)
             
@@ -426,6 +427,9 @@ if __name__ == "__main__":
         load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=True)
             
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
+    #scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=10)
+    #eval_model(test_data_loader, 750000, device, model, checkpoint_dir, scheduler)
+    
 
     train(device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=checkpoint_dir,

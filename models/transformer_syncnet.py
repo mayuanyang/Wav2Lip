@@ -193,13 +193,13 @@ class TransformerSyncnet(nn.Module):
         
         # --- Process audio modality ---
         audio_features1 = self.audio_encoder1(audio_embedding)  # (B, 512, H_a, W_a)
-        audio_features1 = self.audio_pos_encoder1(audio_features1)
+        #audio_features1 = self.audio_pos_encoder1(audio_features1)
         
         audio_features2 = self.audio_encoder2(audio_features1)
-        audio_features2 = self.audio_pos_encoder2(audio_features2)
+        #audio_features2 = self.audio_pos_encoder2(audio_features2)
         
         audio_features3 = self.audio_encoder3(audio_features2)
-        audio_features3 = self.audio_pos_encoder3(audio_features3)
+        #audio_features3 = self.audio_pos_encoder3(audio_features3)
         
         audio_features4 = self.audio_encoder4(audio_features3)
         audio_features4 = self.audio_pos_encoder(audio_features4)
