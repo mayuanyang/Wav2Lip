@@ -24,13 +24,12 @@ def get_face_landmarks_batch(image_paths):
     mp_face_mesh = mp.solutions.face_mesh
     face_mesh = mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True)
     
-    results = []
     for image_path in image_paths:
         try:
             # 读取图像
             image = cv2.imread(image_path)
             if image is None:
-                results.append(None)
+                save_landmarks(image_path, None)
                 continue
             
             # 转换为RGB
@@ -51,43 +50,104 @@ def get_face_landmarks_batch(image_paths):
                     x, y = lm.x * w, lm.y * h
                     lip_landmarks.append([x, y])
                 
-                results.append(np.array(lip_landmarks))
+                save_landmarks(image_path, np.array(lip_landmarks))
             else:
-                results.append(None)
+                save_landmarks(image_path, None)
         except Exception as e:
             print(f"Error processing {image_path}: {e}")
-            results.append(None)
+            save_landmarks(image_path, None)
     
     # 关闭资源
     face_mesh.close()
-    
-    return list(zip(image_paths, results))
 
 def process_image_batch(args):
     """
     处理图像批次的函数，用于多进程
     """
     image_paths, batch_size = args
-    return get_face_landmarks_batch(image_paths)
+    get_face_landmarks_batch(image_paths)
 
-def collect_all_images(data_root):
+def collect_all_images(data_root, abc_file_path):
     """
     收集所有需要处理的图像路径
+    从指定的文件读取子文件夹路径列表，每个子文件夹路径占一行
     """
     image_paths = []
-    for root, dirs, files in os.walk(data_root):
-        # 检查当前目录是否包含.jpg文件
-        jpg_files = [f for f in files if f.endswith('.jpg')]
-        if jpg_files:
-            for jpg_file in jpg_files:
-                image_path = os.path.join(root, jpg_file)
-                # 检查是否已有对应的landmarks文件
-                base_name = os.path.splitext(image_path)[0]
-                landmarks_path = base_name + ".npy"
-                if not os.path.exists(landmarks_path):
-                    image_paths.append(image_path)
+    
+    # 读取指定的文件获取子文件夹路径列表
+    if not os.path.exists(abc_file_path):
+        print(f"Error: abc file not found at {abc_file_path}")
+        return image_paths
+    
+    with open(abc_file_path, 'r') as f:
+        subfolders = [line.strip() for line in f.readlines() if line.strip()]
+    
+    # 遍历每个子文件夹
+    for subfolder in subfolders:
+        # 构造完整的子文件夹路径
+        full_subfolder_path = os.path.join(data_root, subfolder)
+        
+        # 检查子文件夹是否存在
+        if not os.path.exists(full_subfolder_path):
+            print(f"Warning: Subfolder {full_subfolder_path} does not exist, skipping...")
+            continue
+            
+        # 获取子文件夹中的所有.jpg文件
+        jpg_files = glob(os.path.join(full_subfolder_path, "*.jpg"))
+        
+        # 检查每个.jpg文件是否已有对应的landmarks文件
+        for jpg_file in jpg_files:
+            # 检查是否已有对应的landmarks文件
+            base_name = os.path.splitext(jpg_file)[0]
+            landmarks_path = base_name + ".npy"
+            if not os.path.exists(landmarks_path):
+                image_paths.append(jpg_file)
     
     return image_paths
+
+def collect_images_by_folder(data_root, abc_file_path):
+    """
+    按文件夹收集需要处理的图像路径
+    从指定的文件读取子文件夹路径列表，每个子文件夹路径占一行
+    返回一个字典，键为文件夹路径，值为该文件夹中需要处理的图像路径列表
+    """
+    folders_to_process = {}
+    
+    # 读取指定的文件获取子文件夹路径列表
+    if not os.path.exists(abc_file_path):
+        print(f"Error: abc file not found at {abc_file_path}")
+        return folders_to_process
+    
+    with open(abc_file_path, 'r') as f:
+        subfolders = [line.strip() for line in f.readlines() if line.strip()]
+    
+    # 遍历每个子文件夹
+    for subfolder in subfolders:
+        # 构造完整的子文件夹路径
+        full_subfolder_path = os.path.join(data_root, subfolder)
+        
+        # 检查子文件夹是否存在
+        if not os.path.exists(full_subfolder_path):
+            print(f"Warning: Subfolder {full_subfolder_path} does not exist, skipping...")
+            continue
+            
+        # 获取子文件夹中的所有.jpg文件
+        jpg_files = glob(os.path.join(full_subfolder_path, "*.jpg"))
+        
+        # 检查每个.jpg文件是否已有对应的landmarks文件
+        images_to_process = []
+        for jpg_file in jpg_files:
+            # 检查是否已有对应的landmarks文件
+            base_name = os.path.splitext(jpg_file)[0]
+            landmarks_path = base_name + ".npy"
+            if not os.path.exists(landmarks_path):
+                images_to_process.append(jpg_file)
+        
+        # 只有当文件夹中有需要处理的图像时才添加到处理列表中
+        if images_to_process:
+            folders_to_process[full_subfolder_path] = images_to_process
+    
+    return folders_to_process
 
 def save_landmarks(image_path, landmarks):
     """
@@ -102,62 +162,70 @@ def save_landmarks(image_path, landmarks):
         # 如果没有检测到面部，保存一个空数组
         np.save(landmarks_path, np.array([]))
 
-def main(data_root, num_workers=4, batch_size=10):
+def main(data_root, abc_file_path, num_workers=4, batch_size=10):
     """
     主函数：优化的预计算面部关键点
     """
     print("Collecting images to process...")
-    image_paths = collect_all_images(data_root)
+    folders_to_process = collect_images_by_folder(data_root, abc_file_path)
     
-    print(f"Found {len(image_paths)} images to process")
+    total_images = sum(len(images) for images in folders_to_process.values())
+    print(f"Found {total_images} images to process in {len(folders_to_process)} folders")
     
-    if len(image_paths) == 0:
+    if total_images == 0:
         print("No images need to be processed. All landmarks files already exist.")
         return
     
-    # 将图像路径分批
-    batches = []
-    for i in range(0, len(image_paths), batch_size):
-        batch = image_paths[i:i+batch_size]
-        batches.append((batch, batch_size))
-    
-    print(f"Processing {len(batches)} batches with {num_workers} workers")
-    
     start_time = time.time()
+    total_processed = 0
     
-    # 使用多进程处理批次
-    if num_workers > 1:
-        with mp_lib.Pool(processes=num_workers) as pool:
-            # 使用imap进行进度跟踪
-            results = list(tqdm(pool.imap(process_image_batch, batches), 
-                              total=len(batches), 
-                              desc="Processing batches"))
-    else:
-        # 单进程处理
-        results = []
-        for batch in tqdm(batches, desc="Processing batches"):
-            results.append(process_image_batch(batch))
-    
-    # 保存结果
-    processed_count = 0
-    for batch_result in results:
-        for image_path, landmarks in batch_result:
-            save_landmarks(image_path, landmarks)
-            processed_count += 1
+    # 按文件夹处理
+    for folder_path, image_paths in folders_to_process.items():
+        print(f"\nProcessing folder: {folder_path} ({len(image_paths)} images)")
+        
+        # 将当前文件夹的图像路径分批
+        batches = []
+        for i in range(0, len(image_paths), batch_size):
+            batch = image_paths[i:i+batch_size]
+            batches.append((batch, batch_size))
+        
+        # 处理当前文件夹的批次
+        folder_start_time = time.time()
+        folder_processed = 0
+        
+        if num_workers > 1:
+            with mp_lib.Pool(processes=num_workers) as pool:
+                # 使用imap进行进度跟踪
+                for _ in tqdm(pool.imap(process_image_batch, batches), 
+                             total=len(batches), 
+                             desc=f"Processing batches in {os.path.basename(folder_path)}"):
+                    pass
+        else:
+            # 单进程处理
+            for batch in tqdm(batches, desc=f"Processing batches in {os.path.basename(folder_path)}"):
+                process_image_batch(batch)
+        
+        folder_end_time = time.time()
+        folder_elapsed_time = folder_end_time - folder_start_time
+        folder_processed = len(image_paths)
+        total_processed += folder_processed
+        
+        print(f"Completed folder {os.path.basename(folder_path)}: {folder_processed} images in {folder_elapsed_time:.2f} seconds")
     
     end_time = time.time()
     elapsed_time = end_time - start_time
     
-    print(f"Landmarks precomputation completed!")
-    print(f"Processed {processed_count} images in {elapsed_time:.2f} seconds")
-    print(f"Average processing speed: {processed_count/elapsed_time:.2f} images/second")
+    print(f"\nLandmarks precomputation completed!")
+    print(f"Processed {total_processed} images in {elapsed_time:.2f} seconds")
+    print(f"Average processing speed: {total_processed/elapsed_time:.2f} images/second")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Optimized precompute facial landmarks for SyncNet training")
     parser.add_argument("--data_root", type=str, default="training_data", help="Root directory of training data")
+    parser.add_argument("--abc_file", type=str, default="filelists/train.txt", help="Path to the file containing subfolder paths")
     parser.add_argument("--num_workers", type=int, default=4, help="Number of worker processes")
     parser.add_argument("--batch_size", type=int, default=10, help="Batch size for processing")
     
     args = parser.parse_args()
     
-    main(args.data_root, args.num_workers, args.batch_size)
+    main(args.data_root, args.abc_file, args.num_workers, args.batch_size)
