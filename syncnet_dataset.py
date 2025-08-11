@@ -1,6 +1,6 @@
 from hparams import hparams, get_image_list
 import multiprocessing
-from os.path import dirname, join, basename, isfile
+from os.path import dirname, join, basename, isfile, splitext
 import os, random, cv2, argparse
 from glob import glob
 import numpy as np
@@ -30,6 +30,24 @@ LIPS_LANDMARKS = [
     291, 146, 91, 181, 84, 17, 314, 405, 320, 307,
     375, 321, 311, 308, 324, 318, 402, 317, 14, 87
 ]
+
+def load_precomputed_landmarks(image_path):
+    """
+    从预计算的.npy文件中加载面部关键点
+    """
+    base_name = splitext(image_path)[0]
+    landmarks_path = base_name + ".npy"
+    
+    if os.path.exists(landmarks_path):
+        try:
+            landmarks = np.load(landmarks_path)
+            return landmarks
+        except Exception as e:
+            print(f"Error loading landmarks from {landmarks_path}: {e}")
+            return None
+    else:
+        print(f"Landmarks file not found: {landmarks_path}")
+        return None
 
 
 class Dataset(object):
@@ -213,7 +231,11 @@ class Dataset(object):
                     try:
                         img = cv2.resize(img, (hparams.img_size * self.img_size_factor, hparams.img_size * self.img_size_factor))                            
 
-                        #img = apply_lip_mask_single(img, face_mesh)
+                        # 使用预计算的landmarks而不是动态计算
+                        landmarks = load_precomputed_landmarks(fname)
+                        if landmarks is not None:
+                            img = apply_lip_mask_with_precomputed_landmarks(img, landmarks)
+                        
                         if len(face_image_cache) < hparams.syncnet_image_cache_size:
                           face_image_cache[fname] = img  # Cache the resized image
                         
@@ -332,6 +354,49 @@ def blackout_non_lip(img, bbox):
     # Multiply the image by the mask to blackout non-lip regions.
     img_masked = img * mask
     return img_masked
+
+def apply_lip_mask_with_precomputed_landmarks(frame, landmarks):
+    """
+    使用预计算的面部关键点应用唇部遮罩
+    """
+    if landmarks is None or len(landmarks) == 0:
+        return frame
+    
+    # Get the mouth landmarks
+    mouth_points = landmarks
+    
+    # Convert the list of mouth points to a NumPy array for easier manipulation.
+    mouth_points = np.array(mouth_points)
+    
+    # Compute the bounding rectangle coordinates.
+    x_min = np.min(mouth_points[:, 0])
+    x_max = np.max(mouth_points[:, 0])
+    y_min = np.min(mouth_points[:, 1])
+    y_max = np.max(mouth_points[:, 1])
+    
+    h, w, _ = frame.shape
+    
+    # Calculate the width and height of the mouth region.
+    width = x_max - x_min
+    height = y_max - y_min
+    
+    # Define a padding factor (e.g., 50% larger in each direction).
+    pad_width_factor = 0.4  # Adjust this value as needed.
+    pad_height_factor = 0.5  # Adjust this value as needed.
+    pad_x = int(width * pad_width_factor)
+    pad_y = int(height * pad_height_factor)
+    
+    # Expand the rectangle and ensure the coordinates stay within frame boundaries.
+    x_min_expanded = max(int(x_min) - pad_x, 0)
+    y_min_expanded = max(int(y_min) - pad_y, 0)
+    x_max_expanded = min(int(x_max) + pad_x, w)
+    y_max_expanded = min(int(y_max) + pad_y, h)
+    
+    bbox = [x_min_expanded, y_min_expanded, x_max_expanded, y_max_expanded]
+    img_masked = blackout_non_lip(frame, bbox)
+    
+    return img_masked
+
 def apply_lip_mask_single(frame, face_mesh):
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(frame_rgb)

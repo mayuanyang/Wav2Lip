@@ -519,9 +519,10 @@ def main():
         print('The img_batch shape', img_batch.shape, mel_batch.shape, args.diffusion_step)
         # For V5 model, we don't need the step parameter for inference
         if args.version == 'V5':
-            pred, _, _ = model(mel_batch, img_batch, args.diffusion_step)
+            pred, _, _ = model(mel_batch, img_batch, step=args.diffusion_step)
         else:
-            pred, face_embedding, audio_embedding = model(mel_batch, img_batch, args.diffusion_step)
+            print('Using version', args.version)
+            pred, face_embedding, audio_embedding = model(mel_batch, img_batch, step=args.diffusion_step)
         
         check_nan(pred, i)
 
