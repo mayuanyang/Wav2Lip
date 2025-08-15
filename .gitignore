@@ -16,3 +16,4 @@ evaluation/test_filelists/lr*.txt
 training
 input
 temp
+*.npy

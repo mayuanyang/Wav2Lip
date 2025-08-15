@@ -43,6 +43,16 @@ class TransformerSyncnet(nn.Module):
     def __init__(self, num_heads=8, num_encoder_layers=4):
         super(TransformerSyncnet, self).__init__()
         
+        # --- Landmarks encoder ---
+        # Process 5 frames with 30 landmarks each (x,y coordinates)
+        self.landmarks_encoder = nn.Sequential(
+            nn.Linear(30 * 2, 128),  # 30 landmarks * 2 coordinates -> 128
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 512),  # Output 512-dimensional features to match face features
+        )
+        
         # --- Face encoder for individual frames ---
         self.face_encoder1 = nn.Sequential(
             Conv2d(3, 128, kernel_size=3, stride=2, padding=1),
@@ -147,6 +157,8 @@ class TransformerSyncnet(nn.Module):
             num_layers=4
         )
         
+        self.combined_reduce = nn.Linear(1280, 768)
+        
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=768, nhead=num_heads, dropout=0.1, activation='gelu'),
             num_layers=num_encoder_layers
@@ -156,7 +168,7 @@ class TransformerSyncnet(nn.Module):
         # Final classification head.
         # We pool tokens for each modality separately, then concatenate their global features.
         self.classifier = nn.Sequential(
-            nn.Linear(3840, 1024),
+            nn.Linear(768 * 5, 1024),  # 768 (combined features) * 5 frames
             nn.ReLU(),
             nn.Dropout(p=0.1),
             nn.Linear(1024, 512),
@@ -179,10 +191,11 @@ class TransformerSyncnet(nn.Module):
         #self.reduce.apply(initialize_weights)
         self.classifier.apply(initialize_weights)
       
-    def forward(self, face_embedding, audio_embedding, step):
+    def forward(self, face_embedding, audio_embedding, landmarks, step):
         """
         face_embedding: tensor of shape (B, 15, H, W) -> 5 images concatenated (each 3 channels)
         audio_embedding: tensor of shape (B, 1, H_audio, W_audio)
+        landmarks: tensor of shape (B, 5, 30, 2) -> 5 frames with 30 landmarks each (x,y coordinates)
         """
         
         num_of_frames = 5
@@ -190,6 +203,10 @@ class TransformerSyncnet(nn.Module):
         save_every_s_steps = 1000
         
         batch_size = face_embedding.shape[0]
+        
+        # --- Process landmarks ---
+        # Reshape landmarks from (B, 5, 30, 2) to (B*5, 30*2)
+        landmarks_flat = landmarks.view(batch_size * num_of_frames, -1)
         
         # --- Process audio modality ---
         audio_features1 = self.audio_encoder1(audio_embedding)  # (B, 512, H_a, W_a)
@@ -242,7 +259,13 @@ class TransformerSyncnet(nn.Module):
         )
 
         # --- 合并特征 ---
-        combined = torch.cat((face_self_out, audio_self_out), dim=2)  # 沿特征维度拼接       
+        # Process landmarks to match the feature dimension
+        landmarks_processed = self.landmarks_encoder(landmarks_flat)  # (B*5, 512)
+        landmarks_seq = landmarks_processed.view(batch_size, num_of_frames, -1).permute(1, 0, 2)  # (5, B, 512)
+        
+        # Concatenate all features
+        combined = torch.cat((face_self_out, audio_self_out, landmarks_seq), dim=2)  # 沿特征维度拼接 
+        combined = self.combined_reduce(combined)
         
         attn_output = self.transformer_encoder(combined)
         attn_output = attn_output.permute(1, 0, 2).reshape(batch_size, -1)

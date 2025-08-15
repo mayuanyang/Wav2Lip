@@ -160,10 +160,13 @@ def main(data_root, abc_file_path, num_workers=4, batch_size=10):
     
     start_time = time.time()
     total_processed = 0
+    skipped_folders = 0
     
     # 遍历每个子文件夹并立即处理
     for subfolder in subfolders:
         folder_processed = process_folder(data_root, subfolder, num_workers, batch_size)
+        if folder_processed == 0:
+            skipped_folders += 1
         total_processed += folder_processed
     
     end_time = time.time()
@@ -171,6 +174,7 @@ def main(data_root, abc_file_path, num_workers=4, batch_size=10):
     
     print(f"\nLandmarks precomputation completed!")
     print(f"Processed {total_processed} images in {elapsed_time:.2f} seconds")
+    print(f"Skipped {skipped_folders} folders that didn't need processing")
     print(f"Average processing speed: {total_processed/elapsed_time:.2f} images/second")
 
 if __name__ == "__main__":

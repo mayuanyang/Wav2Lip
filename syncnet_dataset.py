@@ -87,7 +87,7 @@ class Dataset(object):
         # num_frames = (T x hop_size * fps) / sample_rate
         start_frame_num = self.get_frame_id(start_frame)
         offset = random.choice([-1,0,1]) #随机左右移动一个frame作为数据增强
-        start_frame += offset
+        start_frame_num += offset
 
         """
         80. is a scaling factor used to convert the time in seconds to the index in the audio spectrogram.
@@ -322,7 +322,26 @@ class Dataset(object):
             x = torch.FloatTensor(x)
             mel = torch.FloatTensor(mel.T).unsqueeze(0)
 
-            return x, mel, regression_y, classification_y
+            # Load landmarks for all frames in the window
+            landmarks_list = []
+            for fname in window_fnames:
+                landmarks = load_precomputed_landmarks(fname)
+                if landmarks is not None:
+                    # Ensure landmarks have the correct shape (30, 2)
+                    if landmarks.shape == (30, 2):
+                        landmarks_list.append(landmarks)
+                    else:
+                        # If shape is incorrect, use zeros as fallback
+                        print('The landmarks shape', landmarks.shape)
+                        landmarks_list.append(np.zeros((30, 2)))
+                else:
+                    # If landmarks are not available, use zeros as fallback
+                    landmarks_list.append(np.zeros((30, 2)))  # 30 landmarks with x,y coordinates
+            
+            # Convert landmarks list to numpy array
+            landmarks_array = np.array(landmarks_list, dtype=np.float32)  # Shape: (5, 30, 2)
+            
+            return x, mel, regression_y, classification_y, landmarks_array
 
 def blackout_non_lip(img, bbox):
     """

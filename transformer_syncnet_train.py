@@ -157,7 +157,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         
         prog_bar = tqdm(enumerate(train_data_loader))
         print_current_lr(optimizer)
-        for step, (x, mel, regression_y, classification_y) in prog_bar:
+        for step, (x, mel, regression_y, classification_y, landmarks) in prog_bar:
                         
             model.train()
             optimizer.zero_grad()
@@ -165,9 +165,10 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             # Transform data to CUDA device
             x = x.to(device)
             mel = mel.to(device)
+            landmarks = landmarks.to(device)
 
             with autocast('cuda'):
-              output, face1_embedding, audio_embedding = model(x, mel, global_step)
+              output, face1_embedding, audio_embedding = model(x, mel, landmarks, global_step)
               regression_y = regression_y.unsqueeze(1).float()
               regression_y = regression_y.to(device)
               
@@ -249,7 +250,7 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, sch
     prog_bar = tqdm(enumerate(test_data_loader))
     losses = []
     while 1:
-        for step, (x, mel, regression_y, classification_y) in enumerate(test_data_loader):
+        for step, (x, mel, regression_y, classification_y, landmarks) in enumerate(test_data_loader):
 
             model.eval()
 
@@ -257,8 +258,9 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, sch
             x = x.to(device)
 
             mel = mel.to(device)
+            landmarks = landmarks.to(device)
 
-            output, audio_embedding, face_embedding = model(x, mel, step)
+            output, audio_embedding, face_embedding = model(x, mel, landmarks, step)
             classification_y = classification_y.unsqueeze(1).float()
             y = classification_y.to(device)                
 
