@@ -46,7 +46,7 @@ def load_precomputed_landmarks(image_path):
             print(f"Error loading landmarks from {landmarks_path}: {e}")
             return None
     else:
-        print(f"Landmarks file not found: {landmarks_path}")
+        #print(f"Landmarks file not found: {landmarks_path}")
         return None
 
 
@@ -322,26 +322,9 @@ class Dataset(object):
             x = torch.FloatTensor(x)
             mel = torch.FloatTensor(mel.T).unsqueeze(0)
 
-            # Load landmarks for all frames in the window
-            landmarks_list = []
-            for fname in window_fnames:
-                landmarks = load_precomputed_landmarks(fname)
-                if landmarks is not None:
-                    # Ensure landmarks have the correct shape (30, 2)
-                    if landmarks.shape == (30, 2):
-                        landmarks_list.append(landmarks)
-                    else:
-                        # If shape is incorrect, use zeros as fallback
-                        print('The landmarks shape', landmarks.shape)
-                        landmarks_list.append(np.zeros((30, 2)))
-                else:
-                    # If landmarks are not available, use zeros as fallback
-                    landmarks_list.append(np.zeros((30, 2)))  # 30 landmarks with x,y coordinates
             
-            # Convert landmarks list to numpy array
-            landmarks_array = np.array(landmarks_list, dtype=np.float32)  # Shape: (5, 30, 2)
             
-            return x, mel, regression_y, classification_y, landmarks_array
+            return x, mel, regression_y, classification_y
 
 def blackout_non_lip(img, bbox):
     """
