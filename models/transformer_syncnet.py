@@ -123,7 +123,7 @@ class TransformerSyncnet(nn.Module):
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
         
-        self.audio_pos_encoder3 = LearnablePositionalEncoding2D(d_model=256, max_h=10, max_w=2, dropout=0.1)
+        self.audio_pos_encoder3 = LearnablePositionalEncoding2D(d_model=256, max_h=10, max_w=4, dropout=0.1)
         
         self.audio_encoder4 = nn.Sequential(
             Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
@@ -138,7 +138,7 @@ class TransformerSyncnet(nn.Module):
         # 新增：各自模态的 self-attention 层
         
         self.face_self_attn = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=512, nhead=num_heads, dropout=0.1, activation='gelu'),
+            nn.TransformerEncoderLayer(d_model=256, nhead=num_heads, dropout=0.1, activation='gelu'),
             num_layers=4
         )
         
@@ -148,18 +148,20 @@ class TransformerSyncnet(nn.Module):
         )
         
         self.transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=768, nhead=num_heads, dropout=0.1, activation='gelu'),
+            nn.TransformerEncoderLayer(d_model=512, nhead=num_heads, dropout=0.1, activation='gelu'),
             num_layers=num_encoder_layers
         )
                 
         
+        # 降维层，在合并前先降维
+        self.face_dim_reduction = nn.Linear(512, 256)
+        
         # Final classification head.
         # We pool tokens for each modality separately, then concatenate their global features.
         self.classifier = nn.Sequential(
-            nn.Linear(3840, 1024),  # 768 (combined features) * 5 frames
+            nn.Linear(5120, 1024),  # (384 + 128) * 10 frames
             nn.ReLU(),
-            nn.Dropout(p=0.1),
-            nn.Linear(1024, 512),
+            nn.Linear(1024, 512),  # (384 + 128) * 10 frames
             nn.ReLU(),
             nn.Dropout(p=0.1),
             nn.Linear(512, 1)  # binary classification output
@@ -185,7 +187,7 @@ class TransformerSyncnet(nn.Module):
         audio_embedding: tensor of shape (B, 1, H_audio, W_audio)
         """
         
-        num_of_frames = 5
+        num_of_frames = 10
         
         save_every_s_steps = 1000
         
@@ -224,7 +226,7 @@ class TransformerSyncnet(nn.Module):
         #print('The face4', face4.shape)
         
         face_features = face4.flatten(1) #[b*5 ，512]
-        face_seq = face_features.view(batch_size, 5, -1).permute(1, 0, 2)
+        face_seq = face_features.view(batch_size, num_of_frames, -1).permute(1, 0, 2)
         
         if step % save_every_s_steps == 0:
           self.save_sample_images(face1, 'face1', step)
@@ -232,9 +234,11 @@ class TransformerSyncnet(nn.Module):
           self.save_sample_images(face3, 'face3', step)
           self.save_sample_images(face4, 'face4', step)
         
+        # Apply dimension reduction before self-attention
+        face_seq_reduced = self.face_dim_reduction(face_seq.permute(1, 0, 2)).permute(1, 0, 2)
         
         face_self_out = self.face_self_attn(
-            face_seq,
+            face_seq_reduced,
         )
         
         # Audio 的 self-attention
