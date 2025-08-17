@@ -15,12 +15,9 @@ face_image_cache = {} #multiprocessing.Manager().dict()
 file_exist_cache = {} #multiprocessing.Manager().dict()
 orig_mel_cache = {} #multiprocessing.Manager().dict()
 
-"""
-The FPS is set to 25 for video, 5/25 is 0.2, we need to have 0.2 seconds for the audio,
-because the audio mel spectrogram ususlly has 80 frame per seconds, so 16/80 is 0.2 seconds
-"""
+# Default values
 syncnet_T = 10
-syncnet_mel_step_size = 32
+syncnet_mel_step_size = 32  # 80 * (syncnet_T / 25) = 80 * (10 / 25) = 32
 samples = [True, True,True, True,True, False,False, False, False, False]
 negative_data_mode = "HARD" # SIMPLE, MEDIUM, HARD
 
@@ -52,7 +49,7 @@ def load_precomputed_landmarks(image_path):
 
 class Dataset(object):
     
-    def __init__(self, split, data_root, train_root, use_augmentation, use_audio_augmentation=True, img_size_factor=1):
+    def __init__(self, split, data_root, train_root, use_augmentation, use_audio_augmentation=True, img_size_factor=1, num_frames=10):
         print('-----')
         self.all_videos = get_image_list(data_root, split, train_root)
         self.use_augmentation = use_augmentation
@@ -60,6 +57,12 @@ class Dataset(object):
         self.img_size_factor = img_size_factor
         self.mp_face_mesh = mp.solutions.face_mesh
         #self.face_mesh = self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
+        
+        # Set the number of frames and calculate mel step size
+        global syncnet_T, syncnet_mel_step_size
+        syncnet_T = num_frames
+        syncnet_mel_step_size = int(80 * (syncnet_T / 25))  # 80 * (T / 25) where 25 is fps and 80 is mel frames per second
+        print(f"Using {syncnet_T} frames, mel step size: {syncnet_mel_step_size}")
         
 
     def get_frame_id(self, frame):

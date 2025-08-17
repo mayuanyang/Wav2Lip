@@ -40,8 +40,9 @@ class LearnablePositionalEncoding2D(nn.Module):
         return self.dropout(x + self.pos_embedding[:, :, :H, :W])
       
 class TransformerSyncnet(nn.Module):
-    def __init__(self, num_heads=8, num_encoder_layers=4):
+    def __init__(self, num_heads=8, num_encoder_layers=4, num_frames=10):
         super(TransformerSyncnet, self).__init__()
+        self.num_frames = num_frames
                 
         # --- Face encoder for individual frames ---
         self.face_encoder1 = nn.Sequential(
@@ -158,10 +159,11 @@ class TransformerSyncnet(nn.Module):
         
         # Final classification head.
         # We pool tokens for each modality separately, then concatenate their global features.
+        self.classifier_input_dim = 512 * num_frames  # 512 features per frame
         self.classifier = nn.Sequential(
-            nn.Linear(5120, 1024),  # (384 + 128) * 10 frames
+            nn.Linear(self.classifier_input_dim, 1024),  # Dynamic input size based on num_frames
             nn.ReLU(),
-            nn.Linear(1024, 512),  # (384 + 128) * 10 frames
+            nn.Linear(1024, 512),
             nn.ReLU(),
             nn.Dropout(p=0.1),
             nn.Linear(512, 1)  # binary classification output
@@ -183,11 +185,11 @@ class TransformerSyncnet(nn.Module):
       
     def forward(self, face_embedding, audio_embedding, step):
         """
-        face_embedding: tensor of shape (B, 15, H, W) -> 5 images concatenated (each 3 channels)
+        face_embedding: tensor of shape (B, 3*num_frames, H, W) -> num_frames images concatenated (each 3 channels)
         audio_embedding: tensor of shape (B, 1, H_audio, W_audio)
         """
         
-        num_of_frames = 10
+        num_of_frames = self.num_frames
         
         save_every_s_steps = 1000
         

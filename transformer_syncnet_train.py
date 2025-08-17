@@ -43,6 +43,7 @@ parser.add_argument('--sample_mode', help='easy or random', default=True, type=s
 parser.add_argument('--use_wandb', help='Whether to use wandb', default=True, type=str2bool)
 parser.add_argument('--use_augmentation', help='Whether to use data augmentation', default=True, type=str2bool)
 parser.add_argument('--use_audio_augmentation', help='Whether to use audio data augmentation', default=False, type=str2bool)
+parser.add_argument('--num_frames', help='Number of frames to use', default=10, type=int)
 
 args = parser.parse_args()
 
@@ -400,8 +401,8 @@ if __name__ == "__main__":
     if not os.path.exists(checkpoint_dir): os.mkdir(checkpoint_dir)
 
     # Dataset and Dataloader setup
-    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation, use_audio_augmentation, img_size_factor=2)
-    test_dataset = Dataset('val', args.data_root, args.train_root, False, False, img_size_factor=2)
+    train_dataset = Dataset('train', args.data_root, args.train_root, use_augmentation, use_audio_augmentation, img_size_factor=2, num_frames=args.num_frames)
+    test_dataset = Dataset('val', args.data_root, args.train_root, False, False, img_size_factor=2, num_frames=args.num_frames)
     #print(train_dataset.all_videos)
 
     train_data_loader = data_utils.DataLoader(
@@ -415,7 +416,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # Model
-    model = TransformerSyncnet(num_heads=8, num_encoder_layers=6).to(device)
+    model = TransformerSyncnet(num_heads=8, num_encoder_layers=6, num_frames=args.num_frames).to(device)
     
     
     optimizer = optim.AdamW(
