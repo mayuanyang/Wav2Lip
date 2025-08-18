@@ -160,9 +160,15 @@ class Dataset(object):
             
             img_name = random.choice(img_names)
             correct_window_images = self.get_window(img_name)
+            attempt = 0
             while correct_window_images is None:
               img_name = random.choice(img_names)
               correct_window_images = self.get_window(img_name)
+              attempt += 1
+              if attempt > 30:
+                should_load_diff_video = True
+                break
+              
 
             chosen_id = self.get_frame_id(img_name)
 
