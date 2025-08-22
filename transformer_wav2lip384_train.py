@@ -248,7 +248,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         running_img_loss = 0.0
         running_disc_loss = 0.0
                 
-        for step, (x, indiv_mels, mel, gt) in prog_bar:
+        for step, batch_data in prog_bar:
+            # Handle case where collate_fn returns None (all samples in batch were None)
+            if batch_data is None:
+                continue
+                
+            x, indiv_mels, mel, gt = batch_data
+            
             #print("The x shape", x.shape)
             if x.shape[0] == hparams.batch_size:
               
@@ -376,7 +382,13 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, sch
     sync_losses, recon_losses = [], []
     step = 0
     while 1:
-        for x, indiv_mels, mel, gt in test_data_loader:
+        for batch_data in test_data_loader:
+            # Handle case where collate_fn returns None (all samples in batch were None)
+            if batch_data is None:
+                continue
+                
+            x, indiv_mels, mel, gt = batch_data
+            
             if x.shape[0] == hparams.batch_size:
               step += 1
               model.eval()
@@ -488,13 +500,22 @@ if __name__ == "__main__":
         refine_landmarks=True
       )
       
+    # Custom collate function to filter out None values
+    def collate_fn(batch):
+        # Filter out None values
+        batch = list(filter(lambda x: x is not None, batch))
+        if len(batch) == 0:
+            return None
+        # Use default collate function for the rest
+        return torch.utils.data.dataloader.default_collate(batch)
+      
     train_data_loader = data_utils.DataLoader(
         train_dataset, batch_size=hparams.batch_size, shuffle=True,
-        num_workers=hparams.resunet_num_workers)
+        num_workers=hparams.resunet_num_workers, collate_fn=collate_fn)
       
     test_data_loader = data_utils.DataLoader(
         test_dataset, batch_size=hparams.batch_size,
-        num_workers=4)
+        num_workers=4, collate_fn=collate_fn)
 
     device = torch.device("cuda" if use_cuda else "cpu")
 

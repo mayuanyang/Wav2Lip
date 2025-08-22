@@ -6,7 +6,7 @@ import json, subprocess, random, string
 from tqdm import tqdm
 from glob import glob
 import torch, face_detection
-from models import ResUNet384V2, ResUNet384V3, ResUNet384V4, ResUNet384V5, ResUNet384V6, cosine_noise_schedule
+from models import ResUNet384V2, ResUNet384V3, ResUNet384V4, ResUNet384V5, ResUNet384V6,ResUNet384V7, cosine_noise_schedule
 from realesrgan import RealESRGANer
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from PIL import Image
@@ -348,6 +348,8 @@ def load_model(path, lora_path=None):
     model = ResUNet384V5()
   elif args.version == 'V6':
     model = ResUNet384V6(args.model_layers, 2)
+  elif args.version == 'V7':
+    model = ResUNet384V7()
   else:
     model = ResUNet384V2()
   print("Load checkpoint from: {}".format(path))

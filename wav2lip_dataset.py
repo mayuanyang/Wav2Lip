@@ -206,8 +206,10 @@ class Dataset(object):
         #start_time = time.perf_counter()
         
         should_load_diff_video = False
+        retry_count = 0
+        max_retries = 100  # Maximum number of retries to prevent infinite loop
 
-        while 1:
+        while retry_count < max_retries:
             if should_load_diff_video:
                 idx = random.randint(0, len(self.all_videos) - 1)
                 should_load_diff_video = False
@@ -216,9 +218,10 @@ class Dataset(object):
 
             img_names = list(glob(join(vidname, '*.jpg')))
             
-            if len(img_names) <= 3 * syncnet_T:
+            if len(img_names) <= 20:
                 print('The length', len(img_names), vidname)
                 should_load_diff_video = True
+                retry_count += 1
                 continue
             
 
@@ -232,6 +235,7 @@ class Dataset(object):
 
             if window_fnames is None or wrong_window_fnames is None:
                 should_load_diff_video = True
+                retry_count += 1
                 continue
             
             if self.use_augmentation:
@@ -242,11 +246,13 @@ class Dataset(object):
             window = self.read_window(window_fnames, 0)
             if window is None:
                 should_load_diff_video = True
+                retry_count += 1
                 continue
 
             wrong_window = self.read_window(wrong_window_fnames, augment_option)
             if wrong_window is None:
                 should_load_diff_video = True
+                retry_count += 1
                 continue
             
             # Create a set of forbidden image names for faster lookup
@@ -261,11 +267,13 @@ class Dataset(object):
             ref1_window = self.read_window(ref1_window_fnames, augment_option)
             if ref1_window is None:
                 should_load_diff_video = True
+                retry_count += 1
                 continue
 
             ref2_window = self.read_window(ref2_window_fnames, augment_option)
             if ref2_window is None:
                 should_load_diff_video = True
+                retry_count += 1
                 continue
             
             try:
@@ -289,31 +297,17 @@ class Dataset(object):
                 mel = self.crop_audio_window(orig_mel.copy(), img_name)
                 
                 if (mel.shape[0] != syncnet_mel_step_size):
+                    retry_count += 1
                     continue
 
                 indiv_mels = self.get_segmented_mels(orig_mel.copy(), img_name)
-                if indiv_mels is None: continue
+                if indiv_mels is None: 
+                    retry_count += 1
+                    continue
 
                 window = self.prepare_window(window)
                 y = window.copy()
 
-
-                '''
-                Set the second half of the images to be black, the window has 5 images
-                The wrong_window contains images that do not align with the audio
-                x contains 5 images and 6 channels each, the 5 images from window with second half black out, the images from wrong window are merged via channels
-                so the final x still got 5 images and with the merged window and wrong_window
-                indiv_mels contains the corresponding audio for the given window
-                y is the window that without the second half black out
-                '''
-
-                #window = self.apply_gaussian_blur_to_bottom_half_vectorized(window)
-                use_face_mesh = False
-                # if use_face_mesh:
-                #   with self.mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True) as face_mesh:
-                #     window = self.apply_dynamic_blur(window, face_mesh, True)
-                # else:
-                #   window = self.apply_dynamic_blur(window, None, False)
 
                 wrong_window = self.prepare_window(wrong_window)
 
@@ -337,7 +331,12 @@ class Dataset(object):
             except Exception as e:
                 #print('An error has occured', vidname, img_name, wrong_img_name)
                 traceback.print_exc()   
+                retry_count += 1
                 continue
+        
+        # If we've exhausted our retries, return None to skip this sample
+        print(f"Warning: Failed to load a valid sample after {max_retries} attempts, skipping...")
+        return None
     
 
     def apply_dynamic_blur(self, window, face_mesh, use_face_mesh=True):
