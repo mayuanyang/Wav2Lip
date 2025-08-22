@@ -63,11 +63,11 @@ class ResUNet384V7(nn.Module):
         }
         
         # --- First UNet (processes bottom half) ---
-        self.bottom_unet_encoder1 = construct_encoder_layers(3, 3, 16, 1, kernel=3, add_spatial=True)
-        self.bottom_unet_down1 = construct_encoder_layers(3, 16, 16, 2, add_spatial=True)
+        self.bottom_unet_encoder1 = construct_encoder_layers(6, 3, 16, 1, kernel=3, add_spatial=True)
+        self.bottom_unet_down1 = construct_encoder_layers(6, 16, 16, 2, add_spatial=True)
         
-        self.bottom_unet_encoder2 = construct_encoder_layers(3, 16, 32, 1, add_spatial=True)
-        self.bottom_unet_down2 = construct_encoder_layers(3, 32, 32, 2, add_spatial=True)
+        self.bottom_unet_encoder2 = construct_encoder_layers(6, 16, 32, 1, add_spatial=True)
+        self.bottom_unet_down2 = construct_encoder_layers(6, 32, 32, 2, add_spatial=True)
                
         self.bottom_unet_encoder3 = construct_encoder_layers(3, 32, 64, 1, add_spatial=True)
         self.bottom_unet_down3 = construct_encoder_layers(3, 64, 64, 2, add_spatial=True)
@@ -123,11 +123,11 @@ class ResUNet384V7(nn.Module):
         self.bottom_unet_decoder3 = construct_decoder_layers(3, 128, 64, 2)
         self.bottom_unet_conv3 = construct_encoder_layers(3, 128, 64, 1) # 64 (debottom3) + 128 (bottom3) = 192
         
-        self.bottom_unet_decoder2 = construct_decoder_layers(3, 64, 32, 2, add_spatial=True)
-        self.bottom_unet_conv2 = construct_encoder_layers(3, 64, 32, 1, add_spatial=True) # 32 (debottom2) + 64 (bottom2) = 96
+        self.bottom_unet_decoder2 = construct_decoder_layers(6, 64, 32, 2, add_spatial=True)
+        self.bottom_unet_conv2 = construct_encoder_layers(6, 64, 32, 1, add_spatial=True) # 32 (debottom2) + 64 (bottom2) = 96
 
-        self.bottom_unet_decoder1 = construct_decoder_layers(3, 32, 32, 2, add_spatial=True)
-        self.bottom_unet_decoder0 = construct_encoder_layers(3, 32, 32, 1, add_spatial=True)
+        self.bottom_unet_decoder1 = construct_decoder_layers(6, 32, 32, 2, add_spatial=True)
+        self.bottom_unet_decoder0 = construct_encoder_layers(6, 32, 32, 1, add_spatial=True)
         
         self.bottom_unet_conv1 = construct_encoder_layers(3, 48, 32, 1) # 32 (debottom1 from prev_decoder0) + 64 (bottom1) = 96
 
@@ -137,11 +137,11 @@ class ResUNet384V7(nn.Module):
         )
         
         # --- Second UNet (processes combined full image + reference) ---
-        self.final_unet_encoder1 = construct_encoder_layers(3, 12, 24, 1, kernel=3, add_spatial=True) # 3 (combined) + 9 (ref) = 12
-        self.final_unet_down1 = construct_encoder_layers(3, 24, 24, 2, add_spatial=True)
+        self.final_unet_encoder1 = construct_encoder_layers(6, 12, 24, 1, kernel=3, add_spatial=True) # 3 (combined) + 9 (ref) = 12
+        self.final_unet_down1 = construct_encoder_layers(6, 24, 24, 2, add_spatial=True)
         
-        self.final_unet_encoder2 = construct_encoder_layers(3, 24, 48, 1, add_spatial=True)
-        self.final_unet_down2 = construct_encoder_layers(3, 48, 48, 2, add_spatial=True)
+        self.final_unet_encoder2 = construct_encoder_layers(6, 24, 48, 1, add_spatial=True)
+        self.final_unet_down2 = construct_encoder_layers(6, 48, 48, 2, add_spatial=True)
                
         self.final_unet_encoder3 = construct_encoder_layers(3, 48, 96, 1, add_spatial=True)
         self.final_unet_down3 = construct_encoder_layers(3, 96, 96, 2, add_spatial=True)
@@ -167,11 +167,11 @@ class ResUNet384V7(nn.Module):
         self.final_unet_decoder3 = construct_decoder_layers(3, 128, 64, 2)
         self.final_unet_conv3 = construct_encoder_layers(3, 160, 64, 1) # 64 (definal3) + 256 (final3) = 320
         
-        self.final_unet_decoder2 = construct_decoder_layers(3, 64, 32, 2, add_spatial=True)
-        self.final_unet_conv2 = construct_encoder_layers(3, 80, 32, 1, add_spatial=True) # 32 (definal2) + 128 (final2) = 160
+        self.final_unet_decoder2 = construct_decoder_layers(6, 64, 32, 2, add_spatial=True)
+        self.final_unet_conv2 = construct_encoder_layers(6, 80, 32, 1, add_spatial=True) # 32 (definal2) + 128 (final2) = 160
 
-        self.final_unet_decoder1 = construct_decoder_layers(3, 32, 32, 2, add_spatial=True)
-        self.final_unet_decoder0 = construct_encoder_layers(3, 32, 32, 1, add_spatial=True)
+        self.final_unet_decoder1 = construct_decoder_layers(6, 32, 32, 2, add_spatial=True)
+        self.final_unet_decoder0 = construct_encoder_layers(6, 32, 32, 1, add_spatial=True)
         
         self.final_unet_conv1 = construct_encoder_layers(3, 56, 32, 1) # 32 (definal1 from prev_decoder0) + 64 (final1) = 96
 
