@@ -410,25 +410,6 @@ class ResUNet384V7(nn.Module):
             # Save the bottom half image
             save_path = os.path.join(save_dir, f"generated_bottom_half_step_{step}.jpg")
             cv2.imwrite(save_path, bottom_half_to_save)
-            
-            # Convert final output to numpy array and save as image
-            # Take the first sample in the batch for saving
-            final_output_to_save = outputs[0].detach().cpu().numpy()
-            # Handle different tensor shapes
-            if len(final_output_to_save.shape) == 4:  # [C, T, H, W] or [T, C, H, W]
-                # For video sequences, take the first frame
-                if final_output_to_save.shape[1] < final_output_to_save.shape[0]:  # [C, T, H, W]
-                    final_output_to_save = final_output_to_save[:, 0, :, :]  # Take first frame
-                else:  # [T, C, H, W]
-                    final_output_to_save = final_output_to_save[0, :, :, :]  # Take first frame
                     
-            # Transpose from (C, H, W) to (H, W, C) and convert to uint8
-            final_output_to_save = np.transpose(final_output_to_save, (1, 2, 0))
-            final_output_to_save = (final_output_to_save * 255).astype(np.uint8)
-            
-            # Save the final output image
-            save_path = os.path.join(save_dir, f"final_output_step_{step}.jpg")
-            cv2.imwrite(save_path, final_output_to_save)
-        
         
         return outputs, None, None
