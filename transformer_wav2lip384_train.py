@@ -270,7 +270,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               gt = gt.to(device)
 
               with autocast():
-                g, face_embedding, audio_embedding = model(indiv_mels, x, None)
+                g, face_embedding, audio_embedding = model(indiv_mels, x, global_step)
                 
                 # Compare two images
                 '''
@@ -399,7 +399,7 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, sch
               indiv_mels = indiv_mels.to(device)
               mel = mel.to(device)
 
-              g = model(indiv_mels, x)
+              g = model(indiv_mels, x, global_step)
 
               sync_loss = get_sync_loss(mel, g)
               

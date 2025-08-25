@@ -16,7 +16,7 @@ from torchvision.transforms import GaussianBlur
 
 def fixed_noise_level():
     """Return a fixed noise level"""
-    return 0.1
+    return 0.5
 
 def construct_encoder_layers(num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3):
     layers = []
@@ -63,7 +63,7 @@ class ResUNet384V7(nn.Module):
         }
         
         # --- First UNet (processes bottom half) ---
-        self.bottom_unet_encoder1 = construct_encoder_layers(6, 3, 16, 1, kernel=3, add_spatial=True)
+        self.bottom_unet_encoder1 = construct_encoder_layers(6, 6, 16, 1, kernel=3, add_spatial=True)
         self.bottom_unet_down1 = construct_encoder_layers(6, 16, 16, 2, add_spatial=True)
         
         self.bottom_unet_encoder2 = construct_encoder_layers(6, 16, 32, 1, add_spatial=True)
@@ -72,13 +72,13 @@ class ResUNet384V7(nn.Module):
         self.bottom_unet_encoder3 = construct_encoder_layers(3, 32, 64, 1, add_spatial=True)
         self.bottom_unet_down3 = construct_encoder_layers(3, 64, 64, 2, add_spatial=True)
 
-        self.bottom_unet_encoder4 = construct_encoder_layers(2, 64, 128, 1, add_spatial=True)
+        self.bottom_unet_encoder4 = construct_encoder_layers(3, 64, 128, 1, add_spatial=True)
         self.bottom_unet_pos_encoder4 = LearnablePositionalEncoding2D(d_model=128, max_h=24, max_w=48, dropout=0.1)
-        self.bottom_unet_down4 = construct_encoder_layers(2, 128, 128, 2)
+        self.bottom_unet_down4 = construct_encoder_layers(3, 128, 128, 2)
         
-        self.bottom_unet_encoder5 = construct_encoder_layers(2, 128, 256, 1, add_spatial=True)
+        self.bottom_unet_encoder5 = construct_encoder_layers(3, 128, 256, 1, add_spatial=True)
         self.bottom_unet_pos_encoder5 = LearnablePositionalEncoding2D(d_model=256, max_h=12, max_w=24, dropout=0.1)
-        self.bottom_unet_down5 = construct_encoder_layers(2, 256, 256, 2)
+        self.bottom_unet_down5 = construct_encoder_layers(3, 256, 256, 2)
 
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
@@ -114,8 +114,8 @@ class ResUNet384V7(nn.Module):
         self.audio_adapter_final_de4 = nn.AdaptiveAvgPool2d((48, 48))        # Match final de4 spatial dims
         
         # Bottom UNet Decoders
-        self.bottom_unet_decoder5 = construct_decoder_layers(2, 512, 128, 2)  # 256 (bottom_bottleneck) + 256 (audio) = 512
-        self.bottom_unet_conv5 = construct_encoder_layers(2, 640, 320, 1) # 128 (debottom5) + 256 (bottom5) = 384
+        self.bottom_unet_decoder5 = construct_decoder_layers(3, 512, 128, 2)  # 256 (bottom_bottleneck) + 256 (audio) = 512
+        self.bottom_unet_conv5 = construct_encoder_layers(3, 640, 320, 1) # 128 (debottom5) + 256 (bottom5) = 384
         
         self.bottom_unet_decoder4 = construct_decoder_layers(3, 320, 160, 2)  # 128 (bottom_de5) + 256 (audio) = 384
         self.bottom_unet_conv4 = construct_encoder_layers(3, 544, 128, 1) # 128 (debottom4) + 256 (bottom4) = 384
@@ -253,17 +253,25 @@ class ResUNet384V7(nn.Module):
         # Extract remaining 9 channels as reference
         face_sequences_ref = face_sequences[:, 3:, :, :]
         
+        
+        
         # Get image dimensions
         _, _, h, w = face_sequences_3ch.shape
         split_idx = h // 2
+        
+        # Extract 3 reference channels for bottom encoder
+        bottom_ref_channels = face_sequences_ref[:, 3:6, split_idx:, :]
         
         # Split into top and bottom halves
         top_half = face_sequences_3ch[:, :, :split_idx, :]
         bottom_half = face_sequences_3ch[:, :, split_idx:, :]
         
+        # Combine bottom half with reference channels for bottom encoder
+        bottom_half_with_ref = torch.cat([bottom_half, bottom_ref_channels], dim=1)
+        
         # First UNet: Process bottom half to generate bottom half output
         # Encode bottom half through bottom UNet
-        bottom_enc1 = self.bottom_unet_encoder1(bottom_half)
+        bottom_enc1 = self.bottom_unet_encoder1(bottom_half_with_ref)
         bottom_down1 = self.bottom_unet_down1(bottom_enc1)
         
         bottom_enc2 = self.bottom_unet_encoder2(bottom_down1)
@@ -384,6 +392,43 @@ class ResUNet384V7(nn.Module):
             outputs = torch.stack(outputs, dim=2)
         else:
             outputs = final_output
+            
+        # Save generated bottom half and final output every 1000 steps
+        if step is not None and step % 1000 == 0:
+            # Create directory for saving generated images
+            save_dir = "generated_images"
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+                
+            # Convert generated bottom half to numpy array and save as image
+            # Take the first sample in the batch for saving
+            bottom_half_to_save = generated_bottom_half[0].detach().cpu().numpy()
+            # Transpose from (C, H, W) to (H, W, C) and convert to uint8
+            bottom_half_to_save = np.transpose(bottom_half_to_save, (1, 2, 0))
+            bottom_half_to_save = (bottom_half_to_save * 255).astype(np.uint8)
+            
+            # Save the bottom half image
+            save_path = os.path.join(save_dir, f"generated_bottom_half_step_{step}.jpg")
+            cv2.imwrite(save_path, bottom_half_to_save)
+            
+            # Convert final output to numpy array and save as image
+            # Take the first sample in the batch for saving
+            final_output_to_save = outputs[0].detach().cpu().numpy()
+            # Handle different tensor shapes
+            if len(final_output_to_save.shape) == 4:  # [C, T, H, W] or [T, C, H, W]
+                # For video sequences, take the first frame
+                if final_output_to_save.shape[1] < final_output_to_save.shape[0]:  # [C, T, H, W]
+                    final_output_to_save = final_output_to_save[:, 0, :, :]  # Take first frame
+                else:  # [T, C, H, W]
+                    final_output_to_save = final_output_to_save[0, :, :, :]  # Take first frame
+                    
+            # Transpose from (C, H, W) to (H, W, C) and convert to uint8
+            final_output_to_save = np.transpose(final_output_to_save, (1, 2, 0))
+            final_output_to_save = (final_output_to_save * 255).astype(np.uint8)
+            
+            # Save the final output image
+            save_path = os.path.join(save_dir, f"final_output_step_{step}.jpg")
+            cv2.imwrite(save_path, final_output_to_save)
         
         
         return outputs, None, None
