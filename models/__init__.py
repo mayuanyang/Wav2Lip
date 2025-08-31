@@ -6,6 +6,7 @@ from .resunet384_v4 import ResUNet384V4
 from .resunet_v5 import ResUNet384V5
 from .resunet_v6 import ResUNet384V6
 from .resunet_v7 import ResUNet384V7
+from .resunet_v8 import ResUNet384V8
 from .gan_resunet_v5 import Wav2LipGAN
 from .transformer_syncnet import TransformerSyncnet
 from .transformer_syncnet_v2 import TransformerSyncnetV2

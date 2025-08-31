@@ -2,7 +2,7 @@ from os.path import dirname, join, basename, isfile
 from tqdm import tqdm
 
 from models import TransformerSyncnet
-from models import ResUNet384, ResUNet384V2, ResUNet384V3, ResUNet384V4, ResUNet384V5, ResUNet384V6, ResUNet384V7
+from models import ResUNet384, ResUNet384V2, ResUNet384V3, ResUNet384V4, ResUNet384V5, ResUNet384V6, ResUNet384V7, ResUNet384V8
 import torch
 
 import wandb
@@ -541,6 +541,9 @@ if __name__ == "__main__":
     elif version == 'v7':
       print('Using v7')
       model = ResUNet384V7().to(device)
+    elif version == 'v8':
+      print('Using v8')
+      model = ResUNet384V8().to(device)
     
 
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
