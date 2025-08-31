@@ -283,9 +283,7 @@ class ResUNet384V8(nn.Module):
         
         # Combine top half with generated bottom half to form full image
         combined_full_image = torch.cat([top_half, generated_bottom_half], dim=2)
-        
-        print('The combime', combined_full_image.shape)
-        
+                
         
         if input_dim_size > 4:
             outputs = torch.split(combined_full_image, B, dim=0)
