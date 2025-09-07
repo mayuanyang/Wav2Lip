@@ -220,7 +220,7 @@ class Dataset(object):
             
             # Need at least 30 frames to ensure we have enough for window creation and reference images
             # syncnet_T frames for the main window + additional frames for wrong_window and reference images
-            if len(img_names) <= 30:
+            if len(img_names) <= 20:
                 print('The length', len(img_names), vidname)
                 should_load_diff_video = True
                 retry_count += 1
@@ -264,16 +264,10 @@ class Dataset(object):
             ref1_window_fnames = self.get_ref_images(forbidden_images, img_names)
 
             forbidden_images = set(window_fnames).union(set(wrong_window_fnames)).union(set(ref1_window_fnames))
-            ref2_window_fnames = self.get_ref_images(forbidden_images, img_names)
+            
             
             ref1_window = self.read_window(ref1_window_fnames, augment_option)
             if ref1_window is None:
-                should_load_diff_video = True
-                retry_count += 1
-                continue
-
-            ref2_window = self.read_window(ref2_window_fnames, augment_option)
-            if ref2_window is None:
                 should_load_diff_video = True
                 retry_count += 1
                 continue
@@ -315,10 +309,9 @@ class Dataset(object):
 
                 ref1_window = self.prepare_window(ref1_window)
 
-                ref2_window = self.prepare_window(ref2_window)
-
+                
                 # do not include the correct window so that no second half black
-                x = np.concatenate([window, wrong_window, ref1_window, ref2_window], axis=0) # Concat via the channel axis
+                x = np.concatenate([window, wrong_window, ref1_window], axis=0) # Concat via the channel axis
                 
 
                 x = torch.FloatTensor(x)

@@ -63,7 +63,7 @@ class ResUNet384V8(nn.Module):
         }
         
         # --- First UNet (processes bottom half) ---
-        self.bottom_unet_encoder1 = construct_encoder_layers(4, 12, 24, 1, kernel=3, add_spatial=True)
+        self.bottom_unet_encoder1 = construct_encoder_layers(4, 9, 24, 1, kernel=3, add_spatial=True)
         self.bottom_unet_down1 = construct_encoder_layers(4, 24, 48, 2, add_spatial=True)
         
         self.bottom_unet_encoder2 = construct_encoder_layers(4, 48, 96, 1, add_spatial=True)
