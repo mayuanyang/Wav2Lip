@@ -257,21 +257,6 @@ class Dataset(object):
                 retry_count += 1
                 continue
             
-            # Create a set of forbidden image names for faster lookup
-            forbidden_images = set(window_fnames).union(set(wrong_window_fnames))
-            
-            # Initialize the list for reference window filenames
-            ref1_window_fnames = self.get_ref_images(forbidden_images, img_names)
-
-            forbidden_images = set(window_fnames).union(set(wrong_window_fnames)).union(set(ref1_window_fnames))
-            
-            
-            ref1_window = self.read_window(ref1_window_fnames, augment_option)
-            if ref1_window is None:
-                should_load_diff_video = True
-                retry_count += 1
-                continue
-            
             try:
                 wavpath = join(vidname, "audio.wav")
 
@@ -306,14 +291,10 @@ class Dataset(object):
 
 
                 wrong_window = self.prepare_window(wrong_window)
-
-                ref1_window = self.prepare_window(ref1_window)
-
                 
                 # do not include the correct window so that no second half black
-                x = np.concatenate([window, wrong_window, ref1_window], axis=0) # Concat via the channel axis
+                x = np.concatenate([window, wrong_window], axis=0) # Concat via the channel axis
                 
-
                 x = torch.FloatTensor(x)
                 mel = torch.FloatTensor(mel.T).unsqueeze(0)
 

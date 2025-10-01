@@ -12,6 +12,73 @@ import numpy as np
 from torchvision.transforms import GaussianBlur
 
 
+class WindowSelfAttention(nn.Module):
+    def __init__(self, in_channels, window_size=24):
+        super(WindowSelfAttention, self).__init__()
+        self.in_channels = in_channels
+        self.window_size = window_size
+        self.padding = window_size // 2
+        
+        # Define query, key, and value convolutions
+        self.query_conv = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+        self.key_conv = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+        self.value_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        
+        # Gamma parameter for attention scaling
+        self.gamma = nn.Parameter(torch.zeros(1))
+        
+    def forward(self, x):
+        batch_size, channels, height, width = x.size()
+        
+        # Compute query, key, and value
+        q = self.query_conv(x)
+        k = self.key_conv(x)
+        v = self.value_conv(x)
+        
+        # Pad features for window processing
+        pad_height = (self.window_size - height % self.window_size) % self.window_size
+        pad_width = (self.window_size - width % self.window_size) % self.window_size
+        
+        if pad_height > 0 or pad_width > 0:
+            q = F.pad(q, (0, pad_width, 0, pad_height))
+            k = F.pad(k, (0, pad_width, 0, pad_height))
+            v = F.pad(v, (0, pad_width, 0, pad_height))
+        
+        padded_height, padded_width = q.shape[2], q.shape[3]
+        
+        # Reshape to windows
+        q_windows = q.unfold(2, self.window_size, self.window_size).unfold(3, self.window_size, self.window_size)
+        k_windows = k.unfold(2, self.window_size, self.window_size).unfold(3, self.window_size, self.window_size)
+        v_windows = v.unfold(2, self.window_size, self.window_size).unfold(3, self.window_size, self.window_size)
+        
+        # Reshape for attention computation
+        q_windows = q_windows.contiguous().view(batch_size, -1, self.window_size * self.window_size, channels // 8)
+        k_windows = k_windows.contiguous().view(batch_size, -1, self.window_size * self.window_size, channels // 8)
+        v_windows = v_windows.contiguous().view(batch_size, -1, self.window_size * self.window_size, channels)
+        
+        # Compute attention
+        attn = torch.einsum('bwic,bwjc->bwij', q_windows, k_windows)
+        attn = attn / (channels // 8) ** 0.5
+        attn = F.softmax(attn, dim=-1)
+        
+        # Apply attention
+        out = torch.einsum('bwij,bwjc->bwic', attn, v_windows)
+        out = out.contiguous().view(batch_size, -1, self.window_size, self.window_size, channels)
+        
+        # Reshape back to feature map
+        out_height = padded_height // self.window_size
+        out_width = padded_width // self.window_size
+        out = out.view(batch_size, out_height, out_width, self.window_size, self.window_size, channels)
+        out = out.permute(0, 5, 1, 3, 2, 4).contiguous()
+        out = out.view(batch_size, channels, padded_height, padded_width)
+        
+        # Remove padding
+        if pad_height > 0 or pad_width > 0:
+            out = out[:, :, :height, :width]
+        
+        return self.gamma * out + x
+
+
 
 
 def fixed_noise_level():
@@ -63,7 +130,8 @@ class ResUNet384V8(nn.Module):
         }
         
         # --- First UNet (processes bottom half) ---
-        self.bottom_unet_encoder1 = construct_encoder_layers(4, 9, 24, 1, kernel=3, add_spatial=True)
+        self.bottom_unet_encoder1 = construct_encoder_layers(4, 6, 24, 1, kernel=3, add_spatial=True)
+        self.window_attention = WindowSelfAttention(24, window_size=24)  # 24 channels from bottom_unet_encoder1
         self.bottom_unet_down1 = construct_encoder_layers(4, 24, 48, 2, add_spatial=True)
         
         self.bottom_unet_encoder2 = construct_encoder_layers(4, 48, 96, 1, add_spatial=True)
@@ -132,6 +200,32 @@ class ResUNet384V8(nn.Module):
         self.bottom_unet_conv1 = construct_encoder_layers(3, 56, 32, 1) # 32 (debottom1 from prev_decoder0) + 64 (bottom1) = 96
 
         self.bottom_unet_output_block = nn.Sequential(
+            nn.Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
+            nn.Sigmoid()
+        )
+        
+        # --- Enhancement UNet ---
+        self.enhancement_unet_encoder1 = construct_encoder_layers(3, 3, 32, 1, kernel=3)
+        self.enhancement_unet_down1 = construct_encoder_layers(3, 32, 64, 2)
+        
+        self.enhancement_unet_encoder2 = construct_encoder_layers(3, 64, 128, 1)
+        self.enhancement_unet_down2 = construct_encoder_layers(3, 128, 128, 2)
+        
+        self.enhancement_unet_encoder3 = construct_encoder_layers(3, 128, 256, 1)
+        self.enhancement_unet_down3 = construct_encoder_layers(3, 256, 256, 2)
+        
+        self.enhancement_unet_bottleneck = construct_encoder_layers(3, 256, 512, 1)
+        
+        self.enhancement_unet_decoder3 = construct_decoder_layers(3, 512, 256, 2)
+        self.enhancement_unet_conv3 = construct_encoder_layers(3, 512, 256, 1)
+        
+        self.enhancement_unet_decoder2 = construct_decoder_layers(3, 256, 128, 2)
+        self.enhancement_unet_conv2 = construct_encoder_layers(3, 256, 128, 1)
+        
+        self.enhancement_unet_decoder1 = construct_decoder_layers(3, 128, 64, 2)
+        self.enhancement_unet_conv1 = construct_encoder_layers(3, 96, 32, 1)
+        
+        self.enhancement_unet_output_block = nn.Sequential(
             nn.Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
             nn.Sigmoid()
         )
@@ -206,9 +300,8 @@ class ResUNet384V8(nn.Module):
         # Apply diffusion to the face sequences
         face_sequences_3ch = self.diffuse(face_sequences_3ch, channels_to_mask=3)
         
-        # Extract remaining 9 channels as reference
-        face_sequences_ref = face_sequences[:, 3:12, :, :]
-        
+        # Extract remaining channels as reference
+        face_sequences_ref = face_sequences[:, 3:, :, :]
         
         
         # Get image dimensions
@@ -228,6 +321,7 @@ class ResUNet384V8(nn.Module):
         # First UNet: Process bottom half to generate bottom half output
         # Encode bottom half through bottom UNet
         bottom_enc1 = self.bottom_unet_encoder1(bottom_half_with_ref)
+        bottom_enc1 = self.window_attention(bottom_enc1)  # Apply window self-attention
         bottom_down1 = self.bottom_unet_down1(bottom_enc1)
         
         bottom_enc2 = self.bottom_unet_encoder2(bottom_down1)
@@ -283,13 +377,39 @@ class ResUNet384V8(nn.Module):
         
         # Combine top half with generated bottom half to form full image
         combined_full_image = torch.cat([top_half, generated_bottom_half], dim=2)
+        
+        # Apply enhancement UNet to the combined full image
+        enh_enc1 = self.enhancement_unet_encoder1(combined_full_image)
+        enh_down1 = self.enhancement_unet_down1(enh_enc1)
+        
+        enh_enc2 = self.enhancement_unet_encoder2(enh_down1)
+        enh_down2 = self.enhancement_unet_down2(enh_enc2)
+        
+        enh_enc3 = self.enhancement_unet_encoder3(enh_down2)
+        enh_down3 = self.enhancement_unet_down3(enh_enc3)
+        
+        enh_bottleneck = self.enhancement_unet_bottleneck(enh_down3)
+        
+        enh_de3 = self.enhancement_unet_decoder3(enh_bottleneck)
+        enh_cat3 = torch.cat([enh_de3, enh_enc3], dim=1)
+        enh_cat3 = self.enhancement_unet_conv3(enh_cat3)
+        
+        enh_de2 = self.enhancement_unet_decoder2(enh_cat3)
+        enh_cat2 = torch.cat([enh_de2, enh_enc2], dim=1)
+        enh_cat2 = self.enhancement_unet_conv2(enh_cat2)
+        
+        enh_de1 = self.enhancement_unet_decoder1(enh_cat2)
+        enh_cat1 = torch.cat([enh_de1, enh_enc1], dim=1)
+        enh_cat1 = self.enhancement_unet_conv1(enh_cat1)
+        
+        enhanced_output = self.enhancement_unet_output_block(enh_cat1)
                 
         
         if input_dim_size > 4:
-            outputs = torch.split(combined_full_image, B, dim=0)
+            outputs = torch.split(enhanced_output, B, dim=0)
             outputs = torch.stack(outputs, dim=2)
         else:
-            outputs = combined_full_image
+            outputs = enhanced_output
             
         # Save generated bottom half and final output every 1000 steps
         if step is not None and step % 1000 == 0:
@@ -308,6 +428,13 @@ class ResUNet384V8(nn.Module):
             # Save the bottom half image
             save_path = os.path.join(save_dir, f"generated_bottom_half_step_{step}.jpg")
             cv2.imwrite(save_path, bottom_half_to_save)
+            
+            # Also save the enhanced output
+            enhanced_to_save = enhanced_output[0].detach().cpu().numpy()
+            enhanced_to_save = np.transpose(enhanced_to_save, (1, 2, 0))
+            enhanced_to_save = (enhanced_to_save * 255).astype(np.uint8)
+            enhanced_save_path = os.path.join(save_dir, f"enhanced_output_step_{step}.jpg")
+            cv2.imwrite(enhanced_save_path, enhanced_to_save)
                     
         
         return outputs, None, None
