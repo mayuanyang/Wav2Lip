@@ -85,7 +85,7 @@ def fixed_noise_level():
     """Return a fixed noise level"""
     return 0.5
 
-def construct_encoder_layers(num_of_layers, input_channels, output_channels, first_layer_stride, add_spatial=False, kernel=3):
+def construct_encoder_layers(num_of_layers, input_channels, output_channels, first_layer_stride, kernel=3):
     layers = []
     padding = 1
     if kernel == 7:
@@ -130,21 +130,21 @@ class ResUNet384V8(nn.Module):
         }
         
         # --- First UNet (processes bottom half) ---
-        self.bottom_unet_encoder1 = construct_encoder_layers(4, 6, 24, 1, kernel=3, add_spatial=True)
+        self.bottom_unet_encoder1 = construct_encoder_layers(4, 6, 24, 1)
         self.window_attention = WindowSelfAttention(24, window_size=24)  # 24 channels from bottom_unet_encoder1
-        self.bottom_unet_down1 = construct_encoder_layers(4, 24, 48, 2, add_spatial=True)
+        self.bottom_unet_down1 = construct_encoder_layers(4, 24, 48, 2)
         
-        self.bottom_unet_encoder2 = construct_encoder_layers(4, 48, 96, 1, add_spatial=True)
-        self.bottom_unet_down2 = construct_encoder_layers(4, 96, 96, 2, add_spatial=True)
+        self.bottom_unet_encoder2 = construct_encoder_layers(4, 48, 96, 1)
+        self.bottom_unet_down2 = construct_encoder_layers(4, 96, 96, 2)
                
-        self.bottom_unet_encoder3 = construct_encoder_layers(3, 96, 192, 1, add_spatial=True)
-        self.bottom_unet_down3 = construct_encoder_layers(3, 192, 192, 2, add_spatial=True)
+        self.bottom_unet_encoder3 = construct_encoder_layers(3, 96, 192, 1)
+        self.bottom_unet_down3 = construct_encoder_layers(3, 192, 192, 2)
 
-        self.bottom_unet_encoder4 = construct_encoder_layers(2, 192, 192, 1, add_spatial=True)
+        self.bottom_unet_encoder4 = construct_encoder_layers(2, 192, 192, 1)
         self.bottom_unet_pos_encoder4 = LearnablePositionalEncoding2D(d_model=192, max_h=24, max_w=48, dropout=0.1)
         self.bottom_unet_down4 = construct_encoder_layers(2, 192, 192, 2)
         
-        self.bottom_unet_encoder5 = construct_encoder_layers(2, 192, 192, 1, add_spatial=True)
+        self.bottom_unet_encoder5 = construct_encoder_layers(2, 192, 192, 1)
         self.bottom_unet_pos_encoder5 = LearnablePositionalEncoding2D(d_model=192, max_h=12, max_w=24, dropout=0.1)
         self.bottom_unet_down5 = construct_encoder_layers(2, 192, 192, 2)
 
@@ -168,7 +168,7 @@ class ResUNet384V8(nn.Module):
         self.audio_adapter1 = nn.AdaptiveAvgPool2d((48, 48)) # Target size for cross-attention
         self.audio_pos_encoder_ca = LearnablePositionalEncoding2D(d_model=256, max_h=48, max_w=48, dropout=0.1)
 
-        self.bottom_unet_bottleneck = construct_encoder_layers(3, 192, 256, 1, True)
+        self.bottom_unet_bottleneck = construct_encoder_layers(3, 192, 256, 1)
         self.bottom_unet_bottleneck_pos_encoder = LearnablePositionalEncoding2D(d_model=256, max_h=6, max_w=12, dropout=0.1)
         
         # Audio adapters for fusing with bottom decoders
@@ -192,10 +192,12 @@ class ResUNet384V8(nn.Module):
         self.bottom_unet_conv3 = construct_encoder_layers(3, 256, 64, 1) # 64 (debottom3) + 128 (bottom3) = 192
         
         self.bottom_unet_decoder2 = construct_decoder_layers(6, 64, 32, 2, add_spatial=True)
-        self.bottom_unet_conv2 = construct_encoder_layers(6, 128, 32, 1, add_spatial=True) # 32 (debottom2) + 64 (bottom2) = 96
+        self.bottom_unet_conv2 = construct_encoder_layers(6, 128, 32, 1) # 32 (debottom2) + 64 (bottom2) = 96
 
         self.bottom_unet_decoder1 = construct_decoder_layers(6, 32, 32, 2, add_spatial=True)
-        self.bottom_unet_decoder0 = construct_encoder_layers(6, 32, 32, 1, add_spatial=True)
+        self.bottom_unet_decoder0 = construct_encoder_layers(6, 32, 32, 1)
+        
+        self.bottom_unet_window_attn = WindowSelfAttention(32, window_size=12)
         
         self.bottom_unet_conv1 = construct_encoder_layers(3, 56, 32, 1) # 32 (debottom1 from prev_decoder0) + 64 (bottom1) = 96
 
@@ -370,8 +372,11 @@ class ResUNet384V8(nn.Module):
         
         bottom_de1 = self.bottom_unet_decoder1(bottom_cat2)
         bottom_de0 = self.bottom_unet_decoder0(bottom_de1)
+                
         bottom_cat1 = torch.cat([bottom_de0, bottom_enc1], dim=1)
         bottom_cat1 = self.bottom_unet_conv1(bottom_cat1)
+        
+        bottom_cat1 = self.bottom_unet_window_attn(bottom_cat1)
         
         generated_bottom_half = self.bottom_unet_output_block(bottom_cat1)
         
