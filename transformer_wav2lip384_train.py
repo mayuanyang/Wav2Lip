@@ -247,6 +247,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         prog_bar = tqdm(enumerate(train_data_loader))
         running_img_loss = 0.0
         running_disc_loss = 0.0
+        running_bottom_loss = 0.0
                 
         for step, batch_data in prog_bar:
             # Handle case where collate_fn returns None (all samples in batch were None)
@@ -270,7 +271,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               gt = gt.to(device)
 
               with autocast():
-                g, face_embedding, audio_embedding = model(indiv_mels, x, global_step)
+                g, bottom_half, _ = model(indiv_mels, x, global_step)
                 
                 # Compare two images
                 '''
@@ -280,22 +281,48 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 '''
                 num_of_frames = g.shape[2]
                 full_losses = []
+                bottom_losses = []
                 
                 full_disc_loss = 0
+                bottom_disc_loss = 0
 
                 if hparams.disc_wt > 0:
                   for i in range(num_of_frames):
                     # Extract the i-th frame from gen_image and gt_image
                     gen_frame = g[:, :, i, :, :]  # Shape: [batch_size, 3, 192, 192]
                     gt_frame = gt[:, :, i, :, :]    # Shape: [batch_size, 3, 192, 192]
+                    
+                    bottom_gen_frame = bottom_half[:, :, i, :, :]  # Shape: [batch_size, 3, 192, 192]
+                    bottom_gt_frame = gt[:, :, i, 192:, :]    # Shape: [batch_size, 3, 192, 192]
+                    
+                    # Save bottom frames to temp directory for debugging
+                    if global_step % 1000 == 0:  # Save every 100 steps to avoid too many files
+                        
+                        temp_dir = 'generated_images'
+                        
+                        # Convert tensors to numpy arrays and then to images
+                        bottom_gen_np = (bottom_gen_frame.detach().cpu().numpy().transpose(0, 2, 3, 1) * 255.).astype(np.uint8)
+                        bottom_gt_np = (bottom_gt_frame.detach().cpu().numpy().transpose(0, 2, 3, 1) * 255.).astype(np.uint8)
+                        
+                        for batch_idx in range(bottom_gen_np.shape[0]):
+                            gen_path = os.path.join(temp_dir, f"bottom_gen_frame_step{global_step}_batch{batch_idx}_frame{i}.jpg")
+                            gt_path = os.path.join(temp_dir, f"bottom_gt_frame_step{global_step}_batch{batch_idx}_frame{i}.jpg")
+                            
+                            cv2.imwrite(gen_path, bottom_gen_np[batch_idx])
+                            cv2.imwrite(gt_path, bottom_gt_np[batch_idx])
 
                     full_frame_loss = lpips_loss(gen_frame, gt_frame)
                     full_losses.append(full_frame_loss)
                     
+                    bottom_frame_loss = lpips_loss(bottom_gen_frame, bottom_gt_frame)
+                    bottom_losses.append(bottom_frame_loss)
                   
                   # Average the loss over all frames
                   full_disc_loss = torch.mean(torch.stack(full_losses))
                   running_disc_loss += full_disc_loss.item()
+                  
+                  bottom_disc_loss = torch.mean(torch.stack(bottom_losses))
+                  running_bottom_loss += bottom_disc_loss.item()
                                   
 
                 if hparams.syncnet_wt > 0.:
@@ -317,7 +344,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 #cossine_loss = compute_cosine_similarity(audio_embedding, face_embedding)
                 
                 # 在总损失中包含嘴部区域损失
-                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + mouth_loss #+ tempora_loss + bottom_loss + 0.05 * cossine_loss
+                loss = syncnet_wt * sync_loss + hparams.l1_wt * l1loss + hparams.disc_wt * full_disc_loss + bottom_disc_loss + mouth_loss #+ tempora_loss + bottom_loss + 0.05 * cossine_loss
 
               #loss = loss / 20
               loss.backward()
@@ -348,11 +375,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               avg_disc_loss = running_disc_loss / (step + 1)
               
+              avg_bottom_disc_loss = running_bottom_loss / (step + 1)
+              
               if global_step % hparams.eval_interval == 0:
                 with torch.no_grad():
                   eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
 
-              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, mouth: {mouth_loss.item():.6f}, LR: {current_lr:.7f}")
+              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Bottom Disc: {avg_bottom_disc_loss:.5f}, mouth: {mouth_loss.item():.6f}, LR: {current_lr:.7f}")
               #prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Trep Loss: {tempora_loss.item():.5f}, Cos Loss: {cossine_loss.item():.5f} LR: {current_lr:.7f}")
               
               metrics = {
@@ -361,7 +390,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   "train/sync_loss": running_sync_loss / (step + 1), 
                   "train/disc_loss": avg_disc_loss,
                   "train/mouth_loss": mouth_loss.item(),
-                  # "train/tempora_loss": tempora_loss.item(),
+                  "train/avg_bottom_disc_loss": avg_bottom_disc_loss,
                   #"train/cosine_loss": cossine_loss.item(),
                   "params/step": global_step,
                   "params/learning_rate": current_lr,

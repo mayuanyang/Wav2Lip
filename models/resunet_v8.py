@@ -133,6 +133,7 @@ class ResUNet384V8(nn.Module):
         self.bottom_unet_encoder1 = construct_encoder_layers(4, 6, 24, 1)
         self.window_attention = WindowSelfAttention(24, window_size=24)  # 24 channels from bottom_unet_encoder1
         self.bottom_unet_down1 = construct_encoder_layers(4, 24, 48, 2)
+        self.bottom_unet_down1_window_attention = WindowSelfAttention(48, window_size=12)  # 24 channels from bottom_unet_encoder1
         
         self.bottom_unet_encoder2 = construct_encoder_layers(4, 48, 96, 1)
         self.bottom_unet_down2 = construct_encoder_layers(4, 96, 96, 2)
@@ -325,6 +326,7 @@ class ResUNet384V8(nn.Module):
         bottom_enc1 = self.bottom_unet_encoder1(bottom_half_with_ref)
         bottom_enc1 = self.window_attention(bottom_enc1)  # Apply window self-attention
         bottom_down1 = self.bottom_unet_down1(bottom_enc1)
+        bottom_down1 = self.bottom_unet_down1_window_attention(bottom_down1)
         
         bottom_enc2 = self.bottom_unet_encoder2(bottom_down1)
         bottom_down2 = self.bottom_unet_down2(bottom_enc2)
@@ -380,6 +382,8 @@ class ResUNet384V8(nn.Module):
         
         generated_bottom_half = self.bottom_unet_output_block(bottom_cat1)
         
+        
+        
         # Combine top half with generated bottom half to form full image
         combined_full_image = torch.cat([top_half, generated_bottom_half], dim=2)
         
@@ -413,8 +417,12 @@ class ResUNet384V8(nn.Module):
         if input_dim_size > 4:
             outputs = torch.split(enhanced_output, B, dim=0)
             outputs = torch.stack(outputs, dim=2)
+            
+            bottom_outputs = torch.split(generated_bottom_half, B, dim=0)
+            bottom_outputs = torch.stack(bottom_outputs, dim=2)
         else:
             outputs = enhanced_output
+            bottom_outputs = generated_bottom_half
             
         # Save generated bottom half and final output every 1000 steps
         if step is not None and step % 1000 == 0:
@@ -442,4 +450,4 @@ class ResUNet384V8(nn.Module):
             cv2.imwrite(enhanced_save_path, enhanced_to_save)
                     
         
-        return outputs, None, None
+        return outputs, bottom_outputs, None

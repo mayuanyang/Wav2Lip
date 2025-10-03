@@ -220,7 +220,7 @@ class Dataset(object):
             
             # Need at least 30 frames to ensure we have enough for window creation and reference images
             # syncnet_T frames for the main window + additional frames for wrong_window and reference images
-            if len(img_names) <= 20:
+            if len(img_names) <= 15:
                 print('The length', len(img_names), vidname)
                 should_load_diff_video = True
                 retry_count += 1
