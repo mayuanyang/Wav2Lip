@@ -209,7 +209,7 @@ def apply_dynamic_blur(window, sigma=12):
 
 
 def datagen(frames, mels, use_ref_img, ref_pool, iteration):
-  img_batch, mel_batch, frame_batch, coords_batch, ref_batch, ref_batch2 = [], [], [], [], [], []
+  img_batch, mel_batch, frame_batch, coords_batch = [], [], [], []
 
   if args.box[0] == -1:
     if not args.static:
@@ -235,35 +235,6 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
     if should_fill_ref_pool:
       ref_pool.append(face)
     
-    
-    if use_ref_img:
-      if iteration <= 0:
-          rdn_idx = random.randint(0, len(frames) - 1)
-
-          #print('The rdn_idx and cache 1', rdn_idx, ids_in_ref)
-          while rdn_idx == idx:
-              rdn_idx = random.randint(0, len(frames) - 1)
-          
-          ref_face, _ = face_det_results[rdn_idx].copy()
-          ref_face = cv2.resize(ref_face, (args.img_size, args.img_size))
-          ref_batch.append(ref_face)
-          ids_in_ref.append(rdn_idx)
-
-          
-      else:
-          rdn_idx = random.randint(0, len(ref_pool) - 1)
-
-          #print('The rdn_idx and cache 3', rdn_idx, ids_in_ref)
-          while rdn_idx == idx or rdn_idx in ids_in_ref:
-              rdn_idx = random.randint(0, len(ref_pool) - 1)
-          
-          ref_batch.append(ref_pool[rdn_idx])
-          ids_in_ref.append(rdn_idx)
-
-
-    else:
-      ref_batch.append(face)
-    
       
     img_batch.append(face)
     mel_batch.append(m)
@@ -272,7 +243,6 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
 
     if len(img_batch) >= args.wav2lip_batch_size:
       img_batch, mel_batch = np.asarray(img_batch), np.asarray(mel_batch)
-      ref_batch = np.asarray(ref_batch)
 
       img_masked = img_batch.copy()
 
@@ -280,11 +250,11 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
       #img_masked = apply_dynamic_blur(img_masked)
       #print('The image shape 1', img_masked.shape, img_batch.shape)
 
-      img_batch = np.concatenate((img_masked, img_batch, ref_batch), axis=3) / 255.
+      img_batch = np.concatenate((img_masked, img_batch), axis=3) / 255.
       mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
 
       yield img_batch, mel_batch, frame_batch, coords_batch
-      img_batch, mel_batch, frame_batch, coords_batch, ref_batch = [], [], [], [], []
+      img_batch, mel_batch, frame_batch, coords_batch = [], [], [], []
     
     ids_in_ref = []
 
@@ -294,10 +264,9 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
 
 
     if use_ref_img:
-      ref_batch = np.asarray(ref_batch)
-      img_batch = np.concatenate((img_masked, img_batch, ref_batch), axis=3) / 255.
+      img_batch = np.concatenate((img_masked, img_batch), axis=3) / 255.
     else:
-      img_batch = np.concatenate((img_masked, img_batch, ref_batch), axis=3) / 255.
+      img_batch = np.concatenate((img_masked, img_batch), axis=3) / 255.
     mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
 
     yield img_batch, mel_batch, frame_batch, coords_batch

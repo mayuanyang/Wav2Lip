@@ -284,7 +284,24 @@ class ResUNet384V8(nn.Module):
 
         return result
                 
-    def forward(self, audio_sequences, face_sequences, step=None, train_face_enhancer=True):
+    def apply_global_gaussian_blur(self, image, kernel_size=15, sigma=5.0):
+        """
+        Apply Gaussian blur to the entire input image
+        kernel_size: should be odd integer, larger = more blur
+        sigma: standard deviation for Gaussian kernel
+        """
+        # Ensure kernel_size is odd
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+        
+        # Create Gaussian blur transform
+        blur_transform = GaussianBlur(kernel_size=(kernel_size, kernel_size), 
+                                    sigma=(sigma, sigma))
+        
+        return blur_transform(image)
+      
+      
+    def forward(self, audio_sequences, face_sequences, step=None, training=True):
         input_dim_size = len(face_sequences.size())
         B = audio_sequences.size(0)       
         
@@ -382,13 +399,26 @@ class ResUNet384V8(nn.Module):
         
         generated_bottom_half = self.bottom_unet_output_block(bottom_cat1)
         
+        if input_dim_size > 4:            
+            bottom_outputs = torch.split(generated_bottom_half, B, dim=0)
+            bottom_outputs = torch.stack(bottom_outputs, dim=2)
+        else:
+            bottom_outputs = generated_bottom_half
+        # avoid the full loss affecting the bottom unet
+                
+        # Stop gradients here to prevent enhancement loss from affecting bottom UNet
+        if training:
+            generated_bottom_half_detached = generated_bottom_half.detach()
+        else:
+            generated_bottom_half_detached = generated_bottom_half
         
+        # Use detached version for enhancement
+        combined_full_image = torch.cat([top_half, generated_bottom_half_detached], dim=2)
         
-        # Combine top half with generated bottom half to form full image
-        combined_full_image = torch.cat([top_half, generated_bottom_half], dim=2)
+        blurred_input = self.apply_global_gaussian_blur(combined_full_image)
         
         # Apply enhancement UNet to the combined full image
-        enh_enc1 = self.enhancement_unet_encoder1(combined_full_image)
+        enh_enc1 = self.enhancement_unet_encoder1(blurred_input)
         enh_down1 = self.enhancement_unet_down1(enh_enc1)
         
         enh_enc2 = self.enhancement_unet_encoder2(enh_down1)
@@ -417,13 +447,9 @@ class ResUNet384V8(nn.Module):
         if input_dim_size > 4:
             outputs = torch.split(enhanced_output, B, dim=0)
             outputs = torch.stack(outputs, dim=2)
-            
-            bottom_outputs = torch.split(generated_bottom_half, B, dim=0)
-            bottom_outputs = torch.stack(bottom_outputs, dim=2)
         else:
             outputs = enhanced_output
-            bottom_outputs = generated_bottom_half
-            
+                        
         # Save generated bottom half and final output every 1000 steps
         if step is not None and step % 1000 == 0:
             # Create directory for saving generated images
