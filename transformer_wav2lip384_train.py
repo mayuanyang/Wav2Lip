@@ -215,7 +215,7 @@ def trepa_loss(real_frames, generated_frames):
 
     return loss
   
-def train(device, model, train_data_loader, test_data_loader, optimizer, 
+def train(device, model, train_data_loader, test_data_loader, optimizers, 
           checkpoint_dir=None, checkpoint_interval=None, nepochs=None, should_print_grad_norm=False):
 
     global global_step, global_epoch
@@ -223,11 +223,16 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
     patience = 55000
 
-    current_lr = get_current_lr(optimizer)
-    print('The learning rate is: {0}'.format(current_lr))
+    # Extract optimizers
+    optimizer_g, optimizer_bottom = optimizers
+    
+    current_lr_g = get_current_lr(optimizer_g)
+    current_lr_bottom = get_current_lr(optimizer_bottom)
+    print('The learning rates are: G: {0}, Bottom: {1}'.format(current_lr_g, current_lr_bottom))
 
     # Added by eddy
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=patience)
+    scheduler_g = ReduceLROnPlateau(optimizer_g, mode='min', factor=0.9, patience=patience)
+    scheduler_bottom = ReduceLROnPlateau(optimizer_bottom, mode='min', factor=0.9, patience=patience)
 
     # Initialize LPIPS model
     lpips_loss = lpips.LPIPS(net='vgg').to(device)  # You can choose 'alex', 'vgg', or 'squeeze'
@@ -240,8 +245,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     model.train()
 
     while global_epoch < nepochs:
-        current_lr = get_current_lr(optimizer)
-                
+                        
         #print('Starting Epoch: {}'.format(global_epoch))
         running_sync_loss, running_l1_loss = 0., 0.
         prog_bar = tqdm(enumerate(train_data_loader))
@@ -349,8 +353,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               #loss = loss / 20
               loss.backward()
               if (step + 1) % 10 == 0:
-                optimizer.step()
-                optimizer.zero_grad()
+                # Update both optimizers
+                optimizer_g.step()
+                optimizer_bottom.step()
+                
+                # Zero gradients for both optimizers
+                optimizer_g.zero_grad()
+                optimizer_bottom.zero_grad()
                 
 
               if global_step % checkpoint_interval == 0:
@@ -367,7 +376,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
               if global_step == 1 or global_step % checkpoint_interval == 0:
                   save_checkpoint(
-                      model, optimizer, global_step, checkpoint_dir, global_epoch)
+                      model, optimizers, global_step, checkpoint_dir, global_epoch)
 
               avg_img_loss = (running_img_loss) / (step + 1)
 
@@ -379,9 +388,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               
               if global_step % hparams.eval_interval == 0:
                 with torch.no_grad():
-                  eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, 20)
+                  eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir, [scheduler_g, scheduler_bottom], 20)
 
-              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Bottom Disc: {avg_bottom_disc_loss:.5f}, mouth: {mouth_loss.item():.6f}, LR: {current_lr:.7f}")
+              prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Bottom Disc: {avg_bottom_disc_loss:.5f}, mouth: {mouth_loss.item():.6f}")
               #prog_bar.set_description(f"Epoch: {global_epoch}, Step: {global_step:.0f}, Img Loss: {avg_img_loss:.5f}, Sync Loss: {running_sync_loss / (step + 1):.5f}, L1: {avg_l1_loss:.5f}, Full Disc: {avg_disc_loss:.5f}, Trep Loss: {tempora_loss.item():.5f}, Cos Loss: {cossine_loss.item():.5f} LR: {current_lr:.7f}")
               
               metrics = {
@@ -393,7 +402,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                   "train/avg_bottom_disc_loss": avg_bottom_disc_loss,
                   #"train/cosine_loss": cossine_loss.item(),
                   "params/step": global_step,
-                  "params/learning_rate": current_lr,
                   "params/l1_wt": hparams.l1_wt,
                   "params/bottom_l1_wt": hparams.bottom_l1_wt,
                   "params/mouth_wt": hparams.mouth_wt,
@@ -406,7 +414,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
         global_epoch += 1
 
 
-def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler, eval_steps = 100):
+def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, schedulers, eval_steps = 100):
     print('Evaluating for {} steps'.format(eval_steps))
     sync_losses, recon_losses = [], []
     step = 0
@@ -449,20 +457,28 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir, sch
               if use_wandb:
                 wandb.log({**metrics})
 
-              scheduler.step(averaged_sync_loss + averaged_recon_loss)
+              # Update both schedulers
+              for scheduler in schedulers:
+                  scheduler.step(averaged_sync_loss + averaged_recon_loss)
 
               if step > eval_steps: 
                 return averaged_sync_loss
             
 
-def save_checkpoint(model, optimizer, step, checkpoint_dir, epoch):
-
+def save_checkpoint(model, optimizers, step, checkpoint_dir, epoch):
     checkpoint_path = join(
         checkpoint_dir, "checkpoint_step{:09d}.pth".format(global_step))
-    optimizer_state = optimizer.state_dict() if hparams.save_optimizer_state else None
+    
+    # Save states for both optimizers
+    optimizer_states = []
+    for optimizer in optimizers:
+        optimizer_state = optimizer.state_dict() if hparams.save_optimizer_state else None
+        optimizer_states.append(optimizer_state)
+    
     torch.save({
         "state_dict": model.state_dict(),
-        "optimizer": optimizer_state,
+        "optimizer_g": optimizer_states[0],
+        "optimizer_bottom": optimizer_states[1],
         "global_step": step,
         "global_epoch": epoch,
     }, checkpoint_path)
@@ -477,7 +493,7 @@ def _load(checkpoint_path):
                                 map_location=lambda storage, loc: storage)
     return checkpoint
 
-def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_global_states=True, strick=False):
+def load_checkpoint(path, model, optimizers, reset_optimizer=False, overwrite_global_states=True, strick=False):
     global global_step
     global global_epoch
 
@@ -490,18 +506,24 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
         new_s[k.replace('module.', '')] = v
         
     model.load_state_dict(new_s, strict=strick)
-    if not reset_optimizer:
-        optimizer_state = checkpoint["optimizer"]
-        if optimizer_state is not None:
-            print("Load optimizer state from {}".format(path))
-            optimizer.load_state_dict(checkpoint["optimizer"])
+    
+    if not reset_optimizer and optimizers is not None:
+        # Load states for both optimizers
+        if "optimizer_g" in checkpoint and checkpoint["optimizer_g"] is not None:
+            print("Load optimizer_g state from {}".format(path))
+            optimizers[0].load_state_dict(checkpoint["optimizer_g"])
+        if "optimizer_bottom" in checkpoint and checkpoint["optimizer_bottom"] is not None:
+            print("Load optimizer_bottom state from {}".format(path))
+            optimizers[1].load_state_dict(checkpoint["optimizer_bottom"])
+            
     if overwrite_global_states:
         global_step = checkpoint["global_step"]
         global_epoch = checkpoint["global_epoch"]
 
-    if optimizer != None:
-      for param_group in optimizer.param_groups:
-        param_group['lr'] = 0.00001
+    if optimizers is not None:
+        for optimizer in optimizers:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = 0.00001
 
     # for name, param in model.named_parameters():
     #   if 'face_enhancer' not in name:
@@ -575,11 +597,32 @@ if __name__ == "__main__":
       model = ResUNet384V8().to(device)
     
 
-    optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
-                           lr=hparams.initial_learning_rate)
+    # Create separate parameter groups for g (enhancement) and bottom_half
+    g_params = []
+    bottom_half_params = []
+    
+    # Separate parameters based on their layer names
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            if 'enhancement_unet' in name:
+                g_params.append(param)
+            elif 'bottom_unet' in name:
+                bottom_half_params.append(param)
+            else:
+                # For any other parameters, add them to both optimizers
+                # This might include some shared components
+                g_params.append(param)
+                bottom_half_params.append(param)
+    
+    # Create separate optimizers
+    optimizer_g = optim.Adam(g_params, lr=hparams.initial_learning_rate)
+    optimizer_bottom = optim.Adam(bottom_half_params, lr=hparams.initial_learning_rate)
+    
+    # Combine optimizers into a list for checkpoint saving
+    optimizers = [optimizer_g, optimizer_bottom]
 
     if args.checkpoint_path is not None:
-        load_checkpoint(args.checkpoint_path, model, optimizer, reset_optimizer=True, strick=True)
+        load_checkpoint(args.checkpoint_path, model, optimizers, reset_optimizer=True, strick=True)
         
     load_checkpoint(args.syncnet_checkpoint_path, syncnet, None, reset_optimizer=True, overwrite_global_states=False)
 
@@ -613,7 +656,7 @@ if __name__ == "__main__":
 
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
     # Train!
-    train(device, model, train_data_loader, test_data_loader, optimizer,
+    train(device, model, train_data_loader, test_data_loader, optimizers,
               checkpoint_dir=checkpoint_dir,
               checkpoint_interval=hparams.checkpoint_interval,
               nepochs=hparams.nepochs)

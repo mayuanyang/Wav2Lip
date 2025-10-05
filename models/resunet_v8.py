@@ -133,10 +133,11 @@ class ResUNet384V8(nn.Module):
         self.bottom_unet_encoder1 = construct_encoder_layers(4, 6, 24, 1)
         self.window_attention = WindowSelfAttention(24, window_size=24)  # 24 channels from bottom_unet_encoder1
         self.bottom_unet_down1 = construct_encoder_layers(4, 24, 48, 2)
-        self.bottom_unet_down1_window_attention = WindowSelfAttention(48, window_size=12)  # 24 channels from bottom_unet_encoder1
+        self.bottom_unet_down1_window_attention = WindowSelfAttention(48, window_size=12)
         
         self.bottom_unet_encoder2 = construct_encoder_layers(4, 48, 96, 1)
         self.bottom_unet_down2 = construct_encoder_layers(4, 96, 96, 2)
+        self.bottom_unet_down2_window_attention = WindowSelfAttention(96, window_size=6)
                
         self.bottom_unet_encoder3 = construct_encoder_layers(3, 96, 192, 1)
         self.bottom_unet_down3 = construct_encoder_layers(3, 192, 192, 2)
@@ -177,11 +178,9 @@ class ResUNet384V8(nn.Module):
         self.audio_adapter_de5 = nn.AdaptiveAvgPool2d((12, 24))       # Match de5 spatial dims
         self.audio_adapter_de4 = nn.AdaptiveAvgPool2d((24, 48))       # Match de4 spatial dims
         
-        # Audio adapters for fusing with final decoders
-        self.audio_adapter_final_bottleneck = nn.AdaptiveAvgPool2d((12, 12))  # Match final bottleneck spatial dims
-        self.audio_adapter_final_de5 = nn.AdaptiveAvgPool2d((24, 24))        # Match final de5 spatial dims
-        self.audio_adapter_final_de4 = nn.AdaptiveAvgPool2d((48, 48))        # Match final de4 spatial dims
+        self.audio_adapter_enc = nn.AdaptiveAvgPool2d((48, 48))       # Match de4 spatial dims
         
+                
         # Bottom UNet Decoders
         self.bottom_unet_decoder5 = construct_decoder_layers(3, 512, 128, 2)  # 256 (bottom_bottleneck) + 256 (audio) = 512
         self.bottom_unet_conv5 = construct_encoder_layers(3, 576, 320, 1) # 128 (debottom5) + 256 (bottom5) = 384
@@ -208,25 +207,25 @@ class ResUNet384V8(nn.Module):
         )
         
         # --- Enhancement UNet ---
-        self.enhancement_unet_encoder1 = construct_encoder_layers(3, 3, 32, 1, kernel=3)
-        self.enhancement_unet_down1 = construct_encoder_layers(3, 32, 64, 2)
+        self.enhancement_unet_encoder1 = construct_encoder_layers(3, 6, 24, 1, kernel=3)
+        self.enhancement_unet_down1 = construct_encoder_layers(3, 24, 48, 2)
         
-        self.enhancement_unet_encoder2 = construct_encoder_layers(3, 64, 128, 1)
-        self.enhancement_unet_down2 = construct_encoder_layers(3, 128, 128, 2)
+        self.enhancement_unet_encoder2 = construct_encoder_layers(3, 48, 96, 1)
+        self.enhancement_unet_down2 = construct_encoder_layers(3, 96, 96, 2)
         
-        self.enhancement_unet_encoder3 = construct_encoder_layers(3, 128, 256, 1)
-        self.enhancement_unet_down3 = construct_encoder_layers(3, 256, 256, 2)
+        self.enhancement_unet_encoder3 = construct_encoder_layers(3, 96, 192, 1)
+        self.enhancement_unet_down3 = construct_encoder_layers(3, 192, 192, 2)
         
-        self.enhancement_unet_bottleneck = construct_encoder_layers(3, 256, 512, 1)
+        self.enhancement_unet_bottleneck = construct_encoder_layers(3, 192, 192, 1)
         
-        self.enhancement_unet_decoder3 = construct_decoder_layers(3, 512, 256, 2)
-        self.enhancement_unet_conv3 = construct_encoder_layers(3, 512, 256, 1)
+        self.enhancement_unet_decoder3 = construct_decoder_layers(3, 448, 256, 2)
+        self.enhancement_unet_conv3 = construct_encoder_layers(3, 448, 256, 1)
         
         self.enhancement_unet_decoder2 = construct_decoder_layers(3, 256, 128, 2)
-        self.enhancement_unet_conv2 = construct_encoder_layers(3, 256, 128, 1)
+        self.enhancement_unet_conv2 = construct_encoder_layers(3, 224, 128, 1)
         
         self.enhancement_unet_decoder1 = construct_decoder_layers(3, 128, 64, 2)
-        self.enhancement_unet_conv1 = construct_encoder_layers(3, 96, 32, 1)
+        self.enhancement_unet_conv1 = construct_encoder_layers(3, 88, 32, 1)
         
         self.enhancement_unet_output_block = nn.Sequential(
             nn.Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
@@ -334,6 +333,9 @@ class ResUNet384V8(nn.Module):
         # Split into top and bottom halves
         top_half = face_sequences_3ch[:, :, :split_idx, :]
         bottom_half = face_sequences_3ch[:, :, split_idx:, :]
+        ref_bottom_half = face_sequences_ref[:, :, split_idx:, :]
+        
+        ref_residual = torch.cat([top_half, ref_bottom_half], dim=2)
         
         # Combine bottom half with reference channels for bottom encoder
         bottom_half_with_ref = torch.cat([bottom_half, bottom_ref_channels], dim=1)
@@ -347,6 +349,7 @@ class ResUNet384V8(nn.Module):
         
         bottom_enc2 = self.bottom_unet_encoder2(bottom_down1)
         bottom_down2 = self.bottom_unet_down2(bottom_enc2)
+        bottom_down2 = self.bottom_unet_down2_window_attention(bottom_down2)
         
         bottom_enc3 = self.bottom_unet_encoder3(bottom_down2)
         bottom_down3 = self.bottom_unet_down3(bottom_enc3)
@@ -415,10 +418,10 @@ class ResUNet384V8(nn.Module):
         # Use detached version for enhancement
         combined_full_image = torch.cat([top_half, generated_bottom_half_detached], dim=2)
         
-        blurred_input = self.apply_global_gaussian_blur(combined_full_image)
-        
         # Apply enhancement UNet to the combined full image
-        enh_enc1 = self.enhancement_unet_encoder1(blurred_input)
+        combined_full_image = torch.cat([combined_full_image, ref_residual], dim=1)
+        
+        enh_enc1 = self.enhancement_unet_encoder1(combined_full_image)
         enh_down1 = self.enhancement_unet_down1(enh_enc1)
         
         enh_enc2 = self.enhancement_unet_encoder2(enh_down1)
@@ -428,7 +431,10 @@ class ResUNet384V8(nn.Module):
         enh_down3 = self.enhancement_unet_down3(enh_enc3)
         
         enh_bottleneck = self.enhancement_unet_bottleneck(enh_down3)
+        audio_enc = self.audio_adapter_enc(audio_embedding)
         
+        enh_bottleneck = torch.cat([enh_bottleneck, audio_enc], dim=1)
+                
         enh_de3 = self.enhancement_unet_decoder3(enh_bottleneck)
         enh_cat3 = torch.cat([enh_de3, enh_enc3], dim=1)
         enh_cat3 = self.enhancement_unet_conv3(enh_cat3)
@@ -440,7 +446,7 @@ class ResUNet384V8(nn.Module):
         enh_de1 = self.enhancement_unet_decoder1(enh_cat2)
         enh_cat1 = torch.cat([enh_de1, enh_enc1], dim=1)
         enh_cat1 = self.enhancement_unet_conv1(enh_cat1)
-        
+                
         enhanced_output = self.enhancement_unet_output_block(enh_cat1)
                 
         
