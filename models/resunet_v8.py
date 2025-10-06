@@ -90,6 +90,8 @@ def construct_encoder_layers(num_of_layers, input_channels, output_channels, fir
     padding = 1
     if kernel == 7:
       padding = 3
+    elif kernel == 5:
+      padding = 2
     # First layer
     layers.append(Conv2d(input_channels, output_channels, kernel_size=kernel, stride=first_layer_stride, padding=padding))
     # Subsequent layers
@@ -130,9 +132,9 @@ class ResUNet384V8(nn.Module):
         }
         
         # --- First UNet (processes bottom half) ---
-        self.bottom_unet_encoder1 = construct_encoder_layers(4, 6, 24, 1)
+        self.bottom_unet_encoder1 = construct_encoder_layers(6, 6, 24, 1)
         self.window_attention = WindowSelfAttention(24, window_size=24)  # 24 channels from bottom_unet_encoder1
-        self.bottom_unet_down1 = construct_encoder_layers(4, 24, 48, 2)
+        self.bottom_unet_down1 = construct_encoder_layers(6, 24, 48, 2)
         self.bottom_unet_down1_window_attention = WindowSelfAttention(48, window_size=12)
         
         self.bottom_unet_encoder2 = construct_encoder_layers(4, 48, 96, 1)
@@ -207,11 +209,11 @@ class ResUNet384V8(nn.Module):
         )
         
         # --- Enhancement UNet ---
-        self.enhancement_unet_encoder1 = construct_encoder_layers(3, 6, 24, 1, kernel=3)
-        self.enhancement_unet_down1 = construct_encoder_layers(3, 24, 48, 2)
+        self.enhancement_unet_encoder1 = construct_encoder_layers(4, 6, 24, 1, kernel=7)
+        self.enhancement_unet_down1 = construct_encoder_layers(4, 24, 48, 2, kernel=7)
         
-        self.enhancement_unet_encoder2 = construct_encoder_layers(3, 48, 96, 1)
-        self.enhancement_unet_down2 = construct_encoder_layers(3, 96, 96, 2)
+        self.enhancement_unet_encoder2 = construct_encoder_layers(4, 48, 96, 1, kernel=5)
+        self.enhancement_unet_down2 = construct_encoder_layers(4, 96, 96, 2, kernel=5)
         
         self.enhancement_unet_encoder3 = construct_encoder_layers(3, 96, 192, 1)
         self.enhancement_unet_down3 = construct_encoder_layers(3, 192, 192, 2)
@@ -259,7 +261,7 @@ class ResUNet384V8(nn.Module):
       
     def diffuse(self, x, channels_to_mask=3):
         """
-        带椭圆遮罩的扩散过程
+        带椭圆遮罩的扩散过程 —— 使用黑色（0）填充遮罩区域，而非噪声
         """
         b, c, h, w = x.shape
         split_idx = h // 2
@@ -269,19 +271,19 @@ class ResUNet384V8(nn.Module):
         rgb_channels = bottom_half[:, :channels_to_mask, :, :]
         other_channels = bottom_half[:, channels_to_mask:, :, :]
         
+        # 生成椭圆遮罩
         mask = self.generate_ellipse_mask(h, w, split_idx, x.device)
         mask = mask.unsqueeze(0).unsqueeze(0).repeat(b, channels_to_mask, 1, 1)
         
-        # Use fixed noise level instead of diffusion steps
-        noise = torch.randn_like(rgb_channels)
-        noisy_rgb = math.sqrt(1 - self.noise_level) * rgb_channels + math.sqrt(self.noise_level) * noise
-        
-        noisy_rgb = rgb_channels * (1 - mask) + noisy_rgb * mask
-        
-        noisy_bottom = torch.cat([noisy_rgb, other_channels], dim=1)
+        # 将遮罩区域设为黑色（0），其余部分保持原样
+        masked_rgb = rgb_channels * (1 - mask)  # 非遮罩区域保留原值
+        # 遮罩区域直接设为 0（黑色）
+
+        noisy_bottom = torch.cat([masked_rgb, other_channels], dim=1)
         result = torch.cat([top_half, noisy_bottom], dim=2)
 
         return result
+
                 
     def apply_global_gaussian_blur(self, image, kernel_size=15, sigma=5.0):
         """
