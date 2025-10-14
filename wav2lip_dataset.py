@@ -277,6 +277,9 @@ class Dataset(object):
 
                 mel = self.crop_audio_window(orig_mel.copy(), img_name)
                 
+                mel = (mel - mel.min()) / (mel.max() - mel.min() + 1e-8)
+
+                
                 if (mel.shape[0] != syncnet_mel_step_size):
                     retry_count += 1
                     continue

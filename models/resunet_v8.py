@@ -45,22 +45,130 @@ def construct_decoder_layers(num_of_layers, input_channels, output_channels, fir
     return nn.Sequential(*layers)
 
 
-class SimpleAudioFusion(nn.Module):
-    """Simpler fusion that just adds projected audio features to visual features"""
-    def __init__(self, visual_dim, audio_dim):
-        super().__init__()
-        self.audio_proj = nn.Conv2d(audio_dim, visual_dim, 1)
-        
-    def forward(self, visual_feat, audio_feat):
-        # Resize audio to match visual spatial dimensions
-        if audio_feat.size(2) != visual_feat.size(2) or audio_feat.size(3) != visual_feat.size(3):
-            audio_feat = F.interpolate(audio_feat, size=(visual_feat.size(2), visual_feat.size(3)), 
-                                     mode='bilinear', align_corners=False)
-        
-        audio_feat = self.audio_proj(audio_feat)
-        return visual_feat + audio_feat
+class WindowCrossAttention(nn.Module):
+    """Improved window-based cross attention with stable fusion to avoid gradient vanishing.
 
-      
+    - Normalizes Q/K/V per-window before attention.
+    - Uses separate q/k/v projections.
+    - Pads spatial dims so H,W don't need to be divisible by window_size.
+    - After attention, uses a small conv-MLP and residual add to visual features.
+    """
+    def __init__(self, visual_dim, audio_dim, window_size=8, num_heads=4, attn_dropout=0.0, proj_dropout=0.0):
+        super().__init__()
+        self.visual_dim = visual_dim
+        self.window_size = window_size
+        self.num_heads = num_heads
+
+        # Separate projections
+        self.q_proj = nn.Conv2d(visual_dim, visual_dim, kernel_size=1, bias=True)
+        self.k_proj = nn.Conv2d(audio_dim, visual_dim, kernel_size=1, bias=True)
+        self.v_proj = nn.Conv2d(audio_dim, visual_dim, kernel_size=1, bias=True)
+
+        # PyTorch multihead expects [B, L, E] when batch_first=True
+        self.attention = nn.MultiheadAttention(embed_dim=visual_dim, num_heads=num_heads, dropout=attn_dropout, batch_first=True)
+
+        # Small conv-MLP applied to attention output (channel-preserving)
+        self.post_conv = nn.Sequential(
+            nn.Conv2d(visual_dim, visual_dim, kernel_size=1, bias=True),
+            nn.GELU(),
+            nn.Conv2d(visual_dim, visual_dim, kernel_size=1, bias=True),
+        )
+
+        # Normalization: we apply LayerNorm over channel dim after reshaping windows to [..., C]
+        # We'll create a small helper LayerNorm; will be applied per-window sequence tokens (last dim = C)
+        self.window_ln_q = nn.LayerNorm(visual_dim)
+        self.window_ln_k = nn.LayerNorm(visual_dim)
+        self.window_ln_v = nn.LayerNorm(visual_dim)
+
+        # Final LN over channels (applied on [B, C, H, W] by permuting)
+        self.final_ln = nn.GroupNorm(1, visual_dim)  # GroupNorm(1, C) ~ InstanceNorm across spatial but stable
+
+        # Optional projection dropout after conv-mlp
+        self.proj_dropout = nn.Dropout(proj_dropout) if proj_dropout > 0 else nn.Identity()
+
+    def pad_if_needed(self, x, window_size):
+        # pad on H and W if not divisible by window_size
+        B, C, H, W = x.shape
+        pad_h = (window_size - H % window_size) % window_size
+        pad_w = (window_size - W % window_size) % window_size
+        if pad_h == 0 and pad_w == 0:
+            return x, 0, 0
+        x = F.pad(x, (0, pad_w, 0, pad_h))  # pad (left,right, top,bottom)
+        return x, pad_h, pad_w
+
+    def window_partition(self, x, window_size):
+        """Partition into non-overlapping windows. Returns (windows, H_pad, W_pad, Hp, Wp)"""
+        B, C, H, W = x.shape
+        x, pad_h, pad_w = self.pad_if_needed(x, window_size)
+        _, _, Hp, Wp = x.shape
+        # reshape: B, C, H//ws, ws, W//ws, ws
+        x = x.view(B, C, Hp // window_size, window_size, Wp // window_size, window_size)
+        # permute to (B, H//ws, W//ws, ws, ws, C)
+        windows = x.permute(0, 2, 4, 3, 5, 1).contiguous()
+        # collapse to (num_windows_total*B, ws*ws, C)
+        windows = windows.view(-1, window_size * window_size, C)
+        return windows, Hp, Wp, pad_h, pad_w
+
+    def window_reverse(self, windows, window_size, Hp, Wp, pad_h, pad_w):
+        """Reverse windows into padded spatial layout, then unpad to original H,W."""
+        # windows: (num_windows_total*B, ws*ws, C)
+        B = int(windows.shape[0] // ((Hp // window_size) * (Wp // window_size)))
+        x = windows.view(B, Hp // window_size, Wp // window_size, window_size, window_size, -1)
+        x = x.permute(0, 5, 1, 3, 2, 4).contiguous().view(B, -1, Hp, Wp)
+        if pad_h != 0 or pad_w != 0:
+            x = x[:, :, : Hp - pad_h, : Wp - pad_w]
+        return x
+
+    def forward(self, visual_feat, audio_feat):
+        """
+        visual_feat: [B, C_v, H, W]
+        audio_feat:  [B, C_a, H_a, W_a] (will be resized if necessary)
+        returns: fused [B, C_v, H, W]
+        """
+        B, C_v, H, W = visual_feat.shape
+
+        # Resize audio to visual spatial dims (bilinear)
+        if audio_feat.shape[2:] != (H, W):
+            audio_feat = F.interpolate(audio_feat, size=(H, W), mode='bilinear', align_corners=False)
+
+        # Project to q/k/v (conv 1x1)
+        Q = self.q_proj(visual_feat)      # [B, C_v, H, W]
+        K = self.k_proj(audio_feat)       # [B, C_v, H, W]
+        V = self.v_proj(audio_feat)       # [B, C_v, H, W]
+
+        # Partition into windows (with padding if needed)
+        window_size = self.window_size
+        Qw, Hp, Wp, pad_h, pad_w = self.window_partition(Q, window_size)
+        Kw, _, _, _, _ = self.window_partition(K, window_size)
+        Vw, _, _, _, _ = self.window_partition(V, window_size)
+        # Qw/Kw/Vw: [num_windows*B, ws*ws, C_v]
+
+        # Normalise per-window (LayerNorm expects [..., C])
+        Qw = self.window_ln_q(Qw)
+        Kw = self.window_ln_k(Kw)
+        Vw = self.window_ln_v(Vw)
+
+        # MultiheadAttention expects (B_batch, L_q, E), we're already in that shape
+        # Use attn with Qw as queries, Kw as keys, Vw as values
+        attn_out, _ = self.attention(Qw, Kw, Vw)  # -> [num_windows*B, ws*ws, C_v]
+
+        # Convert attn_out back to spatial windows
+        attn_spatial = self.window_reverse(attn_out, window_size, Hp, Wp, pad_h, pad_w)  # [B, C_v, H, W] possibly padded
+
+        # Post processing conv-MLP, dropout and residual add to visual features
+        processed_audio = self.post_conv(attn_spatial)
+        processed_audio = self.proj_dropout(processed_audio)
+
+        # Residual fusion: visual + processed_audio (ensures gradient path through visual branch)
+        fused = visual_feat + processed_audio
+
+        # Final normalization for stability
+        #fused = self.final_ln(fused)
+
+        return fused
+
+
+
 class ResUNet384V8(nn.Module):
     def __init__(self):
         super(ResUNet384V8, self).__init__()
@@ -76,18 +184,26 @@ class ResUNet384V8(nn.Module):
         self.bottom_unet_down1 = construct_encoder_layers(3, 24, 48, 2)
                 
         self.bottom_unet_encoder2 = construct_encoder_layers(3, 48, 96, 1)
-        self.bottom_unet_down2 = construct_encoder_layers(3, 352, 96, 2)
+        self.bottom_unet_down2 = construct_encoder_layers(3, 96, 96, 2)
                        
         self.bottom_unet_encoder3 = construct_encoder_layers(3, 96, 192, 1)
-        self.bottom_unet_down3 = construct_encoder_layers(3, 448, 192, 2)
+        self.bottom_unet_down3 = construct_encoder_layers(3, 192, 192, 2)
 
         self.bottom_unet_encoder4 = construct_encoder_layers(2, 192, 192, 1)
         self.bottom_unet_pos_encoder4 = LearnablePositionalEncoding2D(d_model=192, max_h=24, max_w=48, dropout=0.1)
-        self.bottom_unet_down4 = construct_encoder_layers(2, 448, 192, 2)
+        self.bottom_unet_down4 = construct_encoder_layers(2, 192, 192, 2)
         
         self.bottom_unet_encoder5 = construct_encoder_layers(2, 192, 192, 1)
         self.bottom_unet_pos_encoder5 = LearnablePositionalEncoding2D(d_model=192, max_h=12, max_w=24, dropout=0.1)
-        self.bottom_unet_down5 = construct_encoder_layers(2, 448, 192, 2)
+        self.bottom_unet_down5 = construct_encoder_layers(2, 192, 192, 2)
+
+        # --- MaxPooling for residual connection from encoder1 to encoder3 ---
+        self.encoder1_to_encoder3_pool = nn.MaxPool2d(kernel_size=4, stride=4)  # 4x downsampling
+        self.encoder1_to_encoder3_conv = nn.Conv2d(24, 192, kernel_size=1)  # Channel adjustment
+
+        # --- MaxPooling for residual connection from encoder1 to encoder4 ---
+        self.encoder1_to_encoder4_pool = nn.MaxPool2d(kernel_size=8, stride=8)  # 8x downsampling
+        self.encoder1_to_encoder4_conv = nn.Conv2d(24, 192, kernel_size=1)  # Channel adjustment
 
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
@@ -103,11 +219,7 @@ class ResUNet384V8(nn.Module):
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
             
-            Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
-            
-            Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
         )
                 
@@ -117,7 +229,7 @@ class ResUNet384V8(nn.Module):
         
         # Audio adapters for fusing with bottom decoders at multiple levels
         self.audio_adapter_bottleneck = nn.AdaptiveAvgPool2d((6, 12))  # Match bottleneck spatial dims
-        self.audio_adapter_5 = nn.AdaptiveAvgPool2d((12, 24))   # Match decoder4 spatial dims
+        self.audio_adapter_5 = nn.AdaptiveAvgPool2d((12, 24))   # Match decoder5 spatial dims
         self.audio_adapter_4 = nn.AdaptiveAvgPool2d((24, 48))   # Match decoder4 spatial dims
         self.audio_adapter_3 = nn.AdaptiveAvgPool2d((48, 96))   # Match decoder3 spatial dims  
         self.audio_adapter_2 = nn.AdaptiveAvgPool2d((96, 192))   # Match decoder2 spatial dims
@@ -128,25 +240,33 @@ class ResUNet384V8(nn.Module):
         self.audio_pos_encoder_4 = LearnablePositionalEncoding2D(d_model=256, max_h=24, max_w=48, dropout=0.1)
         self.audio_pos_encoder_3 = LearnablePositionalEncoding2D(d_model=256, max_h=48, max_w=96, dropout=0.1)
         self.audio_pos_encoder_2 = LearnablePositionalEncoding2D(d_model=256, max_h=96, max_w=192, dropout=0.1)
+        
+        # WindowCrossAttention fusion modules for different levels
+        # Using different window sizes based on feature map sizes for optimal memory usage
+        self.av_fusion_2 = WindowCrossAttention(96, 256, window_size=8, num_heads=4)    # Larger window for smaller features
+        self.av_fusion_3 = WindowCrossAttention(192, 256, window_size=8, num_heads=4)   # Medium window
+        self.av_fusion_4 = WindowCrossAttention(192, 256, window_size=4, num_heads=4)   # Smaller window for larger features
+        self.av_fusion_5 = WindowCrossAttention(192, 256, window_size=4, num_heads=4)   # Smaller window
+        self.av_fusion_bottleneck = WindowCrossAttention(256, 256, window_size=2, num_heads=4)  # Smallest window for bottleneck
        
                 
         # Bottom UNet Decoders
-        self.bottom_unet_decoder5 = construct_decoder_layers(3, 512, 256, 2)  # 256 (bottom_bottleneck) + 256 (audio) = 512
-        self.bottom_unet_conv5 = construct_encoder_layers(3, 704, 320, 1) # 128 (debottom5) + 256 (bottom5) = 384
+        self.bottom_unet_decoder5 = construct_decoder_layers(3, 256, 256, 2)  # Only visual features
+        self.bottom_unet_conv5 = construct_encoder_layers(3, 448, 320, 1) # 256 (debottom5) + 192 (bottom5) = 448
         
-        self.bottom_unet_decoder4 = construct_decoder_layers(3, 320, 256, 2)  # 128 (bottom_de5) + 256 (audio) = 384
-        self.bottom_unet_conv4 = construct_encoder_layers(3, 704, 256, 1) # 128 (debottom4) + 256 (bottom4) = 384
+        self.bottom_unet_decoder4 = construct_decoder_layers(3, 320, 256, 2)
+        self.bottom_unet_conv4 = construct_encoder_layers(3, 448, 256, 1) # 256 (debottom4) + 192 (bottom4) = 448
         
         self.bottom_unet_decoder3 = construct_decoder_layers(3, 256, 256, 2)
-        self.bottom_unet_conv3 = construct_encoder_layers(3, 704, 256, 1) # 64 (debottom3) + 128 (bottom3) = 192
+        self.bottom_unet_conv3 = construct_encoder_layers(3, 448, 256, 1) # 256 (debottom3) + 192 (bottom3) = 448
         
         self.bottom_unet_decoder2 = construct_decoder_layers(3, 256, 128, 2, add_spatial=True)
-        self.bottom_unet_conv2 = construct_encoder_layers(3, 480, 128, 1) # 32 (debottom2) + 64 (bottom2) = 96
+        self.bottom_unet_conv2 = construct_encoder_layers(3, 224, 128, 1) # 128 (debottom2) + 96 (bottom2) = 224
 
         self.bottom_unet_decoder1 = construct_decoder_layers(3, 128, 64, 2, add_spatial=True)
         self.bottom_unet_decoder0 = construct_encoder_layers(3, 64, 32, 1)
                 
-        self.bottom_unet_conv1 = construct_encoder_layers(3, 56, 32, 1) # 32 (debottom1 from prev_decoder0) + 64 (bottom1) = 96
+        self.bottom_unet_conv1 = construct_encoder_layers(3, 56, 32, 1) # 32 (debottom1 from prev_decoder0) + 24 (bottom1) = 56
 
         self.bottom_unet_output_block = nn.Sequential(
             nn.Conv2d(32, 3, kernel_size=1, stride=1, padding=0),
@@ -229,6 +349,9 @@ class ResUNet384V8(nn.Module):
             audio_sequences = torch.cat([audio_sequences[:, i] for i in range(audio_sequences.size(1))], dim=0)
             face_sequences = torch.cat([face_sequences[:, :, i] for i in range(face_sequences.size(2))], dim=0)
 
+        face_sequences = F.normalize(face_sequences, p=2, dim=1)
+        audio_sequences = F.normalize(audio_sequences, p=2, dim=1)
+    
         # Process audio sequences
         audio_embedding = self.audio_encoder1(audio_sequences)
                                 
@@ -281,29 +404,41 @@ class ResUNet384V8(nn.Module):
         bottom_down1 = self.bottom_unet_down1(bottom_enc1)
         
         bottom_enc2 = self.bottom_unet_encoder2(bottom_down1)
-        bottom_enc2 = torch.cat([bottom_enc2, audio_2], dim=1)
+        # Fuse audio with visual features at encoder2 level using WindowCrossAttention
+        #bottom_enc2 = self.av_fusion_2(bottom_enc2, audio_2)
         bottom_down2 = self.bottom_unet_down2(bottom_enc2)
 
+        # Create residual connection from encoder1 to encoder3
+        encoder1_to_encoder3_residual = self.encoder1_to_encoder3_pool(bottom_enc1)  # Downsample spatially
+        encoder1_to_encoder3_residual = self.encoder1_to_encoder3_conv(encoder1_to_encoder3_residual)  # Adjust channels
                 
         bottom_enc3 = self.bottom_unet_encoder3(bottom_down2)
-        bottom_enc3 = torch.cat([bottom_enc3, audio_3], dim=1)
+        # Add the residual connection from encoder1
+        bottom_enc3 = bottom_enc3 + encoder1_to_encoder3_residual
+        # Fuse audio with visual features at encoder3 level using WindowCrossAttention
+        bottom_enc3 = self.av_fusion_3(bottom_enc3, audio_3)
         bottom_down3 = self.bottom_unet_down3(bottom_enc3)
         
+        # Create residual connection from encoder1 to encoder4
+        encoder1_to_encoder4_residual = self.encoder1_to_encoder4_pool(bottom_enc1)  # Downsample spatially
+        encoder1_to_encoder4_residual = self.encoder1_to_encoder4_conv(encoder1_to_encoder4_residual)  # Adjust channels
+        
         bottom_enc4 = self.bottom_unet_encoder4(bottom_down3)
-        bottom_enc4 = torch.cat([bottom_enc4, audio_4], dim=1)
+        # Add the residual connection from encoder1
+        bottom_enc4 = bottom_enc4 + encoder1_to_encoder4_residual
+        # Fuse audio with visual features at encoder4 level using WindowCrossAttention
+        bottom_enc4 = self.av_fusion_4(bottom_enc4, audio_4)
         bottom_down4 = self.bottom_unet_down4(bottom_enc4)
         
         bottom_enc5 = self.bottom_unet_encoder5(bottom_down4)
-        bottom_enc5 = torch.cat([bottom_enc5, audio_5], dim=1)
+        # Fuse audio with visual features at encoder5 level using WindowCrossAttention
+        bottom_enc5 = self.av_fusion_5(bottom_enc5, audio_5)
         bottom_down5 = self.bottom_unet_down5(bottom_enc5)
         
         bottom_bottleneck = self.bottom_unet_bottleneck(bottom_down5)
         bottom_bottleneck = self.bottom_unet_bottleneck_pos_encoder(bottom_bottleneck)
-        
-        
-                
-        # Fuse audio with bottom bottleneck (original concatenation)
-        bottom_bottleneck = torch.cat([bottom_bottleneck, audio_bottleneck], dim=1)
+        # Fuse audio with visual features at bottleneck level using WindowCrossAttention
+        bottom_bottleneck = self.av_fusion_bottleneck(bottom_bottleneck, audio_bottleneck)
         
         # Decode to generate bottom half output with multi-level audio fusion
         bottom_de5 = self.bottom_unet_decoder5(bottom_bottleneck)
