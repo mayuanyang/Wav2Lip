@@ -156,14 +156,14 @@ class WindowCrossAttention(nn.Module):
         attn_spatial = self.window_reverse(attn_out, window_size, Hp, Wp, pad_h, pad_w)  # [B, C_v, H, W] possibly padded
 
         # Post processing conv-MLP, dropout and residual add to visual features
-        processed_audio = self.post_conv(attn_spatial)
+        processed_audio = attn_spatial + self.post_conv(attn_spatial)
         processed_audio = self.proj_dropout(processed_audio)
 
         # Residual fusion: visual + processed_audio (ensures gradient path through visual branch)
         fused = visual_feat + processed_audio
 
         # Final normalization for stability
-        #fused = self.final_ln(fused)
+        fused = self.final_ln(fused)
 
         return fused
 
@@ -342,12 +342,16 @@ class ResUNet384V8(nn.Module):
       
       
     def forward(self, audio_sequences, face_sequences, step=None, training=True):
+        
         input_dim_size = len(face_sequences.size())
         B = audio_sequences.size(0)       
         
         if input_dim_size > 4:
             audio_sequences = torch.cat([audio_sequences[:, i] for i in range(audio_sequences.size(1))], dim=0)
             face_sequences = torch.cat([face_sequences[:, :, i] for i in range(face_sequences.size(2))], dim=0)
+            
+        original_top_half = face_sequences[:, :3, :192, :]
+        original_bottom_half = face_sequences[:, :3, 192:, :]
 
         face_sequences = F.normalize(face_sequences, p=2, dim=1)
         audio_sequences = F.normalize(audio_sequences, p=2, dim=1)
@@ -471,33 +475,22 @@ class ResUNet384V8(nn.Module):
         generated_bottom_half = self.bottom_unet_output_block(bottom_cat1)
         
         # Use detached version for enhancement
-        combined_full_image = torch.cat([top_half, generated_bottom_half], dim=2)
+        combined_full_image = torch.cat([original_top_half, generated_bottom_half], dim=2)
         
         if input_dim_size > 4:            
             bottom_outputs = torch.split(generated_bottom_half, B, dim=0)
             bottom_outputs = torch.stack(bottom_outputs, dim=2)
-            combined_full_image = torch.split(combined_full_image, B, dim=0)
-            combined_full_image = torch.stack(combined_full_image, dim=2)
+            original_top_half = torch.split(original_top_half, B, dim=0)
+            original_top_half = torch.stack(original_top_half, dim=2)
         else:
             bottom_outputs = generated_bottom_half
-            
+                        
         
-        # Save generated bottom half and final output every 1000 steps
-        if step is not None and step % 5000 == 0:
-            # Create directory for saving generated images
-            save_dir = "generated_images"
-            if not os.path.exists(save_dir):
-                os.makedirs(save_dir)
-                
-            # Convert generated bottom half to numpy array and save as image
-            # Take the first sample in the batch for saving
-            bottom_half_to_save = generated_bottom_half[0].detach().cpu().numpy()
-            # Transpose from (C, H, W) to (H, W, C) and convert to uint8
-            bottom_half_to_save = np.transpose(bottom_half_to_save, (1, 2, 0))
-            bottom_half_to_save = (bottom_half_to_save * 255).astype(np.uint8)
-            
-            # Save the bottom half image
-            save_path = os.path.join(save_dir, f"generated_bottom_half_step_{step}.jpg")
-            cv2.imwrite(save_path, bottom_half_to_save)
-        
-        return None, bottom_outputs, None
+        if training:
+          return None, bottom_outputs, None
+        else:
+          # For inference, we want to return the full image with generated bottom half
+          # Concatenate the original top half with the generated bottom half
+          
+          full_image = torch.cat([original_top_half, bottom_outputs], dim=2)
+          return full_image, None, None

@@ -175,26 +175,28 @@ def print_grad_norm(name, module, grad_input, grad_output):
         if isinstance(module, torch.nn.Conv2d):
             print(f"Input Channels: {module.in_channels}, Output Channels: {module.out_channels}")
         
-        # 检查梯度是否为 None
+        
+        if grad_input[0] is not None:
+          g = grad_input[0]
+          print(f"Grad Input Min: {g.min().item():.8f}")
+          print(f"Grad Input Max: {g.max().item():.8f}")
+          print(f"Grad Input Mean: {g.mean().item():.8f}")
+          print(f"Grad Input Std: {g.std().item():.8f}")
+        
+        if grad_output[0] is not None:
+          g = grad_output[0]
+          print(f"Grad Output Min: {g.min().item():.8f}")
+          print(f"Grad Output Max: {g.max().item():.8f}")
+          print(f"Grad Output Mean: {g.mean().item():.8f}")
+          print(f"Grad Output Std: {g.std().item():.8f}")
+        
         grad_input_norm = grad_input[0].norm().item() if grad_input[0] is not None else 0
         grad_output_norm = grad_output[0].norm().item() if grad_output[0] is not None else 0
         
-        print(f"Grad Input Norm: {grad_input_norm:.6f}")
-        print(f"Grad Output Norm: {grad_output_norm:.6f}")
-        
-        # 验证梯度是否合理
-        if grad_input_norm < 1e-6 and grad_output_norm > 1e-6:
+        if grad_input_norm < 1e-8 and grad_output_norm > 1e-4:
             print("!!!!---Potential vanishing gradient detected---!!!!")
+
         
-        # Special monitoring for bottom_unet_encoder3
-        if "bottom_unet_encoder3" in name:
-            print(f"!!!!---bottom_unet_encoder3 gradient---!!!!")
-            print(f"bottom_unet_encoder3 Grad Input Norm: {grad_input_norm:.10f}")
-            print(f"bottom_unet_encoder3 Grad Output Norm: {grad_output_norm:.10f}")
-            
-            # If gradient is extremely low, print a warning
-            if grad_input_norm < 1e-8:
-                print("!!!!---WARNING: Extremely low gradient in bottom_unet_encoder3---!!!!")
         print()
         
         
@@ -311,7 +313,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                     bottom_gt_frame = bottom_half_gt[:, :, i, :, :]    # Shape: [batch_size, 3, 192, 192]
                     
                     # Save bottom frames to temp directory for debugging
-                    if global_step % 1000 == 0:  # Save every 100 steps to avoid too many files
+                    if global_step % 5000 == 0:  # Save every 100 steps to avoid too many files
                         
                         temp_dir = 'generated_images'
                         

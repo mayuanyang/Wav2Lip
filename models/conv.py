@@ -27,7 +27,7 @@ class Conv2d(nn.Module):
                             nn.Conv2d(cin, cout, kernel_size, stride, padding, dilation=dilation),
                             ZeroSensitiveBatchNorm2d(cout) if use_zero_sensitive else nn.BatchNorm2d(cout)
                             )
-        self.act = nn.LeakyReLU(leaking, inplace=False)
+        self.act = nn.GELU()
         self.residual = residual
 
     def forward(self, x):

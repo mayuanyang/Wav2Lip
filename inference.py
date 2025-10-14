@@ -1,19 +1,16 @@
-from os import listdir, path
-from os.path import dirname, join, basename, isfile
+from os.path import join, basename, isfile
 import numpy as np
-import scipy, cv2, os, sys, argparse, audio
-import json, subprocess, random, string
+import cv2, os, argparse, audio
+import subprocess
 from tqdm import tqdm
-from glob import glob
 import torch, face_detection
-from models import ResUNet384V2, ResUNet384V3, ResUNet384V4, ResUNet384V5, ResUNet384V6,ResUNet384V7, ResUNet384V8, cosine_noise_schedule
+from models import ResUNet384V2, ResUNet384V3, ResUNet384V4, ResUNet384V5, ResUNet384V6,ResUNet384V7, ResUNet384V8
 from realesrgan import RealESRGANer
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from PIL import Image
-from scipy.ndimage import gaussian_filter
+import torch.nn as nn
 
 import platform
-import mediapipe as mp
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -80,7 +77,7 @@ parser.add_argument('--use_esrgan', default=False, type=str2bool)
 
 parser.add_argument('--iteration', type=int, help='Number of iteration to inference', default=2)
 
-parser.add_argument('--version', type=str, help='The version of the model', default='V4')
+parser.add_argument('--version', type=str, help='The version of the model', default='V8')
 
 parser.add_argument('--diffusion_step', type=int, help='Number of diffusion steps for gradual denoising', default=1)
 
@@ -139,75 +136,6 @@ def face_detect(images):
   del detector
   return results 
 
-def prepare_window(window):
-        """
-        3 x T x H x W
-        Normalization: The pixel values of the images are divided by 255 to normalize them from a range of [0, 255] to [0, 1]. 
-        This is a common preprocessing step for image data in machine learning to help the model converge faster during training.
-        """
-        x = np.asarray(window) / 255.
-
-        """
-        Transposition: The method transposes the dimensions of the array using np.transpose(x, (3, 0, 1, 2)).
-        The original shape of x is assumed to be (T, H, W, C) where:
-        T is the number of images (time steps if treating images as a sequence).
-        H is the height of the images.
-        W is the width of the images.
-        C is the number of color channels (typically 3 for RGB images).
-        The transposition changes the shape to (C, T, H, W) which means:
-        C (number of channels) comes first.
-        T (number of images) comes second.
-        H (height of images) comes third.
-        W (width of images) comes fourth.
-        """
-        x = np.transpose(x, (3, 0, 1, 2))
-
-        return x
-
-LIPS_LANDMARKS = [
-    61, 185, 40, 39, 37, 0, 267, 269, 270, 409,
-    291, 146, 91, 181, 84, 17, 314, 405, 320, 307,
-    375, 321, 311, 308, 324, 318, 402, 317, 14, 87
-]
-
-def apply_dynamic_blur(window, sigma=12):
-        # This function assumes window has shape (C, T, H, W)
-        # It applies a gaussian blur to the mouth region and gradually diffuses it outward.
-        
-        
-        C, T, H, W = window.shape
-        frames = window.copy()  # now shape: (T, H, W, C)
-        blurred_frames = []
-        
-
-        for frame in frames:
-            
-            h, w, _ = frame.shape
-            split_row = h // 2
-
-            # Split into top and bottom halves
-            top_half = frame[:split_row, :, :]
-            bottom_half = frame[split_row:, :, :].copy()  # Copy to avoid modifying original
-            
-            ellipse_height = int(h * 0.17)
-
-
-            # Draw a black-filled ellipse in the bottom half
-            center = (w // 2, split_row // 2)  # Center relative to bottom_half dimensions
-            axes = (w // 2, ellipse_height)    # Semi-major and semi-minor axes
-            cv2.ellipse(bottom_half, center, axes, 0, 0, 360, (0, 0, 0), -1)
-
-
-            # Reassemble frame
-            frame_masked = np.vstack([top_half, bottom_half])
-            blurred_frames.append(frame_masked) 
-
-        # Reassemble the frames and convert back to (C, T, H, W)
-        result = np.stack(blurred_frames, axis=0)  # shape: (T, H, W, C)
-        #result = np.transpose(result, (0, 1, 2, 3))  # shape: (C, T, H, W)
-        return result
-
-
 def datagen(frames, mels, use_ref_img, ref_pool, iteration):
   img_batch, mel_batch, frame_batch, coords_batch = [], [], [], []
 
@@ -222,8 +150,6 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
     face_det_results = [[f[y1: y2, x1:x2], (y1, y2, x1, x2)] for f in frames]
 
   should_fill_ref_pool = len(ref_pool) == 0
-
-  ids_in_ref = []
 
   for i, m in enumerate(mels):
     idx = 0 if args.static else i%len(frames)
@@ -244,34 +170,63 @@ def datagen(frames, mels, use_ref_img, ref_pool, iteration):
     if len(img_batch) >= args.wav2lip_batch_size:
       img_batch, mel_batch = np.asarray(img_batch), np.asarray(mel_batch)
 
-      img_masked = img_batch.copy()
-
-      # img_masked[:, args.img_size//2:] = 0
-      #img_masked = apply_dynamic_blur(img_masked)
-      #print('The image shape 1', img_masked.shape, img_batch.shape)
-
-      img_batch = np.concatenate((img_masked, img_batch), axis=3) / 255.
+            
+      # reference_img_batch uses different images from the pool
+      batch_size = len(img_batch)
+      reference_img_batch = []
+      
+      # Fill reference_img_batch with random images from ref_pool
+      import random
+      for j in range(batch_size):
+        if len(ref_pool) > 0 and use_ref_img:
+          # Use a random image from the reference pool
+          ref_idx = random.randint(0, len(ref_pool) - 1)
+          reference_img = ref_pool[ref_idx].copy()
+        else:
+          # Fallback to using the same image if ref_pool is empty
+          reference_img = img_batch[j].copy()
+        reference_img_batch.append(reference_img)
+      
+      reference_img_batch = np.array(reference_img_batch)
+      
+      # Concatenate reference images with current images
+      img_batch = np.concatenate((img_batch, reference_img_batch), axis=3) / 255.
       mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
 
       yield img_batch, mel_batch, frame_batch, coords_batch
       img_batch, mel_batch, frame_batch, coords_batch = [], [], [], []
-    
-    ids_in_ref = []
 
   if len(img_batch) > 0:
     img_batch, mel_batch = np.asarray(img_batch), np.asarray(mel_batch)
-    img_masked = img_batch.copy()
-
-
-    if use_ref_img:
-      img_batch = np.concatenate((img_masked, img_batch), axis=3) / 255.
-    else:
-      img_batch = np.concatenate((img_masked, img_batch), axis=3) / 255.
+    
+    # target_img_batch uses current images (as before)
+    target_img_batch = img_batch.copy()
+    
+    # reference_img_batch uses different images from the pool
+    batch_size = len(img_batch)
+    reference_img_batch = []
+    
+    # Fill reference_img_batch with random images from ref_pool
+    import random
+    for j in range(batch_size):
+      if len(ref_pool) > 0:
+        # Use a random image from the reference pool
+        ref_idx = random.randint(0, len(ref_pool) - 1)
+        reference_img = ref_pool[ref_idx].copy()
+      else:
+        # Fallback to using the same image if ref_pool is empty
+        reference_img = img_batch[j].copy()
+      reference_img_batch.append(reference_img)
+    
+    reference_img_batch = np.array(reference_img_batch)
+        
+    # Concatenate reference images with current images
+    img_batch = np.concatenate((reference_img_batch, img_batch), axis=3) / 255.
     mel_batch = np.reshape(mel_batch, [len(mel_batch), mel_batch.shape[1], mel_batch.shape[2], 1])
 
     yield img_batch, mel_batch, frame_batch, coords_batch
 
-mel_step_size = 16
+mel_step_size = 32
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print('Using {} for inference.'.format(device))
 
@@ -312,11 +267,14 @@ def load_model(path, lora_path=None):
   
 
   model = model.to(device)
-  return model.eval()
+  #model = model.eval()
+  # for name, module in model.named_modules():
+  #   if isinstance(module, (nn.BatchNorm2d)):
+  #       print(f"Keeping {name} in training mode")
+  #       module.train()  # Force training mode for normalization layers
+  
+  return model
 
-def check_nan(tensor, name):
-  if torch.isnan(tensor).any():
-    print('NaN problem', f"NaN in {name}") 
 
 def load_esrgan_model(checkpoint_path='checkpoints/RealESRGAN_x4plus.pth', device='cuda' if torch.cuda.is_available() else 'cpu'):
     """
@@ -443,6 +401,7 @@ def main():
       index += 1
     
     print ("Number of frames available for inference: "+str(len(full_frames)))
+    print('Using version', args.version)
 
     temp = full_frames[1: -1:]
     print(f'Iteration {x}, length of chunks {len(mel_chunks)} and length of full frames {len(temp)} and fps {fps}')
@@ -464,17 +423,15 @@ def main():
 
       
       with torch.no_grad():
-        print('The img_batch shape', img_batch.shape, mel_batch.shape, args.diffusion_step)
         # For V5 model, we don't need the step parameter for inference
         if args.version == 'V5':
             pred, _, _ = model(mel_batch, img_batch, step=args.diffusion_step)
         else:
-            print('Using version', args.version)
-            pred, face_embedding, audio_embedding = model(mel_batch, img_batch, step=args.diffusion_step)
+            # For V8 and other models, the model now returns the full image directly
+            pred, _, _ = model(mel_batch, img_batch, step=args.diffusion_step, training=False)
         
-        check_nan(pred, i)
 
-      pred = pred.cpu().numpy().transpose(0, 2, 3, 1) * 255.
+      pred = (pred.cpu().numpy().transpose(0, 2, 3, 1) * 255.).astype(np.uint8)
       
       i = 0
       for p, f, c in zip(pred, frames, coords):
