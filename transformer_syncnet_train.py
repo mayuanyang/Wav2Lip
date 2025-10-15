@@ -104,11 +104,9 @@ def contrastive_loss(face_features, audio_features, labels, margin=1.0):
         
         return loss
 
-# Register hooks to print gradient norms
-import torch
 
 def print_grad_norm(module, grad_input, grad_output):
-    should_print = global_step % 100 == 0
+    should_print = global_step % 1000 == 0
     if should_print:
         print()
         print(f"Module: {module.__class__.__name__}")
@@ -192,10 +190,6 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             if global_step == 1 or global_step % checkpoint_interval == 0:
                 save_checkpoint(
                     model, optimizer, global_step, checkpoint_dir, global_epoch)
-
-            # if global_step % hparams.syncnet_eval_interval == 0:
-            #     with torch.no_grad():
-            #         eval_model(test_data_loader, global_step, device, model, checkpoint_dir, scheduler)
                 
             current_training_regression_loss = avg_regression_loss / (step + 1)
             current_training_classification_loss = avg_classification_loss / (step + 1)
@@ -311,26 +305,6 @@ def _load(checkpoint_path):
 
 
 
-# List of layers to keep trainable
-trainable_layers = [
-    "face_encoder.0.conv_block.0.weight",
-    "face_encoder.0.conv_block.0.bias",
-    "face_encoder.0.conv_block.1.weight",
-    "face_encoder.0.conv_block.1.bias",
-    "face_encoder.0.conv_block.1.running_mean",
-    "face_encoder.0.conv_block.1.running_var",
-    "face_encoder.0.conv_block.1.num_batches_tracked",
-    "face_encoder.1.conv_block.0.weight",
-    "face_encoder.1.conv_block.0.bias",
-    "face_encoder.1.conv_block.1.weight",
-    "face_encoder.1.conv_block.1.bias",
-    "face_encoder.1.conv_block.1.running_mean",
-    "face_encoder.1.conv_block.1.running_var",
-    "face_encoder.1.conv_block.1.num_batches_tracked",
-    # Add more layers as needed...
-]
-
-
 def load_checkpoint(path, model, optimizer, reset_optimizer=False):
     global global_step
     global global_epoch
@@ -359,19 +333,6 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
             optimizer.load_state_dict(checkpoint["optimizer"])
     global_step = checkpoint["global_step"]
     global_epoch = checkpoint["global_epoch"]
-
-    # Reset the new learning rate
-    # for param_group in optimizer.param_groups:
-    #     param_group['lr'] = 0.00002
-
-        # Freeze all parameters first
-    # for name, param in model.named_parameters():
-    #     param.requires_grad = False
-    
-    # # Unfreeze only the specified layers
-    # for name, param in model.named_parameters():
-    #     if any(layer_name in name for layer_name in trainable_layers):
-    #         param.requires_grad = True
 
     return model
 
@@ -430,9 +391,7 @@ if __name__ == "__main__":
         load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=True)
             
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
-    #scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=10)
-    #eval_model(test_data_loader, 750000, device, model, checkpoint_dir, scheduler)
-    
+        
 
     train(device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=checkpoint_dir,

@@ -195,6 +195,9 @@ class TransformerSyncnet(nn.Module):
         
         batch_size = face_embedding.shape[0]
         
+        face_embedding = F.normalize(face_embedding, p=2, dim=1)
+        audio_embedding = F.normalize(audio_embedding, p=2, dim=1)
+        
                 
         # --- Process audio modality ---
         audio_features1 = self.audio_encoder1(audio_embedding)  # (B, 512, H_a, W_a)
