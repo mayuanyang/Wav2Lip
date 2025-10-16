@@ -53,6 +53,9 @@ class TransformerSyncnet(nn.Module):
         )
         self.face_pos_encoder1 = LearnablePositionalEncoding2D(d_model=128, max_h=96, max_w=192, dropout=0.1)
         
+        self.encoder1_to_encoder3_pool = nn.MaxPool2d(kernel_size=4, stride=4)  # 4x downsampling
+        self.encoder1_to_encoder3_conv = nn.Conv2d(128, 256, kernel_size=1)  # Channel adjustment
+        
         self.face_encoder2 = nn.Sequential(
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
@@ -105,6 +108,9 @@ class TransformerSyncnet(nn.Module):
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
             Conv2d(64, 64, kernel_size=3, stride=1, padding=1, residual=True),
         )
+        
+        self.audio1_to_audio3_pool = nn.MaxPool2d(kernel_size=4, stride=4)  # 4x downsampling
+        self.audio1_to_audio3_conv = nn.Conv2d(64, 256, kernel_size=1)  # Channel adjustment
         
         self.audio_pos_encoder1 = LearnablePositionalEncoding2D(d_model=64, max_h=40, max_w=8, dropout=0.1)
 
@@ -201,6 +207,9 @@ class TransformerSyncnet(nn.Module):
                 
         # --- Process audio modality ---
         audio_features1 = self.audio_encoder1(audio_embedding)  # (B, 512, H_a, W_a)
+        audio1_to_audio3_residual = self.audio1_to_audio3_pool(audio_features1)  # Downsample spatially
+        audio1_to_audio3_residual = self.audio1_to_audio3_conv(audio1_to_audio3_residual)  # Adjust channels
+        
         #audio_features1 = self.audio_pos_encoder1(audio_features1)
         
         audio_features2 = self.audio_encoder2(audio_features1)
@@ -209,7 +218,8 @@ class TransformerSyncnet(nn.Module):
         audio_features3 = self.audio_encoder3(audio_features2)
         audio_features3 = self.audio_pos_encoder3(audio_features3)
         
-        audio_features4 = self.audio_encoder4(audio_features3)
+        
+        audio_features4 = self.audio_encoder4(audio_features3 + audio1_to_audio3_residual)
         audio_features4 = self.audio_pos_encoder(audio_features4)
         
         a_seq=audio_features4.view(batch_size, num_of_frames ,-1).permute(1, 0, 2) 
@@ -218,15 +228,19 @@ class TransformerSyncnet(nn.Module):
         face_embedding = face_embedding.view(batch_size * num_of_frames ,3 ,192 ,384)
         
         face1 = self.face_encoder1(face_embedding)
+        encoder1_to_encoder3_residual = self.encoder1_to_encoder3_pool(face1)  # Downsample spatially
+        encoder1_to_encoder3_residual = self.encoder1_to_encoder3_conv(encoder1_to_encoder3_residual)  # Adjust channels
+        
         #face1 = self.face_pos_encoder1(face1)
         
         face2 = self.face_encoder2(face1)
         #face2 = self.face_pos_encoder2(face2)
         
         face3 = self.face_encoder3(face2)
+        
         #face3 = self.face_pos_encoder3(face3)
         
-        face4 = self.face_encoder4(face3)
+        face4 = self.face_encoder4(face3 + encoder1_to_encoder3_residual)
         face4 = self.face_pos_encoder(face4)
         #print('The face4', face4.shape)
         
