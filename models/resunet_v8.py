@@ -86,6 +86,9 @@ class WindowCrossAttention(nn.Module):
         # Optional projection dropout after conv-mlp
         self.proj_dropout = nn.Dropout(proj_dropout) if proj_dropout > 0 else nn.Identity()
 
+        # Learnable scaling factor for residual connection
+        self.residual_scale = nn.Parameter(torch.ones(1))
+
     def pad_if_needed(self, x, window_size):
         # pad on H and W if not divisible by window_size
         B, C, H, W = x.shape
@@ -127,6 +130,9 @@ class WindowCrossAttention(nn.Module):
         """
         B, C_v, H, W = visual_feat.shape
 
+        # Store original visual features for residual connection
+        visual_identity = visual_feat.clone()
+
         # Resize audio to visual spatial dims (bilinear)
         if audio_feat.shape[2:] != (H, W):
             audio_feat = F.interpolate(audio_feat, size=(H, W), mode='bilinear', align_corners=False)
@@ -155,23 +161,27 @@ class WindowCrossAttention(nn.Module):
         # Convert attn_out back to spatial windows
         attn_spatial = self.window_reverse(attn_out, window_size, Hp, Wp, pad_h, pad_w)  # [B, C_v, H, W] possibly padded
 
-        # Post processing conv-MLP, dropout and residual add to visual features
+        # Post processing conv-MLP, dropout and residual add to attention output
         processed_audio = attn_spatial + self.post_conv(attn_spatial)
         processed_audio = self.proj_dropout(processed_audio)
 
-        # Residual fusion: visual + processed_audio (ensures gradient path through visual branch)
-        fused = visual_feat + processed_audio
+        # Residual fusion: visual + processed_audio with learnable scaling
+        # This ensures gradient can flow through both paths
+        fused = visual_identity + self.residual_scale * processed_audio
 
-        # Final normalization for stability
-        fused = self.final_ln(fused)
+        # Final normalization for stability - apply to the fused output
+        #fused = self.final_ln(fused)
 
         return fused
 
 
 
 class ResUNet384V8(nn.Module):
-    def __init__(self):
+    def __init__(self, print_gradients=False):
         super(ResUNet384V8, self).__init__()
+        
+        self.print_gradients = print_gradients
+        self.gradient_hooks = []
         
         self.ellipse_params = {
             'center': (0.0, 0),  # (x,y)中心偏移(归一化坐标)
@@ -200,10 +210,15 @@ class ResUNet384V8(nn.Module):
         # --- MaxPooling for residual connection from encoder1 to encoder3 ---
         self.encoder1_to_encoder3_pool = nn.MaxPool2d(kernel_size=4, stride=4)  # 4x downsampling
         self.encoder1_to_encoder3_conv = nn.Conv2d(24, 192, kernel_size=1)  # Channel adjustment
+        
 
         # --- MaxPooling for residual connection from encoder1 to encoder4 ---
         self.encoder1_to_encoder4_pool = nn.MaxPool2d(kernel_size=8, stride=8)  # 8x downsampling
         self.encoder1_to_encoder4_conv = nn.Conv2d(24, 192, kernel_size=1)  # Channel adjustment
+        
+        
+        self.encoder3_to_encoder5_pool = nn.MaxPool2d(kernel_size=4, stride=4)  # 4x downsampling
+        self.encoder3_to_encoder5_conv = nn.Conv2d(192, 192, kernel_size=1)  # Channel adjustment
 
         # --- Audio encoder ---
         self.audio_encoder1 = nn.Sequential(
@@ -230,9 +245,16 @@ class ResUNet384V8(nn.Module):
         # Audio adapters for fusing with bottom decoders at multiple levels
         self.audio_adapter_bottleneck = nn.AdaptiveAvgPool2d((6, 12))  # Match bottleneck spatial dims
         self.audio_adapter_5 = nn.AdaptiveAvgPool2d((12, 24))   # Match decoder5 spatial dims
+        self.audio_adapter_5_conv = nn.Conv2d(256, 256, kernel_size=1)  # Channel adjustment
+        
         self.audio_adapter_4 = nn.AdaptiveAvgPool2d((24, 48))   # Match decoder4 spatial dims
+        self.audio_adapter_4_conv = nn.Conv2d(256, 256, kernel_size=1)  # Channel adjustment
+        
         self.audio_adapter_3 = nn.AdaptiveAvgPool2d((48, 96))   # Match decoder3 spatial dims  
+        self.audio_adapter_3_conv = nn.Conv2d(256, 256, kernel_size=1)  # Channel adjustment
+        
         self.audio_adapter_2 = nn.AdaptiveAvgPool2d((96, 192))   # Match decoder2 spatial dims
+        self.audio_adapter_2_conv = nn.Conv2d(256, 256, kernel_size=1)  # Channel adjustment
         
         # Positional encoders for audio at different scales
         self.audio_pos_encoder_bottleneck = LearnablePositionalEncoding2D(d_model=256, max_h=6, max_w=12, dropout=0.1)
@@ -274,7 +296,24 @@ class ResUNet384V8(nn.Module):
         )
         
                 
+    def register_gradient_hook(self, tensor, name):
+        """Register a hook to print gradients for a tensor."""
+        def hook_fn(grad):
+            if self.print_gradients:
+                grad_norm = grad.norm().item()
+                print(f"Gradient norm for {name}: {grad_norm}")
+                # Also print some statistics about the gradient
+                print(f"  Mean: {grad.mean().item():.6f}, Std: {grad.std().item():.6f}")
+                print(f"  Min: {grad.min().item():.6f}, Max: {grad.max().item():.6f}")
+        handle = tensor.register_hook(hook_fn)
+        self.gradient_hooks.append(handle)
+        return tensor
         
+    def clear_gradient_hooks(self):
+        """Remove all registered gradient hooks."""
+        for handle in self.gradient_hooks:
+            handle.remove()
+        self.gradient_hooks.clear()  
     
     def generate_ellipse_mask(self, h, w, split_idx, device):
         """生成下半部分的椭圆遮罩"""
@@ -373,15 +412,19 @@ class ResUNet384V8(nn.Module):
         audio_bottleneck = self.audio_pos_encoder_bottleneck(audio_bottleneck)
         
         audio_5 = self.audio_adapter_5(audio_embedding)
+        audio_5 = self.audio_adapter_5_conv(audio_5)
         audio_5 = self.audio_pos_encoder_5(audio_5)
         
         audio_4 = self.audio_adapter_4(audio_embedding)
+        audio_4 = self.audio_adapter_4_conv(audio_4)
         audio_4 = self.audio_pos_encoder_4(audio_4)
         
         audio_3 = self.audio_adapter_3(audio_embedding)
+        audio_3 = self.audio_adapter_3_conv(audio_3)
         audio_3 = self.audio_pos_encoder_3(audio_3)
         
         audio_2 = self.audio_adapter_2(audio_embedding)
+        audio_2 = self.audio_adapter_2_conv(audio_2)
         audio_2 = self.audio_pos_encoder_2(audio_2)
         
         
@@ -419,15 +462,28 @@ class ResUNet384V8(nn.Module):
         bottom_enc3 = self.bottom_unet_encoder3(bottom_down2)
         # Add the residual connection from encoder1
         bottom_enc3 = bottom_enc3 + encoder1_to_encoder3_residual
+        
+                
         # Fuse audio with visual features at encoder3 level using WindowCrossAttention
-        bottom_enc3 = self.av_fusion_3(bottom_enc3, audio_3)
-        bottom_down3 = self.bottom_unet_down3(bottom_enc3)
+        bottom_enc3_fused = self.av_fusion_3(bottom_enc3, audio_3)
+        
+        encoder3_to_encoder5_residual = self.encoder3_to_encoder5_pool(bottom_enc3_fused)
+        encoder3_to_encoder5_residual = self.encoder3_to_encoder5_conv(encoder3_to_encoder5_residual)  # Adjust channels
+        
+        # Register gradient hook for bottom_enc3 if print_gradients is enabled
+        if self.print_gradients:
+            bottom_enc3_fused = self.register_gradient_hook(bottom_enc3_fused, "bottom_enc3_after_av_fusion_3")
+        
+        bottom_enc3_fused = self.bottom_unet_down3(bottom_enc3_fused)
+        # Register gradient hook for bottom_down3 if print_gradients is enabled
+        if self.print_gradients:
+            bottom_enc3_fused = self.register_gradient_hook(bottom_enc3_fused, "bottom_down3_after_bottom_unet_down3")
         
         # Create residual connection from encoder1 to encoder4
         encoder1_to_encoder4_residual = self.encoder1_to_encoder4_pool(bottom_enc1)  # Downsample spatially
         encoder1_to_encoder4_residual = self.encoder1_to_encoder4_conv(encoder1_to_encoder4_residual)  # Adjust channels
         
-        bottom_enc4 = self.bottom_unet_encoder4(bottom_down3)
+        bottom_enc4 = self.bottom_unet_encoder4(bottom_enc3_fused)
         # Add the residual connection from encoder1
         bottom_enc4 = bottom_enc4 + encoder1_to_encoder4_residual
         # Fuse audio with visual features at encoder4 level using WindowCrossAttention
@@ -435,6 +491,9 @@ class ResUNet384V8(nn.Module):
         bottom_down4 = self.bottom_unet_down4(bottom_enc4)
         
         bottom_enc5 = self.bottom_unet_encoder5(bottom_down4)
+        
+        bottom_enc5 += encoder3_to_encoder5_residual
+        
         # Fuse audio with visual features at encoder5 level using WindowCrossAttention
         bottom_enc5 = self.av_fusion_5(bottom_enc5, audio_5)
         bottom_down5 = self.bottom_unet_down5(bottom_enc5)
