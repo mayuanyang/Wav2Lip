@@ -216,6 +216,9 @@ class ResUNet384V8(nn.Module):
         self.encoder1_to_encoder4_pool = nn.MaxPool2d(kernel_size=8, stride=8)  # 8x downsampling
         self.encoder1_to_encoder4_conv = nn.Conv2d(24, 192, kernel_size=1)  # Channel adjustment
         
+        self.encoder2_to_encoder4_pool = nn.MaxPool2d(kernel_size=4, stride=4)  # 8x downsampling
+        self.encoder2_to_encoder4_conv = nn.Conv2d(96, 192, kernel_size=1)  # Channel adjustment
+        
         
         self.encoder3_to_encoder5_pool = nn.MaxPool2d(kernel_size=4, stride=4)  # 4x downsampling
         self.encoder3_to_encoder5_conv = nn.Conv2d(192, 192, kernel_size=1)  # Channel adjustment
@@ -448,25 +451,24 @@ class ResUNet384V8(nn.Module):
         # First UNet: Process bottom half to generate bottom half output
         # Encode bottom half through bottom UNet
         bottom_enc1 = self.bottom_unet_encoder1(bottom_half_with_ref)
-        bottom_down1 = self.bottom_unet_down1(bottom_enc1)
-        
-        bottom_enc2 = self.bottom_unet_encoder2(bottom_down1)
-        # Fuse audio with visual features at encoder2 level using WindowCrossAttention
-        #bottom_enc2 = self.av_fusion_2(bottom_enc2, audio_2)
-        bottom_down2 = self.bottom_unet_down2(bottom_enc2)
-
         # Create residual connection from encoder1 to encoder3
         encoder1_to_encoder3_residual = self.encoder1_to_encoder3_pool(bottom_enc1)  # Downsample spatially
         encoder1_to_encoder3_residual = self.encoder1_to_encoder3_conv(encoder1_to_encoder3_residual)  # Adjust channels
-                
-        bottom_enc3 = self.bottom_unet_encoder3(bottom_down2)
-        # Add the residual connection from encoder1
-        bottom_enc3 = bottom_enc3 + encoder1_to_encoder3_residual
         
+        # Create residual connection from encoder1 to encoder4
+        encoder1_to_encoder4_residual = self.encoder1_to_encoder4_pool(bottom_enc1)  # Downsample spatially
+        encoder1_to_encoder4_residual = self.encoder1_to_encoder4_conv(encoder1_to_encoder4_residual)  # Adjust channels
+        
+        bottom_down1 = self.bottom_unet_down1(bottom_enc1)
+        
+        bottom_enc2 = self.bottom_unet_encoder2(bottom_down1)
+        encoder2_to_encoder4_residual = self.encoder2_to_encoder4_pool(bottom_enc2)  # Downsample spatially
+        encoder2_to_encoder4_residual = self.encoder2_to_encoder4_conv(encoder2_to_encoder4_residual)  # Adjust channels
+        bottom_down2 = self.bottom_unet_down2(bottom_enc2)
                 
+        bottom_enc3 = self.bottom_unet_encoder3(bottom_down2)      
         # Fuse audio with visual features at encoder3 level using WindowCrossAttention
         bottom_enc3_fused = self.av_fusion_3(bottom_enc3, audio_3)
-        
         encoder3_to_encoder5_residual = self.encoder3_to_encoder5_pool(bottom_enc3_fused)
         encoder3_to_encoder5_residual = self.encoder3_to_encoder5_conv(encoder3_to_encoder5_residual)  # Adjust channels
         
@@ -474,21 +476,20 @@ class ResUNet384V8(nn.Module):
         if self.print_gradients:
             bottom_enc3_fused = self.register_gradient_hook(bottom_enc3_fused, "bottom_enc3_after_av_fusion_3")
         
+        # Add the residual connection from encoder1
+        bottom_enc3_fused = bottom_enc3_fused + encoder1_to_encoder3_residual
         bottom_enc3_fused = self.bottom_unet_down3(bottom_enc3_fused)
         # Register gradient hook for bottom_down3 if print_gradients is enabled
         if self.print_gradients:
             bottom_enc3_fused = self.register_gradient_hook(bottom_enc3_fused, "bottom_down3_after_bottom_unet_down3")
         
-        # Create residual connection from encoder1 to encoder4
-        encoder1_to_encoder4_residual = self.encoder1_to_encoder4_pool(bottom_enc1)  # Downsample spatially
-        encoder1_to_encoder4_residual = self.encoder1_to_encoder4_conv(encoder1_to_encoder4_residual)  # Adjust channels
         
-        bottom_enc4 = self.bottom_unet_encoder4(bottom_enc3_fused)
+        bottom_enc4 = self.bottom_unet_encoder4(bottom_enc3_fused + encoder2_to_encoder4_residual)
         # Add the residual connection from encoder1
         bottom_enc4 = bottom_enc4 + encoder1_to_encoder4_residual
         # Fuse audio with visual features at encoder4 level using WindowCrossAttention
         bottom_enc4 = self.av_fusion_4(bottom_enc4, audio_4)
-        bottom_down4 = self.bottom_unet_down4(bottom_enc4)
+        bottom_down4 = self.bottom_unet_down4(bottom_enc4 + encoder1_to_encoder4_residual)
         
         bottom_enc5 = self.bottom_unet_encoder5(bottom_down4)
         
@@ -496,7 +497,7 @@ class ResUNet384V8(nn.Module):
         
         # Fuse audio with visual features at encoder5 level using WindowCrossAttention
         bottom_enc5 = self.av_fusion_5(bottom_enc5, audio_5)
-        bottom_down5 = self.bottom_unet_down5(bottom_enc5)
+        bottom_down5 = self.bottom_unet_down5(bottom_enc5 + encoder3_to_encoder5_residual)
         
         bottom_bottleneck = self.bottom_unet_bottleneck(bottom_down5)
         bottom_bottleneck = self.bottom_unet_bottleneck_pos_encoder(bottom_bottleneck)
