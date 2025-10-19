@@ -56,6 +56,10 @@ class TransformerSyncnet(nn.Module):
         self.encoder1_to_encoder3_pool = nn.MaxPool2d(kernel_size=4, stride=4)  # 4x downsampling
         self.encoder1_to_encoder3_conv = nn.Conv2d(128, 256, kernel_size=1)  # Channel adjustment
         
+        # Additional residual connection from face encoder2 to face encoder4
+        self.encoder2_to_encoder4_pool = nn.MaxPool2d(kernel_size=2, stride=2)  # 4x downsampling
+        self.encoder2_to_encoder4_conv = nn.Conv2d(256, 256, kernel_size=1)  # Channel adjustment
+        
         self.face_encoder2 = nn.Sequential(
             Conv2d(128, 256, kernel_size=3, stride=2, padding=1),  # Downsample
             Conv2d(256, 256, kernel_size=3, stride=1, padding=1, residual=True),
@@ -143,7 +147,7 @@ class TransformerSyncnet(nn.Module):
         self.audio_pos_encoder = LearnablePositionalEncoding2D(d_model=256, max_h=5, max_w=1, dropout=0.1)
         
         # 新增：各自模态的 self-attention 层
-        
+        # Enhanced with residual connections
         self.face_self_attn = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=256, nhead=num_heads, dropout=0.1, activation='gelu'),
             num_layers=4
@@ -158,6 +162,9 @@ class TransformerSyncnet(nn.Module):
             nn.TransformerEncoderLayer(d_model=512, nhead=num_heads, dropout=0.1, activation='gelu'),
             num_layers=num_encoder_layers
         )
+        
+        # Additional skip connection around the transformer encoder
+        self.transformer_skip_conv = nn.Conv1d(512, 512, kernel_size=1)
                 
         
         # 降维层，在合并前先降维
@@ -234,13 +241,16 @@ class TransformerSyncnet(nn.Module):
         #face1 = self.face_pos_encoder1(face1)
         
         face2 = self.face_encoder2(face1)
-        #face2 = self.face_pos_encoder2(face2)
+        # Create residual connection from encoder2 to encoder4
+        encoder2_to_encoder4_residual = self.encoder2_to_encoder4_pool(face2)  # Downsample spatially
+        encoder2_to_encoder4_residual = self.encoder2_to_encoder4_conv(encoder2_to_encoder4_residual)  # Adjust channels
         
+                
         face3 = self.face_encoder3(face2)
         
         #face3 = self.face_pos_encoder3(face3)
-        
-        face4 = self.face_encoder4(face3 + encoder1_to_encoder3_residual)
+                
+        face4 = self.face_encoder4(face3 + encoder1_to_encoder3_residual + encoder2_to_encoder4_residual)
         face4 = self.face_pos_encoder(face4)
         #print('The face4', face4.shape)
         
@@ -270,7 +280,15 @@ class TransformerSyncnet(nn.Module):
         # Concatenate all features
         combined = torch.cat((face_self_out, audio_self_out), dim=2)  # 沿特征维度拼接 
         
+        # Apply skip connection around transformer encoder
+        combined_transposed = combined.permute(1, 2, 0)  # [seq_len, batch, dim] -> [batch, dim, seq_len]
+        transformer_skip = self.transformer_skip_conv(combined_transposed)  # Apply 1x1 conv for dimension matching
+        transformer_skip = transformer_skip.permute(2, 0, 1)  # [batch, dim, seq_len] -> [seq_len, batch, dim]
+        
         attn_output = self.transformer_encoder(combined)
+
+            
+        attn_output = attn_output + transformer_skip  # Add skip connection around the entire transformer
         attn_output = attn_output.permute(1, 0, 2).reshape(batch_size, -1)
         
         output = self.classifier(attn_output)
