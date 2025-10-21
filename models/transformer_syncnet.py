@@ -203,15 +203,13 @@ class TransformerSyncnet(nn.Module):
         """
         
         num_of_frames = self.num_frames
-        
         save_every_s_steps = 1000
-        
         batch_size = face_embedding.shape[0]
         
-        face_embedding = F.normalize(face_embedding, p=2, dim=1)
-        audio_embedding = F.normalize(audio_embedding, p=2, dim=1)
-        
-                
+        # --- REMOVED: INCORRECT NORMALIZATION OF RAW INPUTS ---
+        # face_embedding = F.normalize(face_embedding, p=2, dim=1) # WRONG PLACE
+        # audio_embedding = F.normalize(audio_embedding, p=2, dim=1) # WRONG PLACE
+                    
         # --- Process audio modality ---
         audio_features1 = self.audio_encoder1(audio_embedding)  # (B, 512, H_a, W_a)
         audio1_to_audio3_residual = self.audio1_to_audio3_pool(audio_features1)  # Downsample spatially
@@ -229,10 +227,9 @@ class TransformerSyncnet(nn.Module):
         audio_features4 = self.audio_encoder4(audio_features3 + audio1_to_audio3_residual)
         audio_features4 = self.audio_pos_encoder(audio_features4)
         
-        a_seq=audio_features4.view(batch_size, num_of_frames ,-1).permute(1, 0, 2) 
-                        
-        ### ---视觉分支--- ###
-        face_embedding = face_embedding.view(batch_size * num_of_frames ,3 ,192 ,384)
+        # --- Process visual modality ---
+        # Reshape to process each frame individually
+        face_embedding = face_embedding.view(batch_size * num_of_frames, 3, 192, 384)
         
         face1 = self.face_encoder1(face_embedding)
         encoder1_to_encoder3_residual = self.encoder1_to_encoder3_pool(face1)  # Downsample spatially
@@ -244,24 +241,29 @@ class TransformerSyncnet(nn.Module):
         # Create residual connection from encoder2 to encoder4
         encoder2_to_encoder4_residual = self.encoder2_to_encoder4_pool(face2)  # Downsample spatially
         encoder2_to_encoder4_residual = self.encoder2_to_encoder4_conv(encoder2_to_encoder4_residual)  # Adjust channels
-        
                 
         face3 = self.face_encoder3(face2)
-        
         #face3 = self.face_pos_encoder3(face3)
                 
         face4 = self.face_encoder4(face3 + encoder1_to_encoder3_residual + encoder2_to_encoder4_residual)
         face4 = self.face_pos_encoder(face4)
-        #print('The face4', face4.shape)
         
-        face_features = face4.flatten(1) #[b*5 ，512]
+        # --- CORRECT PLACE FOR L2 NORMALIZATION: AFTER ENCODERS ---
+        # Normalize the final feature embeddings for cross-modal comparison
+        face_features = F.normalize(face4.flatten(1), p=2, dim=1)  # Normalize flattened features [b*num_frames, d]
+        audio_features = F.normalize(audio_features4.flatten(1), p=2, dim=1)  # Normalize flattened features [b, d]
+        
+        # --- Prepare sequences for attention ---
+        # Reshape face features back into sequence: [num_frames, batch, features]
         face_seq = face_features.view(batch_size, num_of_frames, -1).permute(1, 0, 2)
-        
+        # Reshape audio features: [num_frames, batch, features]
+        a_seq = audio_features.view(batch_size, num_of_frames, -1).permute(1, 0, 2)
+                            
         if step % save_every_s_steps == 0:
-          self.save_sample_images(face1, 'face1', step)
-          self.save_sample_images(face2, 'face2', step)
-          self.save_sample_images(face3, 'face3', step)
-          self.save_sample_images(face4, 'face4', step)
+            self.save_sample_images(face1, 'face1', step)
+            self.save_sample_images(face2, 'face2', step)
+            self.save_sample_images(face3, 'face3', step)
+            self.save_sample_images(face4, 'face4', step)
         
         # Apply dimension reduction before self-attention
         face_seq_reduced = self.face_dim_reduction(face_seq.permute(1, 0, 2)).permute(1, 0, 2)
@@ -270,15 +272,14 @@ class TransformerSyncnet(nn.Module):
             face_seq_reduced,
         )
         
-        # Audio 的 self-attention
+        # Audio self-attention
         audio_self_out = self.audio_self_attn(
             a_seq,
         )
 
-        # --- 合并特征 ---
-        
+        # --- Combine features ---
         # Concatenate all features
-        combined = torch.cat((face_self_out, audio_self_out), dim=2)  # 沿特征维度拼接 
+        combined = torch.cat((face_self_out, audio_self_out), dim=2)  # Concatenate along feature dimension
         
         # Apply skip connection around transformer encoder
         combined_transposed = combined.permute(1, 2, 0)  # [seq_len, batch, dim] -> [batch, dim, seq_len]
@@ -287,13 +288,13 @@ class TransformerSyncnet(nn.Module):
         
         attn_output = self.transformer_encoder(combined)
 
-            
         attn_output = attn_output + transformer_skip  # Add skip connection around the entire transformer
         attn_output = attn_output.permute(1, 0, 2).reshape(batch_size, -1)
         
         output = self.classifier(attn_output)
         
         return output, None, None
+
 
     def save_sample_images(self, x, layer, step):
         base_dir = 'temp'
