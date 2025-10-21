@@ -118,12 +118,14 @@ mse_loss = nn.MSELoss()
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, refine_landmarks=True)
 
-def get_sync_loss(mel, g):
+def get_sync_loss(mel, g, bottom_half):
     
-    
-    g = g[:, :, :, g.size(3)//2:]
-    
-    g = torch.cat([g[:, :, i] for i in range(syncnet_T)], dim=1)
+    if bottom_half is not None:
+      g = torch.cat([bottom_half[:, :, i] for i in range(syncnet_T)], dim=1)
+    else:
+      g = g[:, :, :, g.size(3)//2:]
+      
+      g = torch.cat([g[:, :, i] for i in range(syncnet_T)], dim=1)
     
     output, _, _ = syncnet(g, mel, 10)
     
@@ -343,7 +345,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                                   
 
                 if hparams.syncnet_wt > 0.:
-                    sync_loss = get_sync_loss(mel, g)
+                    sync_loss = get_sync_loss(mel, g, bottom_half)
                 else:
                     sync_loss = 0.
                 
