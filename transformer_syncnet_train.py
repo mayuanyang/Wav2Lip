@@ -136,7 +136,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
     
     global global_step, global_epoch, consecutive_threshold_count, current_training_regression_loss, current_training_classification_loss
     
-    patience = 10000
+    patience = 50000
 
     # Added by eddy
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=patience)
