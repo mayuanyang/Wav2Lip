@@ -499,7 +499,7 @@ def _load(checkpoint_path):
                                 map_location=lambda storage, loc: storage)
     return checkpoint
 
-def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_global_states=True, strick=False):
+def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_global_states=True, strict=False):
     global global_step
     global global_epoch
 
@@ -511,7 +511,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_glo
       if k in model.state_dict() and v.size() == model.state_dict()[k].size():
         new_s[k.replace('module.', '')] = v
         
-    model.load_state_dict(new_s, strict=strick)
+    model.load_state_dict(new_s, strict=False)
     
     if not reset_optimizer and optimizer is not None:
         if "optimizer" in checkpoint and checkpoint["optimizer"] is not None:
@@ -611,7 +611,7 @@ if __name__ == "__main__":
 
     
     if args.checkpoint_path is not None:
-        load_checkpoint(args.checkpoint_path, model, optimizer, reset_optimizer=True, strick=True)
+        load_checkpoint(args.checkpoint_path, model, optimizer, reset_optimizer=True, strict=True)
         
     load_checkpoint(args.syncnet_checkpoint_path, syncnet, None, reset_optimizer=True, overwrite_global_states=False)
 
