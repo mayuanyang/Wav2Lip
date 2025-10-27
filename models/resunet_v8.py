@@ -63,14 +63,14 @@ class ResUNet384V8(nn.Module):
         self.bottom_unet_encoder1 = construct_encoder_layers(4, 6, 64, 1)
         self.bottom_unet_down1 = construct_encoder_layers(4, 64, 96, 2)
                 
-        self.bottom_unet_encoder2 = construct_encoder_layers(2, 96, 128, 1)
-        self.bottom_unet_down2 = construct_encoder_layers(2, 128, 192, 2)
+        self.bottom_unet_encoder2 = construct_encoder_layers(4, 96, 128, 1)
+        self.bottom_unet_down2 = construct_encoder_layers(4, 128, 192, 2)
                        
-        self.bottom_unet_encoder3 = construct_encoder_layers(2, 192, 256, 1)
-        self.bottom_unet_down3 = construct_encoder_layers(2, 256, 320, 2)
+        self.bottom_unet_encoder3 = construct_encoder_layers(3, 192, 256, 1)
+        self.bottom_unet_down3 = construct_encoder_layers(3, 256, 320, 2)
 
-        self.bottom_unet_encoder4 = construct_encoder_layers(2, 320, 192, 1)
-        self.bottom_unet_down4 = construct_encoder_layers(2, 192, 192, 2)
+        self.bottom_unet_encoder4 = construct_encoder_layers(3, 320, 192, 1)
+        self.bottom_unet_down4 = construct_encoder_layers(3, 192, 192, 2)
         self.bottom_unet_pos_encoder4 = LearnablePositionalEncoding2D(d_model=192, max_h=12, max_w=24, dropout=0.1)
         
         
@@ -80,16 +80,25 @@ class ResUNet384V8(nn.Module):
                                                        nn.LeakyReLU(0.01)
         )
         
-        
-        self.encoder1_to_encoder3_skip = nn.Sequential(nn.Conv2d(64, 256, kernel_size=1, stride=4, padding=0),
-                                                       nn.BatchNorm2d(256),
+        self.encoder2_to_encoder3_skip = nn.Sequential(nn.MaxPool2d(kernel_size=2, stride=2),
+                                                       nn.Conv2d(128, 192, kernel_size=1, stride=1, padding=0),
+                                                       nn.BatchNorm2d(192),
                                                        nn.LeakyReLU(0.01)
         )
         
+        self.encoder1_to_encoder3_skip = nn.Sequential(
+          nn.AdaptiveAvgPool2d((48, 96)),
+          nn.Conv2d(64, 256, kernel_size=1, stride=1, padding=0),
+          nn.BatchNorm2d(256),
+          nn.LeakyReLU(0.01)
+        )
         
-        self.encoder1_to_encoder4_skip = nn.Sequential(nn.Conv2d(64, 192, kernel_size=1, stride=8, padding=0),
-                                                       nn.BatchNorm2d(192),
-                                                       nn.LeakyReLU(0.01)
+        
+        self.encoder1_to_encoder4_skip = nn.Sequential(
+          nn.AdaptiveAvgPool2d((24, 48)),
+          nn.Conv2d(64, 192, kernel_size=1, stride=1, padding=0),
+          nn.BatchNorm2d(192),
+          nn.LeakyReLU(0.01)
         )
         
 
@@ -131,6 +140,11 @@ class ResUNet384V8(nn.Module):
         
         
         # Audio adapters for fusing with bottom decoders at multiple levels
+        self.audio_adapter_3 = nn.AdaptiveAvgPool2d((24, 48))   # Match decoder5 spatial dims
+        self.audio_adapter_3_conv = nn.Sequential(nn.Conv2d(128, 256, kernel_size=1, stride=1, padding=0),
+                                                       nn.BatchNorm2d(256),
+                                                       nn.LeakyReLU(0.01))
+        
                 
         self.audio_adapter_4 = nn.AdaptiveAvgPool2d((12, 24))   # Match decoder5 spatial dims
         self.audio_adapter_4_conv = nn.Identity()
@@ -139,32 +153,32 @@ class ResUNet384V8(nn.Module):
         # Positional encoders for audio at different scales
         self.audio_pos_encoder_4 = LearnablePositionalEncoding2D(d_model=192, max_h=12, max_w=24, dropout=0.1)
         self.audio_pos_encoder_decoder4 = LearnablePositionalEncoding2D(d_model=192, max_h=24, max_w=48, dropout=0.1)
-        self.audio_pos_encoder_decoder3 = LearnablePositionalEncoding2D(d_model=192, max_h=48, max_w=96, dropout=0.1)
+        self.audio_pos_encoder_decoder3 = LearnablePositionalEncoding2D(d_model=256, max_h=48, max_w=96, dropout=0.1)
         
                 
         # Bottom UNet Decoders
         # Updated decoder connections after removing encoder5/down5
-        self.bottom_unet_decoder4 = construct_decoder_layers(2, 384, 256, 2)
-        self.bottom_unet_conv4 = construct_encoder_layers(2, 448, 256, 1) # 256 (debottom4) + 192 (bottom4) = 384
+        self.bottom_unet_decoder4 = construct_decoder_layers(3, 384, 256, 2)
+        self.bottom_unet_conv4 = construct_encoder_layers(3, 448, 256, 1) # 256 (debottom4) + 192 (bottom4) = 384
         
-        self.bottom_unet_decoder3 = construct_decoder_layers(2, 256, 320, 2)
-        self.bottom_unet_conv3 = construct_encoder_layers(2, 576, 256, 1) # 256 (debottom3) + 192 (bottom3) = 448
+        self.bottom_unet_decoder3 = construct_decoder_layers(3, 512, 320, 2)
+        self.bottom_unet_conv3 = construct_encoder_layers(3, 576, 256, 1) # 256 (debottom3) + 192 (bottom3) = 448
         
         self.bottom_unet_decoder2 = construct_decoder_layers(4, 256, 128, 2)
         self.bottom_unet_conv2 = construct_encoder_layers(4, 256, 128, 1) # 128 (debottom2) + 96 (bottom2) = 224
 
         self.bottom_unet_decoder1 = construct_decoder_layers(4, 128, 64, 2)
-        self.bottom_unet_decoder0 = construct_encoder_layers(4, 64, 32, 1)
+        self.bottom_unet_decoder0 = construct_encoder_layers(4, 128, 64, 1)
 
         self.bottom_unet_output_block = nn.Sequential(
-            Conv2d(32, 3, kernel_size=3, stride=1, padding=1),
+            Conv2d(64, 3, kernel_size=3, stride=1, padding=1),
             nn.Sigmoid()
         )
         
         # Transformer Encoder
         self.face4_cross_attn = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=384, nhead=4, dropout=0.1, activation='gelu', batch_first=True),
-            num_layers=4
+            num_layers=2
         )
         
         self.face4_attn_reduce = nn.Conv2d(384, 192, kernel_size=1, stride=1, padding=0)        
@@ -306,12 +320,14 @@ class ResUNet384V8(nn.Module):
         audio2_to_audio4 = self.audio2_conv(audio_2)
                 
         audio_3 = self.audio_encoder3(audio_2 + audio1_to_audio3)       
+        audio3_adapted = self.audio_adapter_3(audio_3)
+        audio3_adapted = self.audio_adapter_3_conv(audio3_adapted)
+        audio3_adapted = self.audio_pos_encoder_decoder3(audio3_adapted)
         
-        audio_4 = self.audio_encoder4(audio_3 + audio2_to_audio4)
-                
+        audio_4 = self.audio_encoder4(audio_3 + audio2_to_audio4)        
         audio4_adapted = self.audio_adapter_4(audio_4)
         audio4_adapted = self.audio_adapter_4_conv(audio4_adapted)
-        audio4_adapted = self.audio_pos_encoder_4(audio4_adapted)       
+        audio4_adapted = self.audio_pos_encoder_4(audio4_adapted)
                         
         # First UNet: Process bottom half to generate bottom half output
         # Encode bottom half through bottom UNet
@@ -327,9 +343,11 @@ class ResUNet384V8(nn.Module):
         
         bottom_enc2 = self.bottom_unet_encoder2(bottom_down1 + encoder1_to_encoder2_residual)
         
+        encoder2_to_encoder3_skip = self.encoder2_to_encoder3_skip(bottom_enc2)
+        
         bottom_down2 = self.bottom_unet_down2(bottom_enc2)
         
-        bottom_enc3 = self.bottom_unet_encoder3(bottom_down2)
+        bottom_enc3 = self.bottom_unet_encoder3(bottom_down2 + encoder2_to_encoder3_skip)
                 
         bottom_down3 = self.bottom_unet_down3(bottom_enc3 + encoder1_to_encoder3_residual)
         
@@ -337,41 +355,42 @@ class ResUNet384V8(nn.Module):
         
         
         bottom_down4 = self.bottom_unet_down4(bottom_enc4 + encoder1_to_encoder4_residual)
-        #bottom_down4 = self.bottom_unet_pos_encoder4(bottom_down4)
+        bottom_down4 = self.bottom_unet_pos_encoder4(bottom_down4)
                 
-        # _, channels, height, width = bottom_down4.shape
-        # # Concatenate along channel dimension
+        _, channels, height, width = bottom_down4.shape
+        # Concatenate along channel dimension
 
-        # flat_face4_down = bottom_down4.permute(0, 2, 3, 1)  # [B, H, W, C]
-        # #flat_face4_down = self.face_norm(flat_face4_down)
-        # flat_face4_down = flat_face4_down.permute(0, 3, 1, 2).flatten(2).permute(0, 2, 1)  # [B, seq_len, features]
+        flat_face4_down = self.face_norm(bottom_down4)
+        flat_face4_down = flat_face4_down.permute(0, 2, 3, 1)  # [B, H, W, C]
+        flat_face4_down = flat_face4_down.permute(0, 3, 1, 2).flatten(2).permute(0, 2, 1)  # [B, seq_len, features]
 
-        # # For audio features  
-        # flat_audio4 = audio4_adapted.permute(0, 2, 3, 1)  # [B, H, W, C]
-        # #flat_audio5 = self.audio_norm(flat_audio5)
-        # flat_audio4 = flat_audio4.permute(0, 3, 1, 2).flatten(2).permute(0, 2, 1)  # [B, seq_len, features]
+        # For audio features  
+        flat_audio5 = self.audio_norm(audio4_adapted)
+        flat_audio4 = flat_audio5.permute(0, 2, 3, 1)  # [B, H, W, C]
+        
+        flat_audio4 = flat_audio4.permute(0, 3, 1, 2).flatten(2).permute(0, 2, 1)  # [B, seq_len, features]
 
-        # # Concatenate along sequence dimension
-        # face_features = F.normalize(flat_face4_down, p=2, dim=1)  # Normalize flattened features [b*num_frames, d]
-        # audio_features = F.normalize(flat_audio4, p=2, dim=1)  # Normalize flattened features [b, d]
-        # face4_combined_sequence = torch.cat([face_features, audio_features], dim=2)  # [10, 576, 192]
+        # Concatenate along sequence dimension
+        face4_combined_sequence = torch.cat([flat_face4_down, flat_audio4], dim=2)  # [10, 576, 192]
                 
-        # # Process through transformer
-        # face4_fused = self.face4_cross_attn(face4_combined_sequence)  # [10, 288, 384]
-        # face4_fused = face4_fused + face4_combined_sequence
-        # face4_fused = face4_fused.permute(0, 2, 1)  # [10, 192, 288]
-        # #face4_fused = self.face4_proj(face4_fused)
-        # face4_fused = face4_fused.view(batch_size, 384, height, width)  # [10, 192, 12, 24]
-        # face4_fused = self.face4_attn_reduce(face4_fused)
-                                
+        # Process through transformer
+        face4_fused = self.face4_cross_attn(face4_combined_sequence)  # [10, 288, 384]
+        face4_fused = face4_fused + face4_combined_sequence
+        face4_fused = face4_fused.permute(0, 2, 1)  # [10, 192, 288]
+        #face4_fused = self.face4_proj(face4_fused)
+        face4_fused = face4_fused.view(batch_size, 384, height, width)  # [10, 192, 12, 24]
+        face4_fused = self.face4_attn_reduce(face4_fused)                               
+        face4_fused = bottom_down4 + face4_fused
+        
         
         # Decode to generate bottom half output with multi-level audio fusion
-        fusion = torch.cat([bottom_down4, audio4_adapted], dim=1)
+        fusion = torch.cat([bottom_down4, audio4_adapted + face4_fused], dim=1)
         bottom_de4 = self.bottom_unet_decoder4(fusion)
         bottom_cat4 = torch.cat([bottom_de4, bottom_enc4], dim=1)
         bottom_cat4 = self.bottom_unet_conv4(bottom_cat4)
         
-        bottom_de3 = self.bottom_unet_decoder3(bottom_cat4)
+        fused_for_decoder3 = torch.cat([bottom_cat4, audio3_adapted], dim=1)
+        bottom_de3 = self.bottom_unet_decoder3(fused_for_decoder3)
         bottom_cat3 = torch.cat([bottom_de3, bottom_enc3], dim=1)
         bottom_cat3 = self.bottom_unet_conv3(bottom_cat3)
         
@@ -380,7 +399,8 @@ class ResUNet384V8(nn.Module):
         bottom_cat2 = self.bottom_unet_conv2(bottom_cat2)
         
         bottom_de1 = self.bottom_unet_decoder1(bottom_cat2)
-        bottom_de0 = self.bottom_unet_decoder0(bottom_de1 + bottom_enc1)
+        bottom_cat1 = torch.cat([bottom_de1, bottom_enc1], dim=1)
+        bottom_de0 = self.bottom_unet_decoder0(bottom_cat1)
         
         generated_bottom_half = self.bottom_unet_output_block(bottom_de0)
         
