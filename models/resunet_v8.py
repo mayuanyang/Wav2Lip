@@ -80,6 +80,11 @@ class ResUNet384V8(nn.Module):
                                                        nn.LeakyReLU(0.01)
         )
         
+        self.encoder1_to_encoder_down2_skip = nn.Sequential(nn.Conv2d(64, 128, kernel_size=1, stride=2, padding=0),
+                                                       nn.BatchNorm2d(128),
+                                                       nn.LeakyReLU(0.01)
+        )
+        
         self.encoder2_to_encoder3_skip = nn.Sequential(nn.MaxPool2d(kernel_size=2, stride=2),
                                                        nn.Conv2d(128, 192, kernel_size=1, stride=1, padding=0),
                                                        nn.BatchNorm2d(192),
@@ -244,11 +249,7 @@ class ResUNet384V8(nn.Module):
         mask = self.generate_ellipse_mask(h, w, split_idx, x.device)
         mask = mask.unsqueeze(0).unsqueeze(0).repeat(b, channels_to_mask, 1, 1)
         
-        # 将遮罩区域设为黑色（0），其余部分保持原样
-        static_value = 0.01  # Small positive value
-        masked_rgb = rgb_channels * (1 - mask) + static_value * mask
-        
-        # 遮罩区域直接设为 0（黑色）
+        masked_rgb = rgb_channels * (1 - mask)  # 非遮罩区域保留原值
 
         noisy_bottom = torch.cat([masked_rgb, other_channels], dim=1)
         result = torch.cat([top_half, noisy_bottom], dim=2)
@@ -334,6 +335,8 @@ class ResUNet384V8(nn.Module):
         bottom_enc1 = self.bottom_unet_encoder1(bottom_half_with_ref)
         encoder1_to_encoder2_residual = self.encoder1_to_encoder2_skip(bottom_enc1)  # Downsample spatially
         
+        encoder1_to_encoder_down2_residual = self.encoder1_to_encoder_down2_skip(bottom_enc1)
+        
         encoder1_to_encoder3_residual = self.encoder1_to_encoder3_skip(bottom_enc1)  # Downsample spatially
                 
         encoder1_to_encoder4_residual = self.encoder1_to_encoder4_skip(bottom_enc1)  # Downsample spatially
@@ -344,8 +347,8 @@ class ResUNet384V8(nn.Module):
         bottom_enc2 = self.bottom_unet_encoder2(bottom_down1 + encoder1_to_encoder2_residual)
         
         encoder2_to_encoder3_skip = self.encoder2_to_encoder3_skip(bottom_enc2)
-        
-        bottom_down2 = self.bottom_unet_down2(bottom_enc2)
+                
+        bottom_down2 = self.bottom_unet_down2(bottom_enc2 + encoder1_to_encoder_down2_residual)
         
         bottom_enc3 = self.bottom_unet_encoder3(bottom_down2 + encoder2_to_encoder3_skip)
                 
