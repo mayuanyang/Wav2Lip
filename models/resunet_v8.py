@@ -69,39 +69,43 @@ class ResUNet384V8(nn.Module):
         self.bottom_unet_encoder3 = construct_encoder_layers(3, 192, 256, 1)
         self.bottom_unet_down3 = construct_encoder_layers(3, 256, 320, 2)
 
-        self.bottom_unet_encoder4 = construct_encoder_layers(3, 320, 192, 1)
-        self.bottom_unet_down4 = construct_encoder_layers(3, 192, 192, 2)
+        self.bottom_unet_encoder4 = construct_encoder_layers(4, 320, 192, 1)
+        self.bottom_unet_down4 = construct_encoder_layers(4, 192, 192, 2)
         self.bottom_unet_pos_encoder4 = LearnablePositionalEncoding2D(d_model=192, max_h=12, max_w=24, dropout=0.1)
         
+        self.bottom_unet_encoder5 = construct_encoder_layers(2, 192, 192, 1)
+        self.bottom_unet_down5 = construct_encoder_layers(2, 192, 192, 2)
         
         # --- MaxPooling for residual connection from encoder1 to encoder3 ---
-        self.encoder1_to_encoder2_skip = nn.Sequential(nn.Conv2d(64, 96, kernel_size=1, stride=2, padding=0),
+        self.encoder1_to_encoder2_skip = nn.Sequential(nn.Conv2d(64, 96, kernel_size=3, stride=2, padding=1),
                                                        nn.BatchNorm2d(96),
                                                        nn.LeakyReLU(0.01)
         )
         
-        self.encoder1_to_encoder_down2_skip = nn.Sequential(nn.Conv2d(64, 128, kernel_size=1, stride=2, padding=0),
+        self.encoder1_to_encoder_down2_skip = nn.Sequential(nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
                                                        nn.BatchNorm2d(128),
                                                        nn.LeakyReLU(0.01)
         )
         
-        self.encoder2_to_encoder3_skip = nn.Sequential(nn.MaxPool2d(kernel_size=2, stride=2),
-                                                       nn.Conv2d(128, 192, kernel_size=1, stride=1, padding=0),
+        self.encoder2_to_encoder3_skip = nn.Sequential(nn.Conv2d(128, 192, kernel_size=3, stride=2, padding=1),
                                                        nn.BatchNorm2d(192),
                                                        nn.LeakyReLU(0.01)
         )
         
-        self.encoder1_to_encoder3_skip = nn.Sequential(
-          nn.AdaptiveAvgPool2d((48, 96)),
-          nn.Conv2d(64, 256, kernel_size=1, stride=1, padding=0),
-          nn.BatchNorm2d(256),
-          nn.LeakyReLU(0.01)
+        self.encoder3_to_encoder4_skip = nn.Sequential(nn.Conv2d(256, 320, kernel_size=3, stride=2, padding=1),
+                                                       nn.BatchNorm2d(320),
+                                                       nn.LeakyReLU(0.01)
+        )
+        
+        self.encoder4_to_encoder5_skip = nn.Sequential(nn.Conv2d(192, 192, kernel_size=3, stride=2, padding=1),
+                                                       nn.BatchNorm2d(192),
+                                                       nn.LeakyReLU(0.01)
         )
         
         
         self.encoder1_to_encoder4_skip = nn.Sequential(
           nn.AdaptiveAvgPool2d((24, 48)),
-          nn.Conv2d(64, 192, kernel_size=1, stride=1, padding=0),
+          nn.Conv2d(64, 192, kernel_size=3, stride=1, padding=1),
           nn.BatchNorm2d(192),
           nn.LeakyReLU(0.01)
         )
@@ -163,8 +167,11 @@ class ResUNet384V8(nn.Module):
                 
         # Bottom UNet Decoders
         # Updated decoder connections after removing encoder5/down5
-        self.bottom_unet_decoder4 = construct_decoder_layers(3, 384, 256, 2)
-        self.bottom_unet_conv4 = construct_encoder_layers(3, 448, 256, 1) # 256 (debottom4) + 192 (bottom4) = 384
+        self.bottom_unet_decoder5 = construct_decoder_layers(2, 192, 192, 2)
+        self.bottom_unet_conv5 = construct_encoder_layers(2, 192, 192, 1) # 256 (debottom4) + 192 (bottom4) = 384
+        
+        self.bottom_unet_decoder4 = construct_decoder_layers(4, 384, 256, 2)
+        self.bottom_unet_conv4 = construct_encoder_layers(4, 448, 256, 1) # 256 (debottom4) + 192 (bottom4) = 384
         
         self.bottom_unet_decoder3 = construct_decoder_layers(3, 512, 320, 2)
         self.bottom_unet_conv3 = construct_encoder_layers(3, 576, 256, 1) # 256 (debottom3) + 192 (bottom3) = 448
@@ -332,12 +339,11 @@ class ResUNet384V8(nn.Module):
                         
         # First UNet: Process bottom half to generate bottom half output
         # Encode bottom half through bottom UNet
-        bottom_enc1 = self.bottom_unet_encoder1(bottom_half_with_ref)
-        encoder1_to_encoder2_residual = self.encoder1_to_encoder2_skip(bottom_enc1)  # Downsample spatially
+        bottom_enc1 = self.bottom_unet_encoder1(bottom_half_with_ref) #192x384
+        encoder1_to_encoder2_residual = self.encoder1_to_encoder2_skip(bottom_enc1)  # Downsample spatially 96x192
         
-        encoder1_to_encoder_down2_residual = self.encoder1_to_encoder_down2_skip(bottom_enc1)
+        encoder1_to_encoder_down2_residual = self.encoder1_to_encoder_down2_skip(bottom_enc1) # 96x192
         
-        encoder1_to_encoder3_residual = self.encoder1_to_encoder3_skip(bottom_enc1)  # Downsample spatially
                 
         encoder1_to_encoder4_residual = self.encoder1_to_encoder4_skip(bottom_enc1)  # Downsample spatially
                         
@@ -351,14 +357,18 @@ class ResUNet384V8(nn.Module):
         bottom_down2 = self.bottom_unet_down2(bottom_enc2 + encoder1_to_encoder_down2_residual)
         
         bottom_enc3 = self.bottom_unet_encoder3(bottom_down2 + encoder2_to_encoder3_skip)
-                
-        bottom_down3 = self.bottom_unet_down3(bottom_enc3 + encoder1_to_encoder3_residual)
         
-        bottom_enc4 = self.bottom_unet_encoder4(bottom_down3)
+        encoder3_to_encoder4_skip = self.encoder3_to_encoder4_skip(bottom_enc3)
+                
+        bottom_down3 = self.bottom_unet_down3(bottom_enc3)
+        
+        bottom_enc4 = self.bottom_unet_encoder4(bottom_down3 + encoder3_to_encoder4_skip)
+        
+        encoder4_to_encoder5_skip = self.encoder4_to_encoder5_skip(bottom_enc4)
         
         
         bottom_down4 = self.bottom_unet_down4(bottom_enc4 + encoder1_to_encoder4_residual)
-        bottom_down4 = self.bottom_unet_pos_encoder4(bottom_down4)
+        bottom_down4 = self.bottom_unet_pos_encoder4(bottom_down4 + encoder4_to_encoder5_skip)
                 
         _, channels, height, width = bottom_down4.shape
         # Concatenate along channel dimension
@@ -385,9 +395,15 @@ class ResUNet384V8(nn.Module):
         face4_fused = self.face4_attn_reduce(face4_fused)                               
         face4_fused = bottom_down4 + face4_fused
         
+        bottom_enc5 = self.bottom_unet_encoder5(bottom_down4 + face4_fused)
+        bottom_down5 = self.bottom_unet_down5(bottom_enc5)
+        
+        bottom_dec5 = self.bottom_unet_decoder5(bottom_down5)
+        bottom_dec5_up = self.bottom_unet_conv5(bottom_dec5)
+        
         
         # Decode to generate bottom half output with multi-level audio fusion
-        fusion = torch.cat([bottom_down4, audio4_adapted + face4_fused], dim=1)
+        fusion = torch.cat([bottom_dec5_up, audio4_adapted + face4_fused], dim=1)
         bottom_de4 = self.bottom_unet_decoder4(fusion)
         bottom_cat4 = torch.cat([bottom_de4, bottom_enc4], dim=1)
         bottom_cat4 = self.bottom_unet_conv4(bottom_cat4)
