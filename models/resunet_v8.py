@@ -120,7 +120,7 @@ class ResUNet384V8(nn.Module):
         
         # Add maxpool to match audio_encoder2 output shape
         self.audio1_pool = nn.MaxPool2d(kernel_size=(2, 1), stride=(2, 1))
-        self.audio1_conv = nn.Conv2d(32, 64, kernel_size=1, stride=1, padding=0)
+        self.audio1_conv = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
         
         self.audio_encoder2 = nn.Sequential(
             Conv2d(32, 64, kernel_size=3, stride=(2, 1), padding=1, use_zero_sensitive=True),
@@ -129,7 +129,7 @@ class ResUNet384V8(nn.Module):
         )
         
         self.audio2_pool = nn.MaxPool2d(kernel_size=(2, 1), stride=(2, 1))
-        self.audio2_conv = nn.Conv2d(64, 128, kernel_size=1, stride=1, padding=0)
+        self.audio2_conv = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
         
         
         self.audio_encoder3 = nn.Sequential(
@@ -138,8 +138,8 @@ class ResUNet384V8(nn.Module):
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True, use_zero_sensitive=True),
         )
         
-        self.audio3_conv = nn.Conv2d(128, 192, kernel_size=1)
-        self.audio3_conv_decoder = nn.Conv2d(128, 448, kernel_size=1, stride=1, padding=0)
+        self.audio3_conv = nn.Conv2d(128, 192, kernel_size=3)
+        self.audio3_conv_decoder = nn.Conv2d(128, 448, kernel_size=3, stride=1, padding=1)
 
         
         self.audio_encoder4 = nn.Sequential(
@@ -150,7 +150,7 @@ class ResUNet384V8(nn.Module):
         
         # Audio adapters for fusing with bottom decoders at multiple levels
         self.audio_adapter_3 = nn.AdaptiveAvgPool2d((24, 48))   # Match decoder5 spatial dims
-        self.audio_adapter_3_conv = nn.Sequential(nn.Conv2d(128, 256, kernel_size=1, stride=1, padding=0),
+        self.audio_adapter_3_conv = nn.Sequential(nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
                                                        nn.BatchNorm2d(256),
                                                        nn.LeakyReLU(0.01))
         
@@ -193,7 +193,7 @@ class ResUNet384V8(nn.Module):
             num_layers=2
         )
         
-        self.face4_attn_reduce = nn.Conv2d(384, 192, kernel_size=1, stride=1, padding=0)        
+        self.face4_attn_reduce = nn.Conv2d(384, 192, kernel_size=3, stride=1, padding=1)
                 
         self.face_norm = nn.BatchNorm2d(192)  # For face features
         self.audio_norm = nn.BatchNorm2d(192)  # For audio features
