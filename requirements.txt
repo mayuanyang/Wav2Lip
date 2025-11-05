@@ -8,3 +8,5 @@ tqdm==4.45.0
 numba==0.48
 openai-whisper==20231117
 torchaudio==0.1.0
+beautifulsoup4==4.12.2
+markdown==3.4.1

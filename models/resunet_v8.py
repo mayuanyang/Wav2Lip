@@ -182,9 +182,19 @@ class BottomEncoder(nn.Module):
         # Downsampling path
         self.down1 = DownsampleBlock(64, 96, stride=2)   # 192x192 -> 96x96
         self.res1 = ResidualBlock(96)
+        self.initial_to_down2 = nn.Sequential(
+          nn.Conv2d(64, 96, 1, stride=2),  # Skip connection
+          nn.BatchNorm2d(96),
+          nn.GELU()
+        )
         
         self.down2 = DownsampleBlock(96, 128, stride=2)  # 96x96 -> 48x48
         self.res2 = ResidualBlock(128)
+        self.down2_to_down3 = nn.Sequential(
+          nn.Conv2d(96, 128, 1, stride=2),  # Skip connection
+          nn.BatchNorm2d(128),
+          nn.GELU()
+        )
         
         self.down3 = DownsampleBlock(128, 192, stride=2) # 48x48 -> 24x24
         self.res3 = ResidualBlock(192)
@@ -200,16 +210,19 @@ class BottomEncoder(nn.Module):
         
         x = self.init_conv(x)
         features.append(x)  # 192x384
+        initial_skip = self.initial_to_down2(x)
         
         x = self.down1(x)  # 96x192
         x = self.res1(x)
         features.append(x)
         
-        x = self.down2(x)  # 48x96
+        down2_skip = self.down2_to_down3(x + initial_skip)
+        x = self.down2(x + initial_skip)  # 48x96
         x = self.res2(x)
         features.append(x)
         
-        x = self.down3(x)  # 24x48
+        
+        x = self.down3(x + down2_skip)  # 24x48
         x = self.res3(x)
         features.append(x)
         
@@ -263,7 +276,7 @@ class CrossModalAttention(nn.Module):
         self.audio_value = nn.Conv2d(channels, channels, 1)
         
         self.softmax = nn.Softmax(dim=-1)
-        self.gamma = nn.Parameter(torch.zeros(1))
+        self.gamma = nn.Parameter(torch.ones(1) * 0.5)
     
     def forward(self, visual_feat, audio_feat):
         batch_size, channels, height, width = visual_feat.shape
@@ -284,7 +297,9 @@ class CrossModalAttention(nn.Module):
         attended_audio = attended_audio.view(batch_size, channels, height, width)
         
         # Fuse with visual features
-        return visual_feat + self.gamma * attended_audio
+        #print('The gamma', self.gamma)  # Debugging line
+        positive_gamma = F.relu(self.gamma) + 1e-6
+        return visual_feat + positive_gamma * attended_audio
 
 class CrossModalBottleneck(nn.Module):
     """Proper multi-level cross-modal fusion"""
