@@ -398,9 +398,25 @@ class BottomDecoder(nn.Module):
         
         self.up2 = UpsampleBlock(128, 96)   # 48x96 -> 96x192
         self.res2 = ResidualBlock(96)
+        self.up2_vertical_cat = nn.Sequential(
+            nn.Conv2d(96 + 96, 192, 3, 1, 1),
+            nn.BatchNorm2d(192),
+            nn.GELU(),
+            nn.Conv2d(96 + 96, 96, 3, 1, 1),
+            nn.BatchNorm2d(96),
+            nn.GELU()
+        )
         
         self.up1 = UpsampleBlock(96, 64)    # 96x192 -> 192x384
         self.res1 = ResidualBlock(64)
+        self.up1_vertical_cat = nn.Sequential(
+            nn.Conv2d(64 + 64, 128, 3, 1, 1),
+            nn.BatchNorm2d(128),
+            nn.GELU(),
+            nn.Conv2d(128, 64, 3, 1, 1),
+            nn.BatchNorm2d(64),
+            nn.GELU()
+        )
     
     def forward(self, features):
         # features: list from encoder [x0, x1, x2, x3, bottleneck]
@@ -413,11 +429,15 @@ class BottomDecoder(nn.Module):
         x = self.up3(x, x2)  # Use x2 as skip
         x = self.res3(x)
         
-        x = self.up2(x, x1)  # Use x1 as skip
-        x = self.res2(x)
+        x = self.up2(x, x1)  # Use x1 as skip        
+        concated = torch.cat([x, x1], dim=1)
+        concated = self.up2_vertical_cat(concated)
+        x = self.res2(concated)
         
         x = self.up1(x, x0)  # Use x0 as skip
-        x = self.res1(x)
+        concated = torch.cat([x, x0], dim=1)
+        concated = self.up1_vertical_cat(concated)
+        x = self.res1(concated)
         
         return x
 
