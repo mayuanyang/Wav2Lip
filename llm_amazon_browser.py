@@ -53,8 +53,8 @@ class LLMAmazonBrowser(QMainWindow):
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh_page)
         
-        self.home_btn = QPushButton("Amazon Home")
-        self.home_btn.clicked.connect(self.go_home)
+        # self.home_btn = QPushButton("Amazon Home")
+        # self.home_btn.clicked.connect(self.go_home)
         
         self.go_btn = QPushButton("Go")
         self.go_btn.clicked.connect(self.navigate_to_url)
@@ -69,7 +69,7 @@ class LLMAmazonBrowser(QMainWindow):
         
         # Create AI actions log
         self.actions_log = QListWidget()
-        self.actions_log.setMaximumHeight(200)
+        self.actions_log.setMaximumHeight(800)
         
         # Create web view
         self.web = QWebEngineView()
@@ -113,7 +113,7 @@ class LLMAmazonBrowser(QMainWindow):
         nav_layout.addWidget(self.back_btn)
         nav_layout.addWidget(self.forward_btn)
         nav_layout.addWidget(self.refresh_btn)
-        nav_layout.addWidget(self.home_btn)
+        #nav_layout.addWidget(self.home_btn)
         nav_layout.addStretch()
         
         # Add components to browser layout
