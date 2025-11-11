@@ -82,6 +82,7 @@ class LLMAmazonBrowser(QMainWindow):
         self.auto_nav_timer = QTimer()
         self.auto_nav_timer.timeout.connect(self.auto_navigate_to_best_item)
         self.pending_search_query = None
+        self.pending_price_constraint = None
         self.search_results_page = False
         
         # Set initial URL to Amazon
@@ -217,31 +218,266 @@ class LLMAmazonBrowser(QMainWindow):
         self.auto_nav_timer.stop()
         if self.pending_search_query and self.search_results_page:
             self.add_action_log(f"Auto-navigating to best item for: {self.pending_search_query}")
+            if self.pending_price_constraint:
+                self.add_action_log(f"Price constraint: {self.pending_price_constraint}")
             
-            # Use JavaScript to find and click the first search result
+            # Use JavaScript to find all search results and their titles
             js_code = """
-            // Find the first search result link and click it
-            var firstResult = document.querySelector('[data-component-type="s-search-result"] h2 a');
-            if (!firstResult) {
+            // Get all search results with their titles and content
+            var searchResults = [];
+            var resultElements = document.querySelectorAll('[data-component-type="s-search-result"]');
+            
+            if (resultElements.length === 0) {
                 // Try alternative selectors
-                firstResult = document.querySelector('.s-result-item h2 a');
+                resultElements = document.querySelectorAll('.s-result-item');
             }
-            if (!firstResult) {
-                // Try another alternative
-                firstResult = document.querySelector('[data-component-type="s-search-result"] .a-link-normal');
+            
+            for (var i = 0; i < resultElements.length; i++) {
+                var element = resultElements[i];
+                var titleElement = element.querySelector('h2 span');
+                if (!titleElement) {
+                    titleElement = element.querySelector('.a-text-normal span');
+                }
+
+                
+                // Get all text content within the result element
+                var allText = element.textContent.trim();
+                
+                // Try to find and append price information
+                var priceElement = element.querySelector('.a-price .a-offscreen');
+                if (!priceElement) {
+                    priceElement = element.querySelector('.a-price-whole');
+                }
+                if (!priceElement) {
+                    priceElement = element.querySelector('.a-color-price');
+                }
+                if (priceElement) {
+                    allText += "\\nPrice: " + priceElement.textContent.trim();
+                }
+                
+                if (titleElement) {
+                    var title = titleElement.textContent.trim();
+                    searchResults.push({
+                        title: title,
+                        allText: allText,
+                        linkElement: titleElement
+                    });
+                }
             }
-            if (firstResult) {
-                firstResult.click();
-                "Clicked on first search result";
-            } else {
-                "No search results found";
-            }
+            
+            // Return the search results to Python for LLM processing
+            searchResults.map(result => ({
+                title: result.title,
+                allText: result.allText
+            }));
             """
             
-            self.web.page().runJavaScript(js_code, self.js_callback)
-            self.pending_search_query = None
+            self.web.page().runJavaScript(js_code, self.process_search_results_with_llm)
             self.search_results_page = False
     
+    def process_search_results_with_llm(self, search_results):
+        """Process search results using LLM to find the best match"""
+        if not search_results:
+            self.add_action_log("No search results found")
+            self.pending_search_query = None
+            self.pending_price_constraint = None
+            return
+            
+        self.add_action_log(f"Processing {len(search_results)} search results with LLM")
+        
+        # First, use LLM to extract prices and filter based on price constraints
+        if self.pending_price_constraint:
+            # Create a prompt for the LLM to filter results based on price constraints
+            results_with_text = "\n".join([f"{i+1}. {result['title']}\n   Text: {result['allText']}" for i, result in enumerate(search_results)])
+            print('----results_with_text----', results_with_text)
+            
+            price_filter_prompt = f"""
+You are an AI assistant helping to filter Amazon search results based on price constraints.
+The user is looking for: "{self.pending_search_query}"
+Price constraint: "{self.pending_price_constraint}"
+
+Here are the search results with their full text content:
+{results_with_text}
+
+Please identify which results meet the price constraint. Extract the price from each result's text and check if it meets the constraint.
+
+Respond with ONLY a JSON array containing the numbers of results that meet the price constraint (most relevant first).
+For example, if results 2 and 1 meet the constraint, respond:
+[2, 1]
+
+If no results meet the constraint, respond with an empty array:
+[]
+
+Just provide the JSON array, nothing else.
+"""
+            
+            try:
+                # Call LLM API for price filtering
+                payload = {
+                    "model": self.model,
+                    "prompt": price_filter_prompt,
+                    "max_tokens": 500,
+                    "temperature": 0.1,
+                    "stream": False
+                }
+                
+                response = requests.post(self.api_endpoint, headers=self.headers, json=payload, timeout=30)
+                response.raise_for_status()
+                result = response.json()
+                
+                # Extract the response from the API
+                api_response = result["choices"][0]["text"].strip()
+                
+                # Parse the JSON response
+                filtered_indices = json.loads(api_response)
+                
+                # Filter the search results based on LLM's response
+                if filtered_indices:
+                    search_results = [search_results[i-1] for i in filtered_indices]
+                    self.add_action_log(f"Filtered to {len(search_results)} results based on price constraint")
+                else:
+                    self.add_action_log("No results meet the price constraint")
+                    # Clean up and return
+                    self.pending_search_query = None
+                    self.pending_price_constraint = None
+                    return
+                    
+            except Exception as e:
+                self.add_action_log(f"Error in LLM price filtering: {str(e)}")
+                # Continue with all results if price filtering fails
+        
+        # Create a prompt for the LLM to rank the search results
+        results_text = "\n".join([f"{i+1}. {result['title']}" for i, result in enumerate(search_results)])
+        
+        prompt = f"""
+You are an AI assistant helping to find the most relevant product on Amazon. 
+The user is looking for: "{self.pending_search_query}"
+
+Here are the search results:
+{results_text}
+
+Please rank these results from most relevant (1) to least relevant, considering:
+1. How well the title matches the user's query
+2. Whether the product is the actual item or an accessory/case/etc.
+3. Relevance to the user's intent
+
+Respond with ONLY a JSON array containing the numbers in ranked order (most relevant first).
+For example, if there are 3 results and result 2 is most relevant, then 1, then 3, respond:
+[2, 1, 3]
+
+Just provide the JSON array, nothing else.
+"""
+        
+        try:
+            # Call LLM API
+            payload = {
+                "model": self.model,
+                "prompt": prompt,
+                "max_tokens": 32768,
+                "temperature": 0.1,
+                "stream": False
+            }
+            
+            response = requests.post(self.api_endpoint, headers=self.headers, json=payload, timeout=30)
+            response.raise_for_status()
+            result = response.json()
+            
+            # Extract the response from the API
+            api_response = result["choices"][0]["text"].strip()
+            
+            # Parse the JSON response
+            ranked_indices = json.loads(api_response)
+            
+            if ranked_indices and len(ranked_indices) > 0:
+                # Validate the ranked indices
+                valid_indices = [idx for idx in ranked_indices if 1 <= idx <= len(search_results)]
+                if not valid_indices:
+                    self.add_action_log("LLM returned invalid indices")
+                    # Fallback to clicking the first result
+                    self.fallback_click_first_result()
+                    return
+                
+                # Get the index of the best match (first in ranked list)
+                best_match_index = valid_indices[0] - 1  # Convert from 1-based to 0-based indexing
+                
+                if 0 <= best_match_index < len(search_results):
+                    best_match = search_results[best_match_index]
+                    print('The best match is:', best_match)
+                    
+                    # Check if the title is empty
+                    if not best_match.get('title', '').strip():
+                        self.add_action_log("LLM selected best match with empty title")
+                        # Fallback to clicking the first result
+                        self.fallback_click_first_result()
+                        return
+                    
+                    self.add_action_log(f"LLM selected best match: {best_match['title']}")
+                    
+                    # Now we need to click on this item
+                    # We'll use JavaScript to find and click the element with this title
+                    js_click_code = f"""
+                    // Find and click element with matching title
+                    var resultElements = document.querySelectorAll('[data-component-type="s-search-result"] h2 span, .s-result-item h2 span, [data-component-type="s-search-result"] .a-text-normal span, .s-result-item .a-text-normal span');
+                    var targetTitle = "{best_match['title'].replace('"', '\\"')}";
+
+                    for (var i = 0; i < resultElements.length; i++) {{
+                        var spanElement = resultElements[i];
+                        var title = spanElement.textContent.trim();
+                        
+                        if (title === targetTitle) {{
+                            // Find the parent <a> tag to click
+                            var parentLink = spanElement.closest('a');
+                            if (parentLink) {{
+                                parentLink.click();
+                                
+                            }}
+                        }}
+                    }}
+                    
+                    """
+
+                    self.web.page().runJavaScript(js_click_code, self.js_callback)
+                else:
+                    self.add_action_log("LLM returned invalid index")
+                    # Fallback to clicking the first result
+                    self.fallback_click_first_result()
+            else:
+                self.add_action_log("LLM returned empty ranking")
+                # Fallback to clicking the first result
+                self.fallback_click_first_result()
+                
+        except Exception as e:
+            self.add_action_log(f"Error in LLM processing: {str(e)}")
+            # Fallback to clicking the first result
+            self.fallback_click_first_result()
+        
+        # Clean up
+        self.pending_search_query = None
+        self.pending_price_constraint = None
+    
+    def fallback_click_first_result(self):
+        """Fallback method to click the first search result"""
+        self.add_action_log("Falling back to clicking first result")
+        js_code = """
+        // Find the first search result link and click it
+        var firstResult = document.querySelector('[data-component-type="s-search-result"] h2 a');
+        if (!firstResult) {
+            // Try alternative selectors
+            firstResult = document.querySelector('.s-result-item h2 a');
+        }
+        if (!firstResult) {
+            // Try another alternative
+            firstResult = document.querySelector('[data-component-type="s-search-result"] .a-link-normal');
+        }
+        if (firstResult) {
+            firstResult.click();
+            "Clicked on first search result";
+        } else {
+            "No search results found";
+        }
+        """
+        self.web.page().runJavaScript(js_code, self.js_callback)
+
     def js_callback(self, result):
         """Callback for JavaScript execution"""
         if result:
@@ -265,9 +501,10 @@ Please provide your response in the following JSON format:
       "type": "The type of action (e.g., 'search_amazon', 'navigate_to_url', 'extract_data', 'filter_results')",
       "description": "A detailed description of what to do",
       "parameters": {{
-        "search_query": "Search query for Amazon (if applicable)",
+        "search_query": "Main product keywords for Amazon search (e.g., 'iPhone 16 Pro Max')",
         "url": "URL to navigate to (if applicable)",
         "filters": "Price, rating, or other filters (if applicable)",
+        "price_constraint": "Price constraint if mentioned (e.g., 'under $1200', 'over $50', 'between $100 and $200')",
         "data_to_extract": "What information to extract (if applicable)"
       }}
     }}
@@ -277,7 +514,10 @@ Please provide your response in the following JSON format:
 
 Examples:
 Command: "Find me a Bluetooth speaker under $50"
-Response: {{"intent": "search_products", "actions": [{{"type": "search_amazon", "description": "Search for Bluetooth speakers with price filter", "parameters": {{"search_query": "Bluetooth speaker", "filters": "price under 50"}}}}], "confidence": 0.95}}
+Response: {{"intent": "search_products", "actions": [{{"type": "search_amazon", "description": "Search for Bluetooth speakers with price filter", "parameters": {{"search_query": "Bluetooth speaker", "price_constraint": "under $50"}}}}], "confidence": 0.95}}
+
+Command: "Looking for an iPhone 16 Pro Max under $1200"
+Response: {{"intent": "search_products", "actions": [{{"type": "search_amazon", "description": "Search for iPhone 16 Pro Max with price filter", "parameters": {{"search_query": "iPhone 16 Pro Max", "price_constraint": "under $1200"}}}}], "confidence": 0.95}}
 
 Command: "Show me the reviews for this product"
 Response: {{"intent": "extract_info", "actions": [{{"type": "extract_data", "description": "Extract product reviews", "parameters": {{"data_to_extract": "product reviews"}}}}], "confidence": 0.85}}
@@ -394,13 +634,11 @@ Just provide the JSON response, nothing else.
         if action_type == "search_amazon":
             search_query = parameters.get("search_query", "")
             filters = parameters.get("filters", "")
+            price_constraint = parameters.get("price_constraint", "")
             
             if search_query:
-                # Apply filters to search query if provided
-                if filters:
-                    search_query = f"{search_query} {filters}"
-                
-                # Format search URL for Amazon
+                # For now, we only search with the main product keywords
+                # Price filtering will be handled in the auto-navigation step
                 encoded_terms = urllib.parse.quote(search_query)
                 search_url = f"https://www.amazon.com/s?k={encoded_terms}"
                 self.web.load(QUrl(search_url))
@@ -408,7 +646,11 @@ Just provide the JSON response, nothing else.
                 self.address_bar.setText(search_url)
                 # Set pending search query for auto-navigation
                 self.pending_search_query = search_query
+                # Store price constraint for auto-navigation
+                self.pending_price_constraint = price_constraint
                 self.add_action_log(f"Searching Amazon for: {search_query}")
+                if price_constraint:
+                    self.add_action_log(f"Price constraint: {price_constraint}")
         
         elif action_type == "navigate_to_url":
             url = parameters.get("url", "")
