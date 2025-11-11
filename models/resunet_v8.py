@@ -32,10 +32,27 @@ class ResUNet384V8(nn.Module):
             nn.Sigmoid()
         )
         
+        self.enhancer_encoder = BottomEncoder()
+        self.enhancer_audio_encoder = AudioEncoder()
+        
+        # === Bottleneck with Attention ===
+        self.enhancer_bottleneck = CrossModalBottleneck()
+        
+        # === Improved Decoder ===
+        self.enhancer_decoder = BottomDecoder()
+        
+        # === Output Layers ===
+        self.enhancer_output_conv = nn.Sequential(
+            nn.Conv2d(64, 32, 3, padding=1),
+            nn.GELU(),
+            nn.Conv2d(32, 3, 3, padding=1),
+            nn.Sigmoid()
+        )
+        
         # Gradient monitoring
         self.gradient_hooks = []
         
-    def forward(self, audio_sequences, face_sequences, step=None, training=True):
+    def forward(self, audio_sequences, face_sequences, step=None, training=True, train_enhancer=False):
         # Handle sequence inputs
         input_dim_size = len(face_sequences.size())
         B = audio_sequences.size(0)
@@ -60,6 +77,7 @@ class ResUNet384V8(nn.Module):
         bottom_ref_channels = face_sequences_ref[:, :, split_idx:, :]
         bottom_input = torch.cat([bottom_half, bottom_ref_channels], dim=1)
         
+        # First stage: Main network
         # Encode features
         audio_features = self.audio_encoder(audio_sequences)
         bottom_features = self.bottom_encoder(bottom_input)
@@ -71,14 +89,44 @@ class ResUNet384V8(nn.Module):
         bottom_output = self.bottom_decoder(fused_features)
         generated_bottom = self.output_conv(bottom_output)
         
+        # Second stage: Enhancer network (if enabled)
+        if train_enhancer:
+            # Create full image from original top half and generated bottom half
+            first_stage_output = torch.cat([original_top_half, generated_bottom], dim=2)
+            
+            # Enhancer input: first stage output + reference channels
+            # This creates the input as: [first_stage_output, face_sequences_ref]
+            enhancer_combined_input = torch.cat([first_stage_output, face_sequences_ref], dim=1)
+            
+            # Process with enhancer components
+            enhancer_audio_features = self.enhancer_audio_encoder(audio_sequences)
+            enhancer_features = self.enhancer_encoder(enhancer_combined_input)
+            
+            # Fuse modalities in enhancer bottleneck
+            enhancer_fused_features = self.enhancer_bottleneck(enhancer_features, enhancer_audio_features)
+            
+            # Decode with enhancer
+            enhancer_output = self.enhancer_decoder(enhancer_fused_features)
+            enhanced_bottom = self.enhancer_output_conv(enhancer_output)
+            
+            # Extract bottom half from enhanced output
+            enhanced_bottom = enhanced_bottom[:, :, split_idx:, :]
+            
+            # Use enhanced output
+            final_bottom = enhanced_bottom
+        else:
+            # Use main network output directly
+            final_bottom = generated_bottom
+        
         # Handle output formatting
         if input_dim_size > 4:
-            bottom_outputs = torch.split(generated_bottom, B, dim=0)
+            bottom_outputs = torch.split(final_bottom, B, dim=0)
             bottom_outputs = torch.stack(bottom_outputs, dim=2)
             original_top_half = torch.split(original_top_half, B, dim=0)
             original_top_half = torch.stack(original_top_half, dim=2)
         else:
-            bottom_outputs = generated_bottom
+            bottom_outputs = final_bottom
+            
         
         if training:
             return None, bottom_outputs, None

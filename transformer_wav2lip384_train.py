@@ -291,7 +291,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
               bottom_half_gt = bottom_half_gt.to(device)
 
               with autocast():
-                g, bottom_half, _ = model(indiv_mels, x, global_step)
+                # Train enhancer based on a flag or condition
+                train_enhancer = True
+                g, bottom_half, _ = model(indiv_mels, x, global_step, training=True, train_enhancer=train_enhancer)
                 
                 # Compare two images
                 '''

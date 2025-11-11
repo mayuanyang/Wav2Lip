@@ -9,6 +9,7 @@ import urllib.parse
 import requests
 import json
 import re
+from bs4 import BeautifulSoup
 
 # Import LLM configuration
 from llm_config import get_llm_config, get_api_endpoint, get_api_key, get_model, get_headers
@@ -221,59 +222,81 @@ class LLMAmazonBrowser(QMainWindow):
             if self.pending_price_constraint:
                 self.add_action_log(f"Price constraint: {self.pending_price_constraint}")
             
-            # Use JavaScript to find all search results and their titles
-            js_code = """
-            // Get all search results with their titles and content
-            var searchResults = [];
-            var resultElements = document.querySelectorAll('[data-component-type="s-search-result"]');
+            # Use a QTimer to delay the execution of the JavaScript code
+            QTimer.singleShot(1000, self._extract_amazon_search_results)
+            self.search_results_page = False
+    
+    def _extract_amazon_search_results(self):
+        """Extract Amazon search results after a delay"""
+        # Use JavaScript to find all search results and their titles
+        js_code = """
+        // Get all search results with their titles and content
+        var searchResults = [];
+        var resultElements = document.querySelectorAll('[data-component-type="s-search-result"]');
+        
+        if (resultElements.length === 0) {
+            // Try alternative selectors
+            resultElements = document.querySelectorAll('.s-result-item');
+        }
+        
+        if (resultElements.length === 0) {
+            // Try another alternative selector
+            resultElements = document.querySelectorAll('.s-search-results .sg-col');
+        }
+        
+        for (var i = 0; i < resultElements.length; i++) {
+            var element = resultElements[i];
             
-            if (resultElements.length === 0) {
-                // Try alternative selectors
-                resultElements = document.querySelectorAll('.s-result-item');
+            // Try multiple selectors for the title
+            var titleElement = element.querySelector('h2 a span');
+            if (!titleElement) {
+                titleElement = element.querySelector('h2 span');
+            }
+            if (!titleElement) {
+                titleElement = element.querySelector('.a-text-normal span');
+            }
+            if (!titleElement) {
+                titleElement = element.querySelector('h2 a');
             }
             
-            for (var i = 0; i < resultElements.length; i++) {
-                var element = resultElements[i];
-                var titleElement = element.querySelector('h2 span');
-                if (!titleElement) {
-                    titleElement = element.querySelector('.a-text-normal span');
-                }
-
-                
-                // Get all text content within the result element
-                var allText = element.textContent.trim();
-                
-                // Try to find and append price information
-                var priceElement = element.querySelector('.a-price .a-offscreen');
-                if (!priceElement) {
-                    priceElement = element.querySelector('.a-price-whole');
-                }
-                if (!priceElement) {
-                    priceElement = element.querySelector('.a-color-price');
-                }
-                if (priceElement) {
-                    allText += "\\nPrice: " + priceElement.textContent.trim();
-                }
-                
-                if (titleElement) {
-                    var title = titleElement.textContent.trim();
+            // Get all text content within the result element
+            var allText = element.textContent.trim();
+            
+            // Try to find and append price information
+            var priceElement = element.querySelector('.a-price .a-offscreen');
+            if (!priceElement) {
+                priceElement = element.querySelector('.a-price-whole');
+            }
+            if (!priceElement) {
+                priceElement = element.querySelector('.a-color-price');
+            }
+            if (!priceElement) {
+                priceElement = element.querySelector('.a-price');
+            }
+            if (priceElement) {
+                allText += "\\nPrice: " + priceElement.textContent.trim();
+            }
+            
+            if (titleElement) {
+                var title = titleElement.textContent.trim();
+                // Only add results with non-empty titles
+                if (title) {
                     searchResults.push({
                         title: title,
-                        allText: allText,
-                        linkElement: titleElement
+                        allText: allText
                     });
                 }
             }
-            
-            // Return the search results to Python for LLM processing
-            searchResults.map(result => ({
-                title: result.title,
-                allText: result.allText
-            }));
-            """
-            
-            self.web.page().runJavaScript(js_code, self.process_search_results_with_llm)
-            self.search_results_page = False
+        }
+        
+        // Return the search results to Python for LLM processing
+        searchResults.map(result => ({
+            title: result.title,
+            allText: result.allText
+        }));
+        """
+        
+        self.web.page().runJavaScript(js_code, self.process_search_results_with_llm)
     
     def process_search_results_with_llm(self, search_results):
         """Process search results using LLM to find the best match"""
@@ -483,6 +506,196 @@ Just provide the JSON array, nothing else.
         if result:
             self.add_action_log(f"JavaScript result: {result}")
 
+    def search_google_and_analyze(self, search_query):
+        """Search Google for the given query and analyze the first 5 results"""
+        self.add_action_log(f"Searching Google for: {search_query}")
+        self.status_bar.showMessage(f"Searching Google for: {search_query}")
+        
+        # Encode the search query
+        encoded_query = urllib.parse.quote(search_query)
+        url = f"https://www.google.com/search?q={encoded_query}&num=5"
+        
+        # Navigate to the Google search results page
+        self.web.load(QUrl(url))
+        
+        # Store the search query for use in the callback
+        self.current_google_search_query = search_query
+        
+        # Connect to the loadFinished signal to process the results when the page loads
+        self.web.loadFinished.connect(self.process_google_search_results)
+    
+    def process_google_search_results(self, success):
+        """Process Google search results after the page has loaded"""
+        # Disconnect the signal to prevent it from being called again
+        self.web.loadFinished.disconnect(self.process_google_search_results)
+        
+        if not success:
+            self.add_action_log("Failed to load Google search results")
+            self.status_bar.showMessage("Failed to load Google search results")
+            return
+        
+        # Use a QTimer to delay the execution of the JavaScript code
+        QTimer.singleShot(1000, self._extract_google_search_results)
+    
+    def _extract_google_search_results(self):
+        """Extract Google search results after a delay"""
+        # Use JavaScript to extract search results
+        js_code = """
+        // Extract search results
+        var results = [];
+        var resultElements = document.querySelectorAll('div.g');
+        
+        // If the above selector doesn't work, try alternative selectors
+        if (resultElements.length === 0) {
+            resultElements = document.querySelectorAll('.g');
+        }
+        
+        for (var i = 0; i < Math.min(resultElements.length, 5); i++) {
+            var element = resultElements[i];
+            
+            // Extract title
+            var titleElement = element.querySelector('h3');
+            if (!titleElement) {
+                titleElement = element.querySelector('h3 a');
+            }
+            var title = titleElement ? titleElement.textContent.trim() : 'No title';
+            
+            // Extract URL
+            var linkElement = element.querySelector('a');
+            if (!linkElement) {
+                linkElement = element.querySelector('h3 a');
+            }
+            var url = linkElement ? linkElement.href : 'No URL';
+            
+            // Extract snippet
+            var snippetElement = element.querySelector('.s3v9rd');  // Common class for snippets
+            if (!snippetElement) {
+                snippetElement = element.querySelector('.st');  // Another common class for snippets
+            }
+            if (!snippetElement) {
+                snippetElement = element.querySelector('span');  // Fallback to any span
+            }
+            var snippet = snippetElement ? snippetElement.textContent.trim() : 'No snippet';
+            
+            // Only add results with non-empty titles
+            if (title && title !== 'No title') {
+                results.push({
+                    title: title,
+                    url: url,
+                    snippet: snippet
+                });
+            }
+        }
+        
+        // Return results to Python
+        results;
+        """
+        
+        # Run the JavaScript code and process the results
+        self.web.page().runJavaScript(js_code, self.handle_google_results)
+    
+    def handle_google_results(self, results):
+        """Handle the Google search results and summarize them"""
+        if not results:
+            self.add_action_log("No Google search results found")
+            self.status_bar.showMessage("No Google search results found")
+            return
+        
+        # Summarize the results
+        self.summarize_google_results(self.current_google_search_query, results)
+
+    def summarize_google_results(self, search_query, search_results):
+        """Summarize Google search results using LLM"""
+        self.add_action_log(f"Summarizing {len(search_results)} Google search results")
+        
+        # Format the search results for the LLM
+        results_text = "\n".join([
+            f"{i+1}. Title: {result['title']}\n   Snippet: {result['snippet']}\n   URL: {result['url']}"
+            for i, result in enumerate(search_results)
+        ])
+        
+        # Create a prompt for the LLM to summarize the results
+        prompt = f"""
+You are an AI assistant that summarizes Google search results. Provide a concise summary of the following search results for the query: "{search_query}"
+
+Search Results:
+{results_text}
+
+Please provide a clear, concise summary that answers the user's query based on the search results. 
+Organize the information in a structured way, highlighting the most relevant points.
+If there are conflicting viewpoints in the results, mention them.
+If the results don't directly answer the query, provide the most relevant information found.
+
+Format your response as a clear summary without any additional formatting or markdown.
+"""
+        
+        try:
+            # Call LLM API
+            payload = {
+                "model": self.model,
+                "prompt": prompt,
+                "max_tokens": 1000,
+                "temperature": 0.3,
+                "stream": False
+            }
+            
+            response = requests.post(self.api_endpoint, headers=self.headers, json=payload, timeout=30)
+            response.raise_for_status()
+            result = response.json()
+            
+            # Extract the response from the API
+            summary = result["choices"][0]["text"].strip()
+            
+            # Display the summary in the actions log
+            self.add_action_log(f"Google Search Summary for '{search_query}':")
+            self.add_action_log(summary)
+            self.status_bar.showMessage("Google search summary completed")
+            
+            # Create an HTML page with the summary and display it in the web view
+            html_content = f"""
+            <html>
+            <head>
+                <title>Google Search Results Summary</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                    h1 {{ color: #4285f4; }}
+                    .summary {{ background-color: #f8f9fa; padding: 15px; border-radius: 8px; }}
+                    .results {{ margin-top: 20px; }}
+                    .result {{ margin-bottom: 15px; padding: 10px; border-left: 3px solid #4285f4; }}
+                    .title {{ font-weight: bold; }}
+                    .snippet {{ margin: 5px 0; }}
+                    .url {{ color: #0d6efd; }}
+                </style>
+            </head>
+            <body>
+                <h1>Google Search Results Summary</h1>
+                <h2>Query: {search_query}</h2>
+                <div class="summary">
+                    <h3>Summary:</h3>
+                    <p>{summary.replace(chr(10), '<br>')}</p>
+                </div>
+                <div class="results">
+                    <h3>Top Results:</h3>
+                    {''.join([f'''
+                    <div class="result">
+                        <div class="title">{result['title']}</div>
+                        <div class="snippet">{result['snippet']}</div>
+                        <div class="url">{result['url']}</div>
+                    </div>
+                    ''' for result in search_results])}
+                </div>
+            </body>
+            </html>
+            """
+            
+            # Load the HTML content in the web view
+            self.web.setHtml(html_content)
+            self.address_bar.setText(f"Google Search: {search_query}")
+            
+        except Exception as e:
+            self.add_action_log(f"Error in summarizing results: {str(e)}")
+            self.status_bar.showMessage(f"Error in summarizing results: {str(e)}")
+
     def interpret_user_input_with_llm(self, user_input):
         """Use LLM to interpret user input and determine actions"""
         self.add_action_log(f"Interpreting user input with LLM: {user_input}")
@@ -493,12 +706,30 @@ You are an AI assistant for an Amazon browser. Analyze the following user comman
 
 User Command: "{user_input}"
 
+First, determine if this query is shopping-related or not. Shopping-related queries typically involve:
+- Searching for products to buy
+- Comparing products
+- Looking for product information, reviews, prices
+- Finding deals or discounts
+- Product specifications
+
+Non-shopping queries might involve:
+- General information seeking
+- News
+- Recipes
+- How-to questions
+- Entertainment
+- Travel information
+- Weather
+- Definitions
+
 Please provide your response in the following JSON format:
 {{
-  "intent": "The user's intent (e.g., 'search_products', 'filter_results', 'extract_info', 'compare_products', 'navigate')",
+  "is_shopping_related": "Boolean indicating if the query is shopping-related (true/false)",
+  "intent": "The user's intent (e.g., 'search_products', 'filter_results', 'extract_info', 'compare_products', 'navigate', 'general_search')",
   "actions": [
     {{
-      "type": "The type of action (e.g., 'search_amazon', 'navigate_to_url', 'extract_data', 'filter_results')",
+      "type": "The type of action (e.g., 'search_amazon', 'navigate_to_url', 'extract_data', 'filter_results', 'search_google')",
       "description": "A detailed description of what to do",
       "parameters": {{
         "search_query": "Main product keywords for Amazon search (e.g., 'iPhone 16 Pro Max')",
@@ -514,19 +745,25 @@ Please provide your response in the following JSON format:
 
 Examples:
 Command: "Find me a Bluetooth speaker under $50"
-Response: {{"intent": "search_products", "actions": [{{"type": "search_amazon", "description": "Search for Bluetooth speakers with price filter", "parameters": {{"search_query": "Bluetooth speaker", "price_constraint": "under $50"}}}}], "confidence": 0.95}}
+Response: {{"is_shopping_related": true, "intent": "search_products", "actions": [{{"type": "search_amazon", "description": "Search for Bluetooth speakers with price filter", "parameters": {{"search_query": "Bluetooth speaker", "price_constraint": "under $50"}}}}], "confidence": 0.95}}
 
 Command: "Looking for an iPhone 16 Pro Max under $1200"
-Response: {{"intent": "search_products", "actions": [{{"type": "search_amazon", "description": "Search for iPhone 16 Pro Max with price filter", "parameters": {{"search_query": "iPhone 16 Pro Max", "price_constraint": "under $1200"}}}}], "confidence": 0.95}}
+Response: {{"is_shopping_related": true, "intent": "search_products", "actions": [{{"type": "search_amazon", "description": "Search for iPhone 16 Pro Max with price filter", "parameters": {{"search_query": "iPhone 16 Pro Max", "price_constraint": "under $1200"}}}}], "confidence": 0.95}}
 
 Command: "Show me the reviews for this product"
-Response: {{"intent": "extract_info", "actions": [{{"type": "extract_data", "description": "Extract product reviews", "parameters": {{"data_to_extract": "product reviews"}}}}], "confidence": 0.85}}
+Response: {{"is_shopping_related": true, "intent": "extract_info", "actions": [{{"type": "extract_data", "description": "Extract product reviews", "parameters": {{"data_to_extract": "product reviews"}}}}], "confidence": 0.85}}
 
 Command: "Compare prices for iPhone 15 Pro"
-Response: {{"intent": "compare_products", "actions": [{{"type": "search_amazon", "description": "Search for iPhone 15 Pro variants", "parameters": {{"search_query": "iPhone 15 Pro"}}}}], "confidence": 0.9}}
+Response: {{"is_shopping_related": true, "intent": "compare_products", "actions": [{{"type": "search_amazon", "description": "Search for iPhone 15 Pro variants", "parameters": {{"search_query": "iPhone 15 Pro"}}}}], "confidence": 0.9}}
 
 Command: "Go to the Amazon homepage"
-Response: {{"intent": "navigate", "actions": [{{"type": "navigate_to_url", "description": "Navigate to Amazon homepage", "parameters": {{"url": "https://www.amazon.com"}}}}], "confidence": 0.95}}
+Response: {{"is_shopping_related": true, "intent": "navigate", "actions": [{{"type": "navigate_to_url", "description": "Navigate to Amazon homepage", "parameters": {{"url": "https://www.amazon.com"}}}}], "confidence": 0.95}}
+
+Command: "What's the weather like today?"
+Response: {{"is_shopping_related": false, "intent": "general_search", "actions": [{{"type": "search_google", "description": "Search Google for weather information", "parameters": {{"search_query": "weather today"}}}}], "confidence": 0.95}}
+
+Command: "How to make pasta?"
+Response: {{"is_shopping_related": false, "intent": "general_search", "actions": [{{"type": "search_google", "description": "Search Google for pasta recipe", "parameters": {{"search_query": "how to make pasta"}}}}], "confidence": 0.95}}
 
 Just provide the JSON response, nothing else.
 """
@@ -551,13 +788,15 @@ Just provide the JSON response, nothing else.
             # Parse the JSON response
             parsed_response = json.loads(api_response)
             
+            is_shopping_related = parsed_response.get("is_shopping_related", True)
             intent = parsed_response["intent"]
             actions = parsed_response["actions"]
             confidence = parsed_response["confidence"]
             
-            self.add_action_log(f"LLM Analysis - Intent: {intent}, Confidence: {confidence}")
+            self.add_action_log(f"LLM Analysis - Shopping Related: {is_shopping_related}, Intent: {intent}, Confidence: {confidence}")
             
             return {
+                "is_shopping_related": is_shopping_related,
                 "intent": intent,
                 "actions": actions,
                 "confidence": confidence
@@ -671,6 +910,11 @@ Just provide the JSON response, nothing else.
             if filters:
                 self.add_action_log(f"Would apply filters: {filters}")
                 self.status_bar.showMessage(f"Applying filters: {filters}")
+        
+        elif action_type == "search_google":
+            search_query = parameters.get("search_query", "")
+            if search_query:
+                self.search_google_and_analyze(search_query)
     
     def execute_ai_command(self):
         """Execute the AI command entered by the user"""
@@ -685,9 +929,33 @@ Just provide the JSON response, nothing else.
         interpretation = self.interpret_user_input_with_llm(command)
         
         if interpretation and interpretation["confidence"] > 0.3:
-            # Execute the actions
-            for action in interpretation["actions"]:
-                self.execute_action(action)
+            # Check if the query is shopping-related
+            is_shopping_related = interpretation.get("is_shopping_related", True)
+            
+            if not is_shopping_related:
+                # For non-shopping queries, we'll search Google directly
+                self.add_action_log("Non-shopping query detected, searching Google...")
+                # Find the search_google action if it exists
+                google_action = None
+                for action in interpretation["actions"]:
+                    if action["type"] == "search_google":
+                        google_action = action
+                        break
+                
+                if google_action:
+                    self.execute_action(google_action)
+                else:
+                    # Fallback: create a search_google action
+                    fallback_action = {
+                        "type": "search_google",
+                        "description": f"Search Google for {command}",
+                        "parameters": {"search_query": command}
+                    }
+                    self.execute_action(fallback_action)
+            else:
+                # For shopping-related queries, execute the actions as before
+                for action in interpretation["actions"]:
+                    self.execute_action(action)
         else:
             self.add_action_log("Low confidence in interpretation, please try rephrasing your command.")
 
